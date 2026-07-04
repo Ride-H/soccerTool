@@ -1,0 +1,13 @@
+{
+  "name": "rpd-x",
+  "version": "1.0.0",
+  "description": "Dependency-free single-file 3D football tactical analyzer (Japan vs Brazil, 2026 FIFA World Cup R32) with the D²-Field danger model. Vanilla WebGL2, zero dependencies.",
+  "type": "module",
+  "scripts": {
+    "build": "node rpdx/build.mjs",
+    "test": "node --test rpdx/test/*.test.mjs"
+  },
+  "author": "Ride-H",
+  "license": "MIT",
+  "engines": { "node": ">=18" }
+}

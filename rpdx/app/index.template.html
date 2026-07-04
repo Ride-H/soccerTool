@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RPD-X | 日本 × ブラジル 2026 — D²-Field 戦術解析</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="loading">
+  <div class="logo">RPD<span class="x">–X</span></div>
+  <div class="sub">D²-FIELD v2 · 距離 × 人数 × 時間</div>
+  <div class="bar"><div class="fill" id="loadFill"></div></div>
+  <div class="sub" id="loadMsg">実試合データ照合済 — 危険度曲線を事前計算中…</div>
+</div>
+
+<!-- スコアボード -->
+<div id="scoreboard" class="panel">
+  <div class="team bra"><canvas class="flag" id="flagA" width="52" height="36"></canvas><span id="nameA">BRA</span></div>
+  <div class="mid">
+    <div class="score num"><span id="scoreA">0</span><span class="sep">–</span><span id="scoreB">0</span></div>
+    <div class="clock"><span class="t num" id="clock">00:00</span><span class="half" id="halfLbl">前半</span><span class="chip sim" id="simChip" style="display:none">SIM</span></div>
+    <div class="possbar" title="累積ボール支配率（ポゼッション・チェーン）">
+      <div class="fillA" id="possA" style="width:50%"></div>
+    </div>
+    <div class="possnum"><span class="num" id="possAv">50</span><span class="posslbl">POSSESSION</span><span class="num" id="possBv">50</span></div>
+  </div>
+  <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
+</div>
+<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span></div>
+
+<!-- ビューバー -->
+<div id="viewbar" class="panel">
+  <button class="btn cam on" data-cam="broadcast">放送</button>
+  <button class="btn cam" data-cam="tactical">俯瞰</button>
+  <button class="btn cam" data-cam="goal">ゴール裏</button>
+  <button class="btn cam" data-cam="pitch">追従</button>
+  <button class="btn cam" data-cam="fly">自由飛行</button>
+  <span class="vsep"></span>
+  <button class="btn tog on" id="togField">危険場 <b id="fieldModeLbl">粒子</b></button>
+  <button class="btn tog on" id="togZones">ゾーン</button>
+  <button class="btn tog on" id="togTrail">軌跡</button>
+  <button class="btn tog on" id="togLabel">番号</button>
+  <span class="vsep"></span>
+  <button class="btn" id="btnInfo">試合情報</button>
+  <button class="btn" id="btnModel">モデル</button>
+  <button class="btn" id="btnCustom">カスタム</button>
+</div>
+
+<!-- 左ドック: 選手・配置・交代・結果 -->
+<button class="dock-toggle" id="toggleL">≡</button>
+<div class="dock" id="dockL">
+  <section class="panel">
+    <h3>選手 <span class="eyebrow">SQUADS</span></h3>
+    <div class="roster-tabs" id="rosterTabs"></div>
+    <div class="plist" id="plist"></div>
+  </section>
+  <section class="panel" id="outcomePanel" style="display:none">
+    <h3>シナリオ結果 <span class="eyebrow">OUTCOME</span></h3>
+    <div id="outcomeBody"></div>
+  </section>
+  <section class="panel" id="formationEditor">
+    <h3>配置 <span class="eyebrow">FORMATION</span></h3>
+    <div class="row">
+      <select id="fmShape" class="sel"></select>
+      <span class="eyebrow">分</span>
+      <input type="number" id="fmMin" min="0" max="105" value="0" class="num numin">
+      <button class="btn primary" id="fmApply">陣形を適用</button>
+    </div>
+    <canvas id="fmPitch" width="292" height="234"></canvas>
+    <div class="hint" id="fmHint">選手をドラッグ = 配置の微調整 · クリック2回 = 入替 · 選択中にベンチ選手クリック = 先発差替</div>
+    <div id="fmPhases"></div>
+    <div class="row">
+      <button class="btn" id="fmClearTweaks">微調整を解除</button>
+      <button class="btn" id="fmReset">このチームの布陣を実試合に戻す</button>
+    </div>
+  </section>
+  <section class="panel" id="subBuilder">
+    <h3>交代 <span class="eyebrow">WHAT-IF</span></h3>
+    <div class="scenario-chips" id="scenarioChips"></div>
+    <div class="row">
+      <div class="slot out" id="slotOut">OUT — ピッチ上の選手をクリック</div>
+      <div class="slot in" id="slotIn">IN — ベンチの選手をクリック</div>
+    </div>
+    <div class="row">
+      <span class="eyebrow">分</span>
+      <input type="number" id="subMin" min="1" max="105" value="60" class="num numin">
+      <button class="btn" id="subNow">現在</button>
+      <button class="btn primary" id="subApply">交代を追加</button>
+      <button class="btn" id="subClear">クリア</button>
+    </div>
+    <div id="subErrors"></div>
+    <div id="subList"></div>
+    <div class="row" style="margin-top:9px">
+      <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>
+      <button class="btn danger" id="btnReset">実試合に戻す</button>
+    </div>
+    <div id="suggestions"></div>
+  </section>
+</div>
+
+<!-- 右ドック: D²-Field -->
+<button class="dock-toggle" id="toggleR">◫</button>
+<div class="dock" id="dockR">
+  <section class="panel">
+    <h3>D²-Field v2 危険度 <span class="eyebrow">KIKEN INDEX</span></h3>
+    <div id="kikenTiles"></div>
+    <div class="legend-line" id="fieldLegend"></div>
+  </section>
+  <section class="panel">
+    <h3>算定モジュール <span class="eyebrow">D × N × T</span></h3>
+    <div id="modBars"></div>
+    <div class="gk-toggle" style="margin-top:10px">
+      <button class="btn on" id="gk20">20人 — チャンス創出</button>
+      <button class="btn" id="gk22">22人 — 得点期待</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h3>ゾーニング視点 <span class="eyebrow">PERSPECTIVE</span></h3>
+    <div class="zone-toggle" id="zoneViewBtns"></div>
+    <div class="hint">粒子は各選手の支配空間。白い継ぎ目が両軍ゾーンの境界線。選手を選択するとその選手の支配域が強調されます。</div>
+  </section>
+  <section class="panel">
+    <h3>脅威寄与 TOP <span class="eyebrow">CONTRIBUTORS</span></h3>
+    <div id="contribList"></div>
+  </section>
+</div>
+
+<!-- インスペクタ -->
+<div id="inspector" class="panel">
+  <button class="close" id="inspClose">✕</button>
+  <div class="head">
+    <div class="bignum" id="inspNum">10</div>
+    <div>
+      <div class="nm" id="inspName">—</div>
+      <div class="sub" id="inspSub">—</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="k">DIST 走行距離</div><div class="v" id="inspDist">—</div></div>
+    <div class="stat"><div class="k">THREAT 脅威寄与</div><div class="v" id="inspThreat">—</div></div>
+    <div class="stat"><div class="k">FATIGUE 推定疲労</div><div class="v" id="inspFat">—</div></div>
+    <div class="stat"><div class="k">STATUS</div><div class="v" id="inspStat" style="font-size:12px">—</div></div>
+  </div>
+  <div class="attrs" id="inspAttrs"></div>
+</div>
+
+<!-- タイムライン -->
+<div id="timelineWrap" class="panel">
+  <div id="tlHead">
+    <button class="btn" id="btnPlay">▶ 再生</button>
+    <div class="speedgrp" id="speedGrp"></div>
+    <button class="btn" id="btnPrevEv">|◀ 前</button>
+    <button class="btn" id="btnNextEv">▶| 次</button>
+    <span class="eyebrow" id="curveStatus"></span>
+    <span class="spacer"></span>
+    <span class="legend-line" id="tlLegend"></span>
+  </div>
+  <canvas id="tlCanvas"></canvas>
+</div>
+<div id="tlTip"></div>
+<div id="toasts"></div>
+<div id="keyhelp" class="panel">
+  Space 再生/停止 · ←→ ±15s · 1-5 カメラ · H 危険場 · Z ゾーン · T 軌跡 · L 番号 · G 20/22 · ? このヘルプ<br>
+  自由飛行: WASD 移動 · QE 上下 · Shift 加速 · ドラッグ 視点 · ホイール 速度
+</div>
+
+<!-- モーダル: 試合情報 -->
+<div class="modal-back" id="modalInfo">
+  <div class="modal panel">
+    <div class="mhead">試合情報 — 検証済み実データ<button class="close" data-close="modalInfo">✕</button></div>
+    <div class="mbody" id="infoBody"></div>
+  </div>
+</div>
+<!-- モーダル: モデル -->
+<div class="modal-back" id="modalModel">
+  <div class="modal panel">
+    <div class="mhead">D²-Field v2 — 距離 × 人数 × 時間<button class="close" data-close="modalModel">✕</button></div>
+    <div class="mbody" id="modelBody"></div>
+  </div>
+</div>
+<!-- モーダル: カスタム試合 -->
+<div class="modal-back" id="modalCustom">
+  <div class="modal panel">
+    <div class="mhead">カスタム試合 — 選手情報だけで解析<button class="close" data-close="modalCustom">✕</button></div>
+    <div class="mbody">
+      <p style="color:var(--muted);margin-bottom:8px">
+        選手情報（背番号・氏名・ポジション、任意で能力値・XI・イベント）から決定論的に試合を生成します。
+        過去データがなくてもフォーメーション・危険度・交代シミュレーションが完全動作します。
+      </p>
+      <textarea class="jsonbox" id="customJson" spellcheck="false"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn primary" id="customLoad">この試合を読み込む</button>
+        <button class="btn" id="customTemplate">テンプレートを再挿入</button>
+        <button class="btn" id="customBack">日本×ブラジル戦に戻る</button>
+      </div>
+      <div id="customErr" style="color:var(--crit-t);margin-top:8px;font-size:11.5px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/*__SCRIPTS__*/
+</script>
+</body>
+</html>
