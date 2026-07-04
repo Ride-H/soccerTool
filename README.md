@@ -1,5 +1,9 @@
 # RPD-X — 日本 × ブラジル 2026 W杯 R32 / D²-Field 戦術解析ツール
 
+[![CI & Deploy](https://github.com/Ride-H/soccerTool/actions/workflows/ci.yml/badge.svg)](https://github.com/Ride-H/soccerTool/actions/workflows/ci.yml)
+
+**▶ ライブデモ（インストール不要・ブラウザで即起動）: https://ride-h.github.io/soccerTool/**
+
 **2026 FIFA ワールドカップ ラウンド32「ブラジル 2-1 日本」（2026-06-29 NRGスタジアム）** の
 検証済み実データをフル収録した、**依存ゼロ・単一HTML**の3D戦術解析ツール。
 フル90+9分の3D/VR視点再生、交代・布陣の what-if が**試合結果まで変える**決定論シミュレーション、
