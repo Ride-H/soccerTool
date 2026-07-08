@@ -876,7 +876,7 @@
     PHYS.summaryAsync(App.match, activeScenario(), team, no, (s) => {
       if (!App.selected || App.selected.team !== team || App.selected.no !== no) return;
       if (!s) { $("#inspMet").textContent = "—"; $("#inspSpr").textContent = "—"; return; }
-      $("#inspMet").textContent = s.avgP.toFixed(1) + " W/kg";
+      $("#inspMet").textContent = `${s.avgP.toFixed(1)} W/kg · ${Math.round(s.loadKJ)} kJ/kg`;
       $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
     });
   };
@@ -1647,6 +1647,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       const pr = state.players.find(q => q.onPitch && q.team === sh.presser.team && q.no === sh.presser.no);
       if (pr) shieldFx = { holderKey: sh.holder.team + ":" + sh.holder.no, px: pr.x, pz: -pr.y };
     }
+    // 空中戦（コーナークロス）— 勝者/敗者のジャンプ・ヘッド演出（描画のみ）
+    let aerialFx = null;
+    const aer = DUEL.aerialAt(state);
+    if (aer) {
+      aerialFx = {
+        winnerKey: aer.winner.team + ":" + aer.winner.no,
+        loserKey: aer.loser.team + ":" + aer.loser.no,
+        jumpH: Math.sin(Math.PI * (1 - aer.u)),   // 踏切→頂点→着地の弧
+      };
+    }
     renderer.frame(now / 1000, dt, {
       state,
       field: App.options.fieldMode !== "off" ? App.lastField : null,
@@ -1658,7 +1668,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       contribMap, ballTrail, playerTrail,
       speedLabels, psyAura,
       hotZone: App.hotZone,
-      tackle: tackleFx, shield: shieldFx, passLine,
+      tackle: tackleFx, shield: shieldFx, passLine, aerial: aerialFx,
     });
     drawTimeline();
     if (++frameCount < maxFrames) requestAnimationFrame(loop);

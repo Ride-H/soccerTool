@@ -4137,6 +4137,37 @@ window.addEventListener("error", (e) => {
     };
   };
 
+  // 空中戦（コーナー/クロスの競り合い）— 決定論。クロス到達直後の窓で、
+  // ボール周辺の最高 aer の攻撃側 vs 守備側を競らせ、aer で勝者を決める（同値は攻撃側）。
+  // 位置・イベント・危険度は不変（描画のジャンプ/ヘッド演出が消費する読み取り専用層）。
+  // 返値: { winner, loser, x, y, u(1→0), attackerWon } / なければ null
+  DUEL.aerialAt = (state) => {
+    const c = state.carrier;
+    if (!c || c.restart !== "corner") return null;
+    const crossT = (c.tf || 0) + (c.rdelay || 0);   // 静止が明けてクロスが入る時刻
+    const dt = (state.t ?? 0) - crossT;
+    if (dt < -0.2 || dt > 0.9) return null;          // 配球窓（コーナー区間の末尾に収まる）
+    // 競り合い点はコーナー弧のボールではなく「ゴール前の箱」（クロスの落下点）
+    const b = state.ball;
+    const gx = Math.sign(b.x || 1) * 52.5;
+    const cx = gx - Math.sign(gx) * 7, cy = 0;       // ゴール前 ~7m 中央
+    let atk = null, aA = -1, def = null, aD = -1;
+    for (const p of state.players) {
+      if (!p.onPitch || p.role === "GK") continue;
+      if (Math.hypot(p.x - cx, p.y - cy) > 16) continue;
+      const aer = (p.attrs && p.attrs.aer) || 60;
+      if (p.team === c.team) { if (aer > aA || (aer === aA && (!atk || p.no < atk.no))) { aA = aer; atk = p; } }
+      else { if (aer > aD || (aer === aD && (!def || p.no < def.no))) { aD = aer; def = p; } }
+    }
+    if (!atk || !def) return null;
+    const attackerWon = aA >= aD;                    // 同値は攻撃側（決定論）
+    const w = attackerWon ? atk : def, l = attackerWon ? def : atk;
+    return {
+      winner: { team: w.team, no: w.no }, loser: { team: l.team, no: l.no },
+      x: (atk.x + def.x) / 2, y: (atk.y + def.y) / 2, u: 1 - Math.max(0, dt) / 0.9, attackerWon,
+    };
+  };
+
   // シールド判定（保持者が最近接プレッサーから体を入れるべきか）— 描画用幾何
   DUEL.shieldAt = (state) => {
     const c = state.carrier;
@@ -4195,13 +4226,14 @@ window.addEventListener("error", (e) => {
     if (cache.has(key)) return cache.get(key);
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr) return null;
-    let vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0, eJ = 0;
     let inSprint = false;
     for (let t = pr.from + 1; t <= pr.to; t += step) {
       const v = E.speedKmh(match, scenario, team, no, t) / 3.6;
       const a = n === 0 ? 0 : (v - vPrev) / step;
       const P = PHYS.ecCost(a / 9.81) * v;
       sumP += P; peakP = Math.max(peakP, P);
+      eJ += P * step;                            // ∫P dt [J/kg] — セッション代謝負荷
       if (v >= PHYS.HSR_MS) hsr += v * step;
       if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
       else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
@@ -4210,6 +4242,7 @@ window.addEventListener("error", (e) => {
     }
     const out = {
       avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV,
+      loadKJ: eJ / 1000,                         // 代謝負荷 [kJ/kg]（HR不要の負荷代替・TRIMPの代役）
       mins: (pr.to - pr.from) / 60, n,
     };
     cache.set(key, out);
@@ -4224,7 +4257,7 @@ window.addEventListener("error", (e) => {
     if (cache.has(key)) { cb(cache.get(key)); return; }
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr) { cb(null); return; }
-    let t = pr.from + 1, vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let t = pr.from + 1, vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0, eJ = 0;
     let inSprint = false;
     const chunk = () => {
       const t1 = Math.min(t + 240, pr.to);
@@ -4233,6 +4266,7 @@ window.addEventListener("error", (e) => {
         const a = n === 0 ? 0 : (v - vPrev) / step;
         const P = PHYS.ecCost(a / 9.81) * v;
         sumP += P; peakP = Math.max(peakP, P);
+        eJ += P * step;
         if (v >= PHYS.HSR_MS) hsr += v * step;
         if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
         else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
@@ -4240,7 +4274,7 @@ window.addEventListener("error", (e) => {
         vPrev = v; n++;
       }
       if (t <= pr.to) { setTimeout(chunk, 0); return; }
-      const out = { avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV, mins: (pr.to - pr.from) / 60, n };
+      const out = { avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV, loadKJ: eJ / 1000, mins: (pr.to - pr.from) / 60, n };
       cache.set(key, out);
       cb(out);
     };
@@ -4261,13 +4295,23 @@ window.addEventListener("error", (e) => {
   const R = (globalThis.RPDX ??= {});
   const FILTER = (R.filter = {});
 
-  // 標準ゲイン: 中程度の計測ノイズ（σ≈0.5-1.5m・~10Hzトラック）向け。
-  // β/dt・2γ/dt² と増幅されるため高レートでは小さめが正しい。
-  // α=位置補正 / β=速度補正 / γ=加速度補正（小さいほど滑らか・大きいほど追従）
-  FILTER.DEFAULTS = { alpha: 0.30, beta: 0.055, gamma: 0.0035 };
+  // ゲインの原理的決定（臨界減衰 α-β-γ / fading-memory）:
+  //   単一の割引因子 θ∈(0,1) から閉形式で α,β,γ を導く（Brookner の g-h-k 関係）。
+  //     α = 1 − θ³ ,  β = 1.5(1−θ)²(1+θ) ,  γ = 0.5(1−θ)³
+  //   θ→0: 応答的（補正大）/ θ→1: 平滑重視。手調整の魔法数を1つの物理的ノブへ。
+  FILTER.gainsFromTheta = (theta) => {
+    const th = Math.min(Math.max(theta, 0.01), 0.99);
+    const om = 1 - th;
+    return { alpha: 1 - th ** 3, beta: 1.5 * om * om * (1 + th), gamma: 0.5 * om ** 3, theta: th };
+  };
+  // 既定 θ=0.85（~10Hz・σ≈1m の中庸）。DEFAULTS は θ から導出（原理式・魔法数なし）。
+  FILTER.DEFAULT_THETA = 0.85;
+  FILTER.DEFAULTS = FILTER.gainsFromTheta(FILTER.DEFAULT_THETA);
 
+  //   opts.theta を渡すとその θ からゲインを導出（opts.alpha/beta/gamma 直接指定も可）。
   FILTER.abg = (samples, opts = {}) => {
-    const { alpha, beta, gamma } = { ...FILTER.DEFAULTS, ...opts };
+    const base = opts.theta != null ? FILTER.gainsFromTheta(opts.theta) : FILTER.DEFAULTS;
+    const { alpha, beta, gamma } = { ...base, ...opts };
     const out = new Array(samples.length);
     let init = false;
     let x = 0, y = 0, vx = 0, vy = 0, ax = 0, ay = 0, tPrev = 0;
@@ -4385,6 +4429,15 @@ window.addEventListener("error", (e) => {
       skill: brierBase > 0 ? 1 - brier / brierBase : 0,
       rows,
     };
+  };
+
+  // しきい値スイープ（ROC点）: 警報閾値を変えると TPR/FPR がどうトレードオフするか。
+  // 予測ではなく記述的（現収録試合での警報の効き方）。閾値↑で TPR/FPR は単調非増加。
+  UQ.sweep = (matches, thresholds = [45, 55, 65, 75, 85]) => {
+    return thresholds.map(thr => {
+      const r = UQ.evaluate(matches, { thr });
+      return { thr, tpr: r.tpr.p, fpr: r.fpr.p, tp: r.tp, fn: r.fn, fp: r.fp, tn: r.tn };
+    });
   };
 
   // 表示用テキスト（区間つきの「責任ある断定」形式）
@@ -5362,6 +5415,8 @@ window.addEventListener("error", (e) => {
       const dBall = Math.hypot(dbx, dbz);
       const stumble = ex && ex.stumble ? ex.stumble : 0;
       const shield = ex && ex.shield ? ex.shield : null;
+      const jump = ex && ex.jump ? ex.jump : 0;          // 0..1 ジャンプ弧の高さ（空中戦）
+      const header = !!(ex && ex.header);                // 勝者=ヘディングの前傾
       if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
       else if (dt > 0) {
         const vInst = Math.min(dist / dt, 10);
@@ -5384,20 +5439,24 @@ window.addEventListener("error", (e) => {
         f.lx = px; f.lz = pz;
       }
       const run = clamp(f.v / 6, 0, 1);
-      const gaitAmp = backpedal ? 0.55 : 1;
+      const gaitAmp = (backpedal ? 0.55 : 1) * (1 - jump);    // ジャンプ中は走行スイングを畳む
       const hipA = (0.10 + 0.75 * run) * gaitAmp;             // 股スイング振幅
       const kneeB = 0.35 + 1.05 * run;                        // 膝屈曲（走りほど深い）
-      const lean = stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
+      const lean = jump > 0.05 ? (header ? 0.28 * jump : 0.05)  // 空中戦: 勝者はヘッドで前傾
+        : stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
         : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
-      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0);
+      const lift = jump * 0.85;                               // 跳躍の垂直変位（描画のみ）
+      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0) + lift;
       const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
       const op = { emiss: 0.04, alpha };
       // 脚 = 腿 + 脛の二節（膝屈曲で歩走が一目で分かる）
       const legC = [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
       for (const s of [-1, 1]) {
         const phi = f.phase + (s < 0 ? Math.PI : 0);
-        const hip = Math.sin(phi) * hipA;
-        const knee = kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
+        // ジャンプ中は両脚をやや前へ畳む（踏み切り/滞空のシルエット）
+        const hip = jump > 0.05 ? -0.35 * jump + Math.sin(phi) * hipA : Math.sin(phi) * hipA;
+        const knee = jump > 0.05 ? 0.5 * jump + kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp
+          : kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
         const hipT = M4.chain(base, M4.t(s * 0.13, 0.94, 0), M4.rotX(hip));
         useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
         drawMesh(mCapsule);
@@ -5419,8 +5478,10 @@ window.addEventListener("error", (e) => {
       drawMesh(mSphere);
       // 腕 = 上腕 + 前腕（肘 — 走るほど深く曲げてポンピング・スタンブルでバランス）
       for (const s of [-1, 1]) {
-        const armSw = -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
-        const elbow = 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
+        // ジャンプ中は両腕を上げて競り合う（-π/2 付近で頭上）
+        const armSw = jump > 0.05 ? -1.9 * jump - s * 0.25 * jump
+          : -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
+        const elbow = jump > 0.05 ? 0.3 : 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
         const shoulder = M4.chain(upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(armSw));
         useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
         drawMesh(mCapsule);
@@ -5843,7 +5904,12 @@ window.addEventListener("error", (e) => {
           stumble: scene.tackle && scene.tackle.loserKey === figKey ? scene.tackle.u : 0,
           shield: scene.shield && scene.shield.holderKey === figKey
             ? { x: scene.shield.px, z: scene.shield.pz } : null,
+          jump: 0, header: false,
         };
+        if (scene.aerial) {
+          if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
+          else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
+        }
         drawFigure(
           figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
           shirt, shorts, toneOf(p.team, p.no),
@@ -6845,7 +6911,7 @@ window.addEventListener("error", (e) => {
     PHYS.summaryAsync(App.match, activeScenario(), team, no, (s) => {
       if (!App.selected || App.selected.team !== team || App.selected.no !== no) return;
       if (!s) { $("#inspMet").textContent = "—"; $("#inspSpr").textContent = "—"; return; }
-      $("#inspMet").textContent = s.avgP.toFixed(1) + " W/kg";
+      $("#inspMet").textContent = `${s.avgP.toFixed(1)} W/kg · ${Math.round(s.loadKJ)} kJ/kg`;
       $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
     });
   };
@@ -7616,6 +7682,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       const pr = state.players.find(q => q.onPitch && q.team === sh.presser.team && q.no === sh.presser.no);
       if (pr) shieldFx = { holderKey: sh.holder.team + ":" + sh.holder.no, px: pr.x, pz: -pr.y };
     }
+    // 空中戦（コーナークロス）— 勝者/敗者のジャンプ・ヘッド演出（描画のみ）
+    let aerialFx = null;
+    const aer = DUEL.aerialAt(state);
+    if (aer) {
+      aerialFx = {
+        winnerKey: aer.winner.team + ":" + aer.winner.no,
+        loserKey: aer.loser.team + ":" + aer.loser.no,
+        jumpH: Math.sin(Math.PI * (1 - aer.u)),   // 踏切→頂点→着地の弧
+      };
+    }
     renderer.frame(now / 1000, dt, {
       state,
       field: App.options.fieldMode !== "off" ? App.lastField : null,
@@ -7627,7 +7703,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       contribMap, ballTrail, playerTrail,
       speedLabels, psyAura,
       hotZone: App.hotZone,
-      tackle: tackleFx, shield: shieldFx, passLine,
+      tackle: tackleFx, shield: shieldFx, passLine, aerial: aerialFx,
     });
     drawTimeline();
     if (++frameCount < maxFrames) requestAnimationFrame(loop);

@@ -755,6 +755,8 @@
       const dBall = Math.hypot(dbx, dbz);
       const stumble = ex && ex.stumble ? ex.stumble : 0;
       const shield = ex && ex.shield ? ex.shield : null;
+      const jump = ex && ex.jump ? ex.jump : 0;          // 0..1 ジャンプ弧の高さ（空中戦）
+      const header = !!(ex && ex.header);                // 勝者=ヘディングの前傾
       if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
       else if (dt > 0) {
         const vInst = Math.min(dist / dt, 10);
@@ -777,20 +779,24 @@
         f.lx = px; f.lz = pz;
       }
       const run = clamp(f.v / 6, 0, 1);
-      const gaitAmp = backpedal ? 0.55 : 1;
+      const gaitAmp = (backpedal ? 0.55 : 1) * (1 - jump);    // ジャンプ中は走行スイングを畳む
       const hipA = (0.10 + 0.75 * run) * gaitAmp;             // 股スイング振幅
       const kneeB = 0.35 + 1.05 * run;                        // 膝屈曲（走りほど深い）
-      const lean = stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
+      const lean = jump > 0.05 ? (header ? 0.28 * jump : 0.05)  // 空中戦: 勝者はヘッドで前傾
+        : stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
         : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
-      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0);
+      const lift = jump * 0.85;                               // 跳躍の垂直変位（描画のみ）
+      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0) + lift;
       const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
       const op = { emiss: 0.04, alpha };
       // 脚 = 腿 + 脛の二節（膝屈曲で歩走が一目で分かる）
       const legC = [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
       for (const s of [-1, 1]) {
         const phi = f.phase + (s < 0 ? Math.PI : 0);
-        const hip = Math.sin(phi) * hipA;
-        const knee = kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
+        // ジャンプ中は両脚をやや前へ畳む（踏み切り/滞空のシルエット）
+        const hip = jump > 0.05 ? -0.35 * jump + Math.sin(phi) * hipA : Math.sin(phi) * hipA;
+        const knee = jump > 0.05 ? 0.5 * jump + kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp
+          : kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
         const hipT = M4.chain(base, M4.t(s * 0.13, 0.94, 0), M4.rotX(hip));
         useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
         drawMesh(mCapsule);
@@ -812,8 +818,10 @@
       drawMesh(mSphere);
       // 腕 = 上腕 + 前腕（肘 — 走るほど深く曲げてポンピング・スタンブルでバランス）
       for (const s of [-1, 1]) {
-        const armSw = -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
-        const elbow = 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
+        // ジャンプ中は両腕を上げて競り合う（-π/2 付近で頭上）
+        const armSw = jump > 0.05 ? -1.9 * jump - s * 0.25 * jump
+          : -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
+        const elbow = jump > 0.05 ? 0.3 : 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
         const shoulder = M4.chain(upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(armSw));
         useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
         drawMesh(mCapsule);
@@ -1236,7 +1244,12 @@
           stumble: scene.tackle && scene.tackle.loserKey === figKey ? scene.tackle.u : 0,
           shield: scene.shield && scene.shield.holderKey === figKey
             ? { x: scene.shield.px, z: scene.shield.pz } : null,
+          jump: 0, header: false,
         };
+        if (scene.aerial) {
+          if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
+          else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
+        }
         drawFigure(
           figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
           shirt, shorts, toneOf(p.team, p.no),

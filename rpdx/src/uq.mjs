@@ -82,6 +82,15 @@
     };
   };
 
+  // しきい値スイープ（ROC点）: 警報閾値を変えると TPR/FPR がどうトレードオフするか。
+  // 予測ではなく記述的（現収録試合での警報の効き方）。閾値↑で TPR/FPR は単調非増加。
+  UQ.sweep = (matches, thresholds = [45, 55, 65, 75, 85]) => {
+    return thresholds.map(thr => {
+      const r = UQ.evaluate(matches, { thr });
+      return { thr, tpr: r.tpr.p, fpr: r.fpr.p, tp: r.tp, fn: r.fn, fp: r.fp, tn: r.tn };
+    });
+  };
+
   // 表示用テキスト（区間つきの「責任ある断定」形式）
   UQ.reportText = (r) => {
     const pct = (w) => `${Math.round(w.p * 100)}%（90%CI ${Math.round(w.lo * 100)}–${Math.round(w.hi * 100)}%・n=${w.n}）`;

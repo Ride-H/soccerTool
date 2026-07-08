@@ -128,3 +128,81 @@ test("#22 duel: シールド判定 — 保持者と最近接プレッサー・4.
   }
   assert.ok(n >= 10, `シールド局面 ${n}`);
 });
+
+/* ================= v1.1 増分（自己完結・データ不要） ================= */
+
+test("#19 uq: しきい値スイープ — TPR/FPR は閾値上昇で単調非増加（記述的ROC）", () => {
+  const sw = UQ.sweep(Object.values(MATCHES), [45, 55, 65, 75, 85]);
+  assert.equal(sw.length, 5);
+  for (let i = 1; i < sw.length; i++) {
+    assert.ok(sw[i].tpr <= sw[i - 1].tpr + 1e-9, `TPR単調 @${sw[i].thr}`);
+    assert.ok(sw[i].fpr <= sw[i - 1].fpr + 1e-9, `FPR単調 @${sw[i].thr}`);
+  }
+  // 低閾値ほど検知は緩い（TPR高）— 45 で全ゴール検知
+  assert.equal(sw[0].fn, 0, "閾値45でゴール見逃しゼロ");
+});
+
+test("#20 filter: Kalata θ ゲインが閉形式関係を満たし θ で単調・DEFAULTS はθ由来", () => {
+  for (const th of [0.5, 0.7, 0.85, 0.95]) {
+    const g = FILTER.gainsFromTheta(th);
+    const om = 1 - th;
+    assert.ok(Math.abs(g.alpha - (1 - th ** 3)) < 1e-12);
+    assert.ok(Math.abs(g.beta - 1.5 * om * om * (1 + th)) < 1e-12);
+    assert.ok(Math.abs(g.gamma - 0.5 * om ** 3) < 1e-12);
+    assert.ok(g.alpha > 0 && g.alpha < 1 && g.beta >= 0 && g.gamma >= 0);
+  }
+  // θ が大きい（平滑重視）ほど α は小さい
+  assert.ok(FILTER.gainsFromTheta(0.9).alpha < FILTER.gainsFromTheta(0.6).alpha);
+  // DEFAULTS は既定 θ から導出されている
+  const d = FILTER.gainsFromTheta(FILTER.DEFAULT_THETA);
+  assert.deepEqual(
+    [FILTER.DEFAULTS.alpha, FILTER.DEFAULTS.beta, FILTER.DEFAULTS.gamma],
+    [d.alpha, d.beta, d.gamma]);
+});
+
+test("#20 filter: θ 指定でもノイズ平滑（RMSE < raw×0.8）", () => {
+  const truth = []; let v = 0, x = 0;
+  for (let i = 0; i < 240; i++) {
+    const a = i < 80 ? 3 : i < 160 ? 0 : -2.5;
+    v = Math.max(0, v + a * 0.1); x += v * 0.1;
+    truth.push({ t: i * 0.1, x, y: 0 });
+  }
+  const noisy = truth.map((s, i) => ({ t: s.t, x: s.x + (N.hash2(9, i) * 2 - 1) * 1.2, y: (N.hash2(5, i) * 2 - 1) * 1.2 }));
+  const f = FILTER.abg(noisy, { theta: 0.85 });
+  let seRaw = 0, seF = 0, nn = 0;
+  for (let i = 10; i < truth.length; i++) { seRaw += (noisy[i].x - truth[i].x) ** 2; seF += (f[i].x - truth[i].x) ** 2; nn++; }
+  assert.ok(Math.sqrt(seF / nn) < Math.sqrt(seRaw / nn) * 0.8, "θ由来ゲインでも平滑する");
+});
+
+test("#21 physio: セッション代謝負荷 loadKJ — 正・妥当域・GK<CM・決定論", () => {
+  const s = PHYS.summary(MATCH, act(MATCH), "JPN", 24);
+  assert.ok(s.loadKJ > 0, `loadKJ ${s.loadKJ}`);
+  // 合成速度は穏やかで実測より過小（相対負荷指標）。妥当な幅のみ確認。
+  assert.ok(s.loadKJ > 10 && s.loadKJ < 500, `loadKJ域 ${s.loadKJ.toFixed(0)}`);
+  const gk = PHYS.summary(MATCH, act(MATCH), "JPN", 1);
+  assert.ok(gk.loadKJ < s.loadKJ, `GK ${gk.loadKJ.toFixed(0)} < CM ${s.loadKJ.toFixed(0)}`);
+  assert.equal(PHYS.summary(MATCH, act(MATCH), "JPN", 24).loadKJ, s.loadKJ);
+});
+
+test("#22 duel: 空中戦 — コーナーで検出・勝者はaer優位・決定論・エンジン不変", () => {
+  const m = MATCH, sc = act(m), range = E.playedRange(m);
+  const snap = () => JSON.stringify(E.stateAt(m, sc, 1000).players.map(p => [p.no, p.x.toFixed(3)]));
+  const before = snap();
+  let found = 0;
+  for (let t = range.t0 + 5; t < range.t1 && found < 3; t += 0.5) {
+    const st = E.stateAt(m, sc, t);
+    const a = DUEL.aerialAt(st);
+    if (!a) continue;
+    found++;
+    assert.notEqual(a.winner.team, a.loser.team);
+    assert.ok(a.u > 0 && a.u <= 1);
+    // 勝者の aer は敗者以上（同値は攻撃側）
+    const wp = st.players.find(p => p.team === a.winner.team && p.no === a.winner.no);
+    const lp = st.players.find(p => p.team === a.loser.team && p.no === a.loser.no);
+    assert.ok(wp.attrs.aer >= lp.attrs.aer - 1e-9, `aer 勝者${wp.attrs.aer} ≥ 敗者${lp.attrs.aer}`);
+    const a2 = DUEL.aerialAt(E.stateAt(m, sc, t));
+    assert.deepEqual(a, a2);
+  }
+  assert.ok(found >= 1, `空中戦検出 ${found}`);
+  assert.equal(snap(), before, "aerialAt はエンジン出力を変えない");
+});
