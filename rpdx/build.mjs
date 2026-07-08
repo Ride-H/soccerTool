@@ -1,14 +1,21 @@
 // 単一ファイルビルド: src + app → dist/rpdx.html（依存ゼロ・オフライン動作）
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(root, p), "utf8");
 
+// マッチパック（src/data_match*.mjs）は置くだけで全て同梱される
+const dataPacks = readdirSync(join(root, "src"))
+  .filter((f) => /^data_match.*\.mjs$/.test(f))
+  .sort()
+  .map((f) => "src/" + f);
+
 const SRC = [
-  "src/noise.mjs", "src/formations.mjs", "src/data_match.mjs",
-  "src/engine.mjs", "src/danger.mjs", "src/subs.mjs", "src/sim.mjs", "src/generic.mjs",
+  "src/noise.mjs", "src/formations.mjs", ...dataPacks,
+  "src/engine.mjs", "src/danger.mjs", "src/subs.mjs", "src/sim.mjs", "src/psy.mjs",
+  "src/duel.mjs", "src/physio.mjs", "src/filter.mjs", "src/uq.mjs", "src/generic.mjs",
   "app/render3d.mjs", "app/ui.mjs",
 ];
 

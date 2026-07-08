@@ -407,6 +407,32 @@ body.showkeys #keyhelp { display: block; }
   #viewbar { top: auto; bottom: 130px; }
   #timelineWrap { bottom: 8px; left: 8px; right: 8px; }
 }
+/* ---------- PSY 心理生理レイヤー ---------- */
+.momo-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.momo-row .tag { width: 34px; font-family: var(--mono); font-size: 10px; font-weight: 700; }
+.momo-track {
+  position: relative; flex: 1; height: 12px; border-radius: 6px;
+  background: rgba(5, 9, 17, 0.8); border: 1px solid var(--line); overflow: hidden;
+}
+.momo-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(196,212,240,.3); }
+.momo-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; transition: none; }
+.momo-row .mv { width: 40px; text-align: right; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+#psySpark { width: 100%; height: 54px; display: block; margin-top: 8px; border-radius: 7px; }
+.psy-team { margin-top: 9px; }
+.psy-mini { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; }
+.psy-mini .cell { background: rgba(5,9,17,.55); border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; }
+.psy-mini .k { font-size: 8.5px; color: var(--faint); letter-spacing: .06em; }
+.psy-mini .v { font-family: var(--mono); font-size: 13px; font-weight: 700; margin-top: 1px; }
+#inspector .stats.psy { margin-top: 6px; }
+#inspector .stats.psy .k { color: var(--gold-deep); }
+
+/* 試合スイッチャ */
+#matchSel { max-width: 210px; }
+
+/* 推定チップ（事実 vs 推定の常時明示） */
+.chip.est { color: var(--faint); border-color: var(--line); font-weight: 600; margin-left: 8px; }
+.statsrc { font-size: 8.5px; color: var(--faint); letter-spacing: .04em; }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
@@ -435,7 +461,7 @@ body.showkeys #keyhelp { display: block; }
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span></div>
+<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
 <div id="viewbar" class="panel">
@@ -449,7 +475,10 @@ body.showkeys #keyhelp { display: block; }
   <button class="btn tog on" id="togZones">ゾーン</button>
   <button class="btn tog on" id="togTrail">軌跡</button>
   <button class="btn tog on" id="togLabel">番号</button>
+  <button class="btn tog on" id="togSpeed">速度</button>
+  <button class="btn tog on" id="togPsy">PSY</button>
   <span class="vsep"></span>
+  <select id="matchSel" class="sel" title="試合を切替"></select>
   <button class="btn" id="btnInfo">試合情報</button>
   <button class="btn" id="btnModel">モデル</button>
   <button class="btn" id="btnCustom">カスタム</button>
@@ -522,6 +551,19 @@ body.showkeys #keyhelp { display: block; }
       <button class="btn on" id="gk20">20人 — チャンス創出</button>
       <button class="btn" id="gk22">22人 — 得点期待</button>
     </div>
+    <div class="gk-toggle" style="margin-top:8px" title="空間支配核: 既定は速度属性（モデル推定）で半径が変わる。幾何のみ=全員一律7.0m（推定属性への依存を排除）">
+      <button class="btn on" id="corePace">支配核 — pace反映</button>
+      <button class="btn" id="coreGeom">幾何のみ（等能力）</button>
+    </div>
+    <div id="seqInfo" class="hint"></div>
+  </section>
+  <section class="panel">
+    <h3>PSY 心理生理レイヤー <span class="eyebrow">HEURISTIC · 非予測</span></h3>
+    <div id="psyMomo"></div>
+    <canvas id="psySpark" width="292" height="54"></canvas>
+    <div id="psyTeams"></div>
+    <div id="psyDD" class="hint" style="margin-top:8px"></div>
+    <div class="hint" id="psyHint"></div>
   </section>
   <section class="panel">
     <h3>ゾーニング視点 <span class="eyebrow">PERSPECTIVE</span></h3>
@@ -550,6 +592,15 @@ body.showkeys #keyhelp { display: block; }
     <div class="stat"><div class="k">FATIGUE 推定疲労</div><div class="v" id="inspFat">—</div></div>
     <div class="stat"><div class="k">STATUS</div><div class="v" id="inspStat" style="font-size:12px">—</div></div>
   </div>
+  <div class="stats psy" title="PSYレイヤー（決定論ヒューリスティック推定・非予測）">
+    <div class="stat"><div class="k">FOCUS 集中力</div><div class="v" id="inspCn">—</div></div>
+    <div class="stat"><div class="k">AROUSAL 覚醒</div><div class="v" id="inspAr">—</div></div>
+    <div class="stat"><div class="k">M-FATIGUE 精神疲労</div><div class="v" id="inspMf">—</div></div>
+    <div class="stat"><div class="k">HRV プロキシ</div><div class="v" id="inspHrv">—</div></div>
+    <div class="stat" title="di Prampero メタボリックパワー（モデル推定・W/kg）"><div class="k">METAB 代謝平均</div><div class="v" id="inspMet">—</div></div>
+    <div class="stat" title="25.2km/h以上のスプリント回数と高強度走行距離（モデル推定）"><div class="k">SPRINT / HSR</div><div class="v" id="inspSpr">—</div></div>
+  </div>
+  <div class="eyebrow" style="margin-top:8px">能力値 — モデル推定</div>
   <div class="attrs" id="inspAttrs"></div>
 </div>
 
@@ -569,7 +620,7 @@ body.showkeys #keyhelp { display: block; }
 <div id="tlTip"></div>
 <div id="toasts"></div>
 <div id="keyhelp" class="panel">
-  Space 再生/停止 · ←→ ±15s · 1-5 カメラ · H 危険場 · Z ゾーン · T 軌跡 · L 番号 · G 20/22 · ? このヘルプ<br>
+  Space 再生/停止 · ←→ ±15s · 1-5 カメラ · H 危険場 · Z ゾーン · T 軌跡 · L 番号 · V 速度 · P PSY · G 20/22 · ? このヘルプ<br>
   自由飛行: WASD 移動 · QE 上下 · Shift 加速 · ドラッグ 視点 · ホイール 速度
 </div>
 
@@ -819,6 +870,20 @@ window.addEventListener("error", (e) => {
       s("LAM", "AM", 0.55,  0.30, 0.36,  0.25, 0.76, 0.34, ["AM","W","ST"]),
       s("ST",  "ST", 0.68,  0,    0.47,  0,    0.86, 0,    ["ST"]),
     ],
+    // ---- 4-1-3-2（アンカー+インテリオール3+2トップ — ARG 2026 R16 等） ----
+    "4132": [
+      s("GK",  "GK", 0.05,  0,    0.04, 0,     0.10, 0,    ["GK"]),
+      s("RB",  "FB", 0.20, -0.60, 0.13,-0.52,  0.44,-0.66, ["FB","WB"]),
+      s("RCB", "CB", 0.15, -0.20, 0.10,-0.18,  0.28,-0.21, ["CB"]),
+      s("LCB", "CB", 0.15,  0.20, 0.10, 0.18,  0.28, 0.21, ["CB"]),
+      s("LB",  "FB", 0.20,  0.60, 0.13, 0.52,  0.44, 0.66, ["FB","WB"]),
+      s("DM",  "DM", 0.32,  0,    0.22, 0,     0.45, 0,    ["DM","CM"]),
+      s("RCM", "CM", 0.46, -0.40, 0.30,-0.34,  0.64,-0.44, ["CM","AM","W"]),
+      s("CM",  "CM", 0.44,  0,    0.29, 0,     0.60, 0,    ["CM","AM"]),
+      s("LCM", "CM", 0.46,  0.40, 0.30, 0.34,  0.64, 0.44, ["CM","AM","W"]),
+      s("RS",  "ST", 0.66, -0.14, 0.46,-0.11,  0.85,-0.15, ["ST","AM"]),
+      s("LS",  "ST", 0.66,  0.14, 0.46, 0.11,  0.85, 0.15, ["ST"]),
+    ],
     "532": [
       s("GK",  "GK", 0.045, 0,    0.035,0,     0.09, 0,    ["GK"]),
       s("RWB", "WB", 0.26, -0.78, 0.11, -0.70, 0.52,-0.82, ["WB","FB"]),
@@ -836,6 +901,7 @@ window.addEventListener("error", (e) => {
   F.SHAPE_LABELS = {
     "343": "3-4-3", "433": "4-3-3", "4231": "4-2-3-1", "442": "4-4-2",
     "352": "3-5-2", "4141": "4-1-4-1", "3421": "3-4-2-1", "532": "5-3-2",
+    "4132": "4-1-3-2",
   };
 
   // 役割類似度（交代適合・引力重みで使用）
@@ -953,8 +1019,11 @@ window.addEventListener("error", (e) => {
   const m1 = (mm, ss = 0) => mm * 60 + ss;             // 前半 表示分 → t
   const m2 = (mm, ss = 0) => H2 + (mm - 45) * 60 + ss; // 後半 表示分 → t
 
-  R.data = {};
-  R.data.MATCH = {
+  // マッチパック・レジストリ: data_match*.mjs は自分を MATCHES に登録する。
+  // 既定試合（R.data.MATCH）はこのファイルのみが設定する。
+  R.data ??= {};
+  R.data.MATCHES ??= {};
+  R.data.MATCH = R.data.MATCHES["wc2026-r32-bra-jpn"] = {
     meta: {
       id: "wc2026-r32-bra-jpn",
       competition: "FIFA ワールドカップ 2026",
@@ -1055,6 +1124,13 @@ window.addEventListener("error", (e) => {
       { t: 6120,        type: "fulltime", label: "試合終了 ブラジル 2-1 日本" },
     ],
 
+    // ---- チェーン保持台本（実況ストーリーの拘束・モデル） ----
+    // 佐野ゴール: ブラジルのビルドアップ → 28:38.5 佐野がパスカット → 独走保持
+    chainForce: [
+      { t0: m1(28, 24), t1: m1(28, 38.5), team: "BRA" },
+      { t0: m1(28, 38.5), t1: m1(28, 54), team: "JPN", no: 24 },
+    ],
+
     // ---- ポゼッション波形 KP [t, P]（P>0: ブラジル保持/攻勢, P<0: 日本） ----
     // 実測 支配率69/31・シュート7/2・xG2.07/0.33 と整合するよう較正
     possessionKP: [
@@ -1072,17 +1148,24 @@ window.addEventListener("error", (e) => {
 
     // ---- ボール・ハードアンカー {t, x, y, sigma?}（座標はモデル、時刻は記録準拠） ----
     ballAnchors: [
-      { t: 0, x: 0, y: 0, hold: 2 },
+      { t: 0, x: 0, y: 0, hold: 6 },
       { t: m1(11, 40), x: -8, y: 6, hold: 25 },                 // 佐野の警告FK
       { t: m1(13, 50), x: 12, y: -9, hold: 25 },                // カゼミーロの警告FK
-      // 佐野ゴール: 奪取→独走→PA外シュート→左隅（日本は-Xへ攻撃）
+      // 佐野ゴール: 奪取(28:40)→前を向くタメ→28:46から独走加速（区間ピーク≈25km/h）
+      // →PA手前(28:52)から左隅へ。1.5秒間隔のウェイポイントで加速プロファイルを刻む
       { t: m1(28, 40), x: -3, y: 3 },                           // ハーフウェーで奪取
-      { t: m1(28, 47), x: -18, y: 2.5 },
-      { t: m1(28, 52), x: -33, y: 1.5 },                        // PA手前でシュート
+      { t: m1(28, 43), x: -4.8, y: 2.9 },                       // 前を向いて運び出し
+      { t: m1(28, 46), x: -7, y: 2.8 },                         // ターンして持ち出す
+      // ボールはタッチごとに半歩〜一歩先を転がる（選手ウェイポイント+1.2m前方）
+      { t: m1(28, 47.5), x: -11.4, y: 2.6 },
+      { t: m1(28, 49), x: -16, y: 2.3 },
+      { t: m1(28, 50.5), x: -24.2, y: 1.9 },                    // 独走加速
+      { t: m1(28, 51.2), x: -28.4, y: 1.7 },                    // トップスピード
+      { t: m1(28, 52), x: -32.4, y: 1.5 },                      // PA手前でシュート
       { t: m1(28, 53), x: -52.2, y: 2.9, hold: 4 },             // ネット左隅
-      { t: m1(29, 50), x: 0, y: 0, hold: 2 },                   // 再開キックオフ
+      { t: m1(29, 50), x: 0, y: 0, hold: 6 },                   // 再開キックオフ
       { t: m1(44, 40), x: 20, y: -14, hold: 20 },               // 鎌田の警告FK
-      { t: 2880, x: 0, y: 0, hold: 2 },                         // 後半キックオフ
+      { t: 2880, x: 0, y: 0, hold: 6 },                         // 後半キックオフ
       { t: m2(48, 0), x: -18, y: 10, hold: 20 },                // ダニーロ警告FK（日本のFK）
       // 52' CK→B・ギマランイス ヘッド→鈴木彩艶ライン上クリア（ブラジルは-Xへ攻撃）
       { t: m2(51, 55), x: -52.5, y: 33.5, hold: 3 },
@@ -1095,7 +1178,7 @@ window.addEventListener("error", (e) => {
       { t: m2(55, 33), x: -38.5, y: -24.5 },                    // クロス地点
       { t: m2(55, 35, 0.5), x: -51.2, y: 3.6 },
       { t: m2(55, 36), x: -52.2, y: 2.5, hold: 4 },             // ネット
-      { t: m2(56, 40), x: 0, y: 0, hold: 2 },                   // 日本再開
+      { t: m2(56, 40), x: 0, y: 0, hold: 6 },                   // 日本再開
       // 58' ヴィニシウス ミドル→ディフレクト枠外
       { t: m2(57, 36), x: -35, y: -8 },
       { t: m2(57, 41), x: -52.8, y: 9.5 },
@@ -1106,16 +1189,34 @@ window.addEventListener("error", (e) => {
       { t: m2(94, 34), x: -30.5, y: -8.5 },                     // ブルーノのパス始点
       { t: m2(94, 38), x: -37.5, y: -13 },                      // マルティネッリ受ける
       { t: m2(94, 41), x: -52.2, y: -3.0, hold: 4 },            // ポスト内側→ネット
-      { t: m2(96, 0), x: 0, y: 0, hold: 2 },                    // 日本再開
+      { t: m2(96, 0), x: 0, y: 0, hold: 6 },                    // 日本再開
       { t: 6120, x: 8, y: 4 },
     ],
 
     // ---- 選手アンカー（得点・アシスト等の再現） {t,team,no,x,y,sigma} ----
     playerAnchors: [
-      // 佐野: ボールキャリア（奪取→独走→シュート）
-      { t: m1(28, 40), team: "JPN", no: 24, x: -2, y: 3, sigma: 7 },
-      { t: m1(28, 47), team: "JPN", no: 24, x: -17, y: 2.5, sigma: 5 },
-      { t: m1(28, 52), team: "JPN", no: 24, x: -31.5, y: 1.5, sigma: 5 },
+      // 佐野: 奪取→タメ→独走スプリント（1.5s間隔ウェイポイント追従・σ1.3で滲み抑制）
+      { t: m1(28, 40), team: "JPN", no: 24, x: -2, y: 3, sigma: 3 },
+      { t: m1(28, 43), team: "JPN", no: 24, x: -4.5, y: 2.9, sigma: 2.2 },
+      { t: m1(28, 46), team: "JPN", no: 24, x: -6.5, y: 2.8, sigma: 1.3 },
+      { t: m1(28, 47.5), team: "JPN", no: 24, x: -10, y: 2.6, sigma: 1.3 },
+      { t: m1(28, 49), team: "JPN", no: 24, x: -14.5, y: 2.3, sigma: 1.3 },
+      { t: m1(28, 50.5), team: "JPN", no: 24, x: -20, y: 1.9, sigma: 1.3 },
+      { t: m1(28, 52), team: "JPN", no: 24, x: -31.8, y: 1.5, sigma: 1.3 },
+      // シュート後の減速: 非対称σ — 到達は鋭く(σL1.4)・解放は緩やか(σR5)。
+      // 対称の広いσだと窓が時間を遡って走路を先食いする（教訓）
+      { t: m1(28, 53.8), team: "JPN", no: 24, x: -33.5, y: 2.4, sigmaL: 1.4, sigmaR: 5 },
+      // 相手のリアクション: カゼミーロが背走チェイス、マルキーニョスが撤退カバー
+      { t: m1(28, 45), team: "BRA", no: 5, x: 1, y: 0, sigma: 4 },
+      { t: m1(28, 52), team: "BRA", no: 5, x: -23, y: 0.5, sigma: 4 },
+      { t: m1(28, 46), team: "BRA", no: 4, x: -14, y: -4, sigma: 4 },
+      { t: m1(28, 52), team: "BRA", no: 4, x: -29, y: -2.5, sigma: 3.5 },
+      // 伊東純也が右を並走（実況どおり）・前田は左でコースを広げる囮ラン
+      // 日本は−Xへ攻撃 → 攻撃視点の右=+y（RF伊東）/ 左=−y（LF前田）
+      { t: m1(28, 46), team: "JPN", no: 14, x: -14, y: 12, sigma: 4 },
+      { t: m1(28, 52), team: "JPN", no: 14, x: -34, y: 8.5, sigma: 3.5 },
+      { t: m1(28, 46), team: "JPN", no: 11, x: -16, y: -13, sigma: 5 },
+      { t: m1(28, 52), team: "JPN", no: 11, x: -35, y: -10, sigma: 4 },
       // カゼミーロ: ファーポストへ進入 / ガブリエウ: 左大外クロス
       { t: m2(55, 20), team: "BRA", no: 5, x: -30, y: 6, sigma: 10 },
       { t: m2(55, 35), team: "BRA", no: 5, x: -50.8, y: 3.8, sigma: 6 },
@@ -1130,16 +1231,294 @@ window.addEventListener("error", (e) => {
       { t: m2(57, 40), team: "BRA", no: 7, x: -34.5, y: -8, sigma: 6 },
     ],
 
-    // ---- 実試合スタッツ（表示用・出典どおり） ----
+    // ---- 実試合スタッツ（表示用・各行に出典を明記 / Issue #1 対応） ----
+    // プロバイダ依存指標（xG等）は出典間で差があり得るため、値と出典をセットで表示する。
     stats: [
-      { key: "ボール支配率", BRA: "69%", JPN: "31%" },
-      { key: "シュート", BRA: 7, JPN: 2 },
-      { key: "枠内シュート", BRA: 3, JPN: 1 },
-      { key: "xG（期待得点）", BRA: "2.07", JPN: "0.33" },
-      { key: "パス成功", BRA: "625 (92%)", JPN: "260 (83%)" },
-      { key: "デュエル勝利", BRA: 41, JPN: 34 },
-      { key: "ファウル", BRA: 4, JPN: 13 },
-      { key: "セーブ", BRA: 1, JPN: 4 },
+      { key: "ボール支配率", src: "FIFA/ESPN", BRA: "69%", JPN: "31%" },
+      { key: "総シュート", src: "ESPN", BRA: 18, JPN: 5 },
+      { key: "枠内シュート", src: "ESPN", BRA: 7, JPN: 2 },
+      { key: "xG（期待得点）", src: "ESPN算出", BRA: "2.07", JPN: "0.33" },
+      { key: "パス成功", src: "ESPN", BRA: "625 (92%)", JPN: "260 (83%)" },
+      { key: "デュエル勝利", src: "ESPN", BRA: 41, JPN: 34 },
+      { key: "ファウル", src: "ESPN", BRA: 4, JPN: 13 },
+      { key: "セーブ", src: "ESPN", BRA: 1, JPN: 4 },
+    ],
+  };
+})();
+
+
+/* ===== src/data_match_argegy.mjs ===== */
+/* =========================================================================
+   RPDX.data — 2026 FIFA W杯 ラウンド16「アルゼンチン 3-2 エジプト」試合データ
+   ---------------------------------------------------------------------------
+   ■ ファクト出典（2026-07-08 照合済・相互一致確認済）
+     - FIFA 公式マッチセンター match 400021528 / Tactical Line-up PDF
+       （Wikipedia「2026 FIFA World Cup knockout stage」wikitext 経由で転記）
+     - ESPN gameId 760509（スタッツ・得点分・警告）/ Al Jazeera・NBC ライブブログ
+   ■ 事実データ: 背番号・氏名・XI・フォーメーション・交代（分）・警告・得点・
+     PKセーブ(21')・VAR取消(60')・スタッツ・会場・主審・観衆 → 上記ソースどおり。
+     生年・所属・キャップ数は公開値ベースの概数（表示用・2026-07時点）。
+   ■ モデルデータ（推定と明示）: 能力値 attrs、アンカー座標、ポゼッション波形、
+     前半AT(3分と仮定・後半ATは90+12警告を包含する13分) → 実測支配率64/36等と
+     整合するよう較正した決定論パラメータ。
+   ---------------------------------------------------------------------------
+   試合の流れ: 15'イブラヒム先制(EGY) → 21'メッシPKをショベイルがセーブ →
+   60'ジコのゴールがVARで取消 → 67'ジコ(EGY 2-0) → 79'ロメロ → 83'メッシ →
+   90+2'エンソ・フェルナンデス — 2点差を終盤にひっくり返す大逆転（PSY実地検証: #18）
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+
+  const P = (no, pos, name, ja, label, born, club, caps, goals, attrs, cap = false) => ({
+    no, pos, name, ja, label, born, club, caps, goals, captain: cap,
+    attrs: { pac: attrs[0], sta: attrs[1], def: attrs[2], att: attrs[3], tec: attrs[4], aer: attrs[5] },
+  });
+
+  // 出場者のみ収録（XI+交代出場 — 未出場ベンチは省略。整合テストは11人以上を要求）
+  const ARG_SQUAD = [
+    P(23, "GK", "Emiliano Martinez",  "エミリアーノ・マルティネス", "E・マルティネス", 1992, "Aston Villa",      52, 0, [58,72,88,30,74,84]),
+    P(26, "DF", "Nahuel Molina",      "ナウエル・モリーナ",         "モリーナ",       1998, "Atletico Madrid",  46, 2, [82,80,76,68,78,60]),
+    P(13, "DF", "Cristian Romero",    "クリスティアン・ロメロ",     "ロメロ",         1998, "Tottenham",        42, 3, [78,80,89,60,76,86]),
+    P(6,  "DF", "Lisandro Martinez",  "リサンドロ・マルティネス",   "L・マルティネス", 1998, "Manchester United",30, 1, [76,80,88,55,80,82]),
+    P(3,  "DF", "Nicolas Tagliafico", "ニコラス・タリアフィコ",     "タリアフィコ",   1992, "Lyon",             62, 1, [74,81,80,62,78,68]),
+    P(5,  "MF", "Leandro Paredes",    "レアンドロ・パレデス",       "パレデス",       1994, "Boca Juniors",     69, 5, [62,78,80,70,86,68]),
+    P(7,  "MF", "Rodrigo De Paul",    "ロドリゴ・デ・パウル",       "デ・パウル",     1994, "Inter Miami",      74, 2, [76,88,76,74,86,62]),
+    P(24, "MF", "Enzo Fernandez",     "エンソ・フェルナンデス",     "エンソ",         2001, "Chelsea",          40, 6, [72,86,80,80,89,70]),
+    P(20, "MF", "Alexis Mac Allister","アレクシス・マク・アリステル","マク・アリステル",1998, "Liverpool",       46, 4, [72,85,76,80,88,66]),
+    P(10, "FW", "Lionel Messi",       "リオネル・メッシ",           "メッシ",         1987, "Inter Miami",     193,114, [78,74,38,94,97,42], true),
+    P(9,  "FW", "Julian Alvarez",     "フリアン・アルバレス",       "J・アルバレス",  2000, "Atletico Madrid",  48,13, [84,86,60,88,86,64]),
+    P(22, "FW", "Lautaro Martinez",   "ラウタロ・マルティネス",     "ラウタロ",       1997, "Inter",            72,32, [82,83,50,89,84,76]),
+    P(15, "MF", "Nicolas Gonzalez",   "ニコラス・ゴンサレス",       "N・ゴンサレス",  1998, "Juventus",         44, 6, [84,83,64,78,80,70]),
+    P(4,  "DF", "Gonzalo Montiel",    "ゴンサロ・モンティエル",     "モンティエル",   1997, "River Plate",      42, 1, [78,79,80,62,76,66]),
+    P(19, "DF", "Nicolas Otamendi",   "ニコラス・オタメンディ",     "オタメンディ",   1988, "Benfica",         126, 7, [66,76,87,52,72,86]),
+    P(25, "DF", "Facundo Medina",     "ファクンド・メディナ",       "メディナ",       1999, "Marseille",        12, 0, [77,79,83,58,75,80]),
+  ];
+
+  const EGY_SQUAD = [
+    P(23, "GK", "Mostafa Shobeir",  "モスタファ・ショベイル", "ショベイル",  2000, "Al Ahly",     14, 0, [56,70,83,26,64,80]),
+    P(3,  "DF", "Mohamed Hany",     "モハメド・ハニー",       "ハニー",      1996, "Al Ahly",     28, 0, [76,80,78,60,72,66]),
+    P(5,  "DF", "Ramy Rabia",       "ラミー・ラビア",         "ラビア",      1993, "Al Ahly",     38, 2, [68,76,84,52,70,82]),
+    P(2,  "DF", "Yasser Ibrahim",   "ヤセル・イブラヒム",     "イブラヒム",  1993, "Al Ahly",     26, 2, [66,75,84,58,68,84]),
+    P(15, "DF", "Karim Hafez",      "カリム・ハーフェズ",     "ハーフェズ",  1996, "Pyramids",    32, 1, [74,79,77,60,74,68]),
+    P(17, "MF", "Mohanad Lasheen",  "モハナド・ラシーン",     "ラシーン",    1996, "Pyramids",    22, 1, [72,82,74,70,76,62]),
+    P(19, "MF", "Marwan Attia",     "マルワン・アティア",     "アティア",    2000, "Al Ahly",     24, 0, [70,83,80,62,74,70]),
+    P(12, "FW", "Haissem Hassan",   "ハイセム・ハサン",       "H・ハサン",   2001, "-",           12, 2, [84,80,52,78,80,54]),
+    P(10, "FW", "Mohamed Salah",    "モハメド・サラー",       "サラー",      1992, "Liverpool",  106,60, [88,84,48,91,90,58], true),
+    P(8,  "MF", "Emam Ashour",      "エマム・アシュール",     "アシュール",  1998, "Al Ahly",     34, 5, [78,82,62,79,83,60]),
+    P(11, "FW", "Mostafa Ziko",     "モスタファ・ジコ",       "ジコ",        2000, "-",           16, 4, [82,80,50,82,80,60]),
+    P(14, "MF", "Hamdy Fathy",      "ハムディ・ファティ",     "ファティ",    1995, "-",           36, 2, [72,82,78,64,72,72]),
+    P(7,  "FW", "Trezeguet",        "トレゼゲ",               "トレゼゲ",    1994, "-",           78,11, [83,81,52,79,79,58]),
+    P(22, "FW", "Omar Marmoush",    "オマル・マルムーシュ",   "マルムーシュ",1999, "Manchester City", 42,14, [86,84,52,86,84,62]),
+    P(25, "MF", "Zizo",             "ジゾ",                   "ジゾ",        1996, "Al Ahly",     34, 6, [80,82,58,80,84,58]),
+  ];
+
+  // ---- 時間軸ヘルパ ----
+  const H2 = 2880;                       // 後半開始（前半 45+AT3）
+  const m1 = (mm, ss = 0) => mm * 60 + ss;
+  const m2 = (mm, ss = 0) => H2 + (mm - 45) * 60 + ss;
+
+  R.data ??= {};
+  R.data.MATCHES ??= {};
+  R.data.MATCHES["wc2026-r16-arg-egy"] = {
+    meta: {
+      id: "wc2026-r16-arg-egy",
+      competition: "FIFA ワールドカップ 2026",
+      stage: "ラウンド16",
+      date: "2026-07-07",
+      kickoffLocal: "12:00 (UTC-4)",
+      venue: "メルセデス・ベンツ・スタジアム（アトランタ）",
+      attendance: 68239,
+      referee: "フランソワ・ルテキシエ（フランス）",
+      motm: { team: "ARG", no: 10 },
+      score: { ARG: 3, EGY: 2 },
+      note: "背番号・交代・警告・得点・PKセーブ・VAR取消はFIFA公式記録どおり。座標・能力値・前半ATはモデル推定。",
+    },
+
+    time: {
+      h1: { start: 0, end: 2880, clock0: 0, added: 3 },        // 45' + AT3（推定）
+      h2: { start: 2880, end: 6360, clock0: 2700, added: 13 }, // 90' + AT13（90+12警告を包含）
+    },
+
+    dir: { ARG: { h1: +1, h2: -1 }, EGY: { h1: -1, h2: +1 } },
+    kickoffBy: { h1: "ARG", h2: "EGY" },
+    possessionPlus: "ARG",             // P(t) > 0 = アルゼンチン攻勢（実測64%）
+    possessionShareGain: 0.413,         // チェーン較正ノブ（実測64/36へ・モデル値）
+    teamOrder: ["ARG", "EGY"],
+
+    teams: {
+      ARG: {
+        code: "ARG", name: "アルゼンチン", nameEn: "Argentina", coach: "リオネル・スカローニ",
+        color: "#7EB6E8", colorDeep: "#12314F",
+        kit: { shirt: "#E9F1F8", shorts: "#F2F6FA", number: "#1B2D5E", gk: "#B5D334", gkNumber: "#20260A" },
+        squad: ARG_SQUAD,
+        // FIFA Tactical Line-up: 4-1-3-2（DMパレデス、CM3枚、メッシ+アルバレス）
+        phases: [{
+          from: 0, shape: "4132",
+          assign: { GK: 23, RB: 26, RCB: 13, LCB: 6, LB: 3, DM: 5, RCM: 7, CM: 24, LCM: 20, RS: 10, LS: 9 },
+        }],
+        captainOrder: [10, 19, 23],
+      },
+      EGY: {
+        code: "EGY", name: "エジプト", nameEn: "Egypt", coach: "ホサム・ハサン",
+        color: "#D5281B", colorDeep: "#3B0B08",
+        kit: { shirt: "#D5281B", shorts: "#141414", number: "#F5F7FA", gk: "#7A8B96", gkNumber: "#10161C" },
+        squad: EGY_SQUAD,
+        // FIFA Tactical Line-up: 4-2-3-1（サラーがトップ下、ジコ1トップ）
+        phases: [{
+          from: 0, shape: "4231",
+          assign: { GK: 23, RB: 3, RCB: 5, LCB: 2, LB: 15, RDM: 17, LDM: 19, RW: 12, AM: 10, LW: 8, ST: 11 },
+        }],
+        captainOrder: [10, 5, 23],
+      },
+    },
+
+    // ---- 交代（FIFA記録）----
+    subsActual: {
+      ARG: [
+        { t: m2(66), min: "66'",       out: 3,  in: 15 },  // N・ゴンサレス ⇄ タリアフィコ
+        { t: m2(66), min: "66'",       out: 7,  in: 22 },  // ラウタロ ⇄ デ・パウル
+        { t: m2(73), min: "73'",       out: 26, in: 4 },   // モンティエル ⇄ モリーナ
+        { t: m2(95, 20), min: "90+5'", out: 13, in: 19 },  // オタメンディ ⇄ ロメロ
+        { t: m2(95, 20), min: "90+5'", out: 9,  in: 25 },  // メディナ ⇄ J・アルバレス
+      ],
+      EGY: [
+        { t: 2880, min: "46'",         out: 8,  in: 14 },  // ファティ ⇄ アシュール（HT）
+        { t: m2(73), min: "73'",       out: 12, in: 7 },   // トレゼゲ ⇄ H・ハサン
+        { t: m2(80), min: "80'",       out: 11, in: 22 },  // マルムーシュ ⇄ ジコ
+        { t: m2(96, 10), min: "90+6'", out: 17, in: 25 },  // ジゾ ⇄ ラシーン
+      ],
+    },
+
+    // ---- イベント（時刻昇順・FIFA/ESPN照合） ----
+    events: [
+      { t: 0,            type: "kickoff",  team: "ARG", label: "キックオフ" },
+      { t: m1(15, 0),    type: "goal",     team: "EGY", no: 2, assist: null, min: "15'",
+        label: "GOAL イブラヒム — エジプト先制",
+        detail: "15分、CBヤセル・イブラヒムがエジプトに先制点。アルゼンチンが立ち上がりから追う展開に。0-1。" },
+      { t: m1(21, 0),    type: "save",     team: "EGY", no: 23, min: "21'",
+        label: "ショベイルがメッシのPKをセーブ" },
+      { t: 2880,         type: "halftime", label: "前半終了 0-1（AT+3）" },
+      { t: 2880,         type: "kickoff",  team: "EGY", label: "後半開始" },
+      { t: m2(60, 0),    type: "shot",     team: "EGY", no: 11, min: "60'",
+        label: "ジコのゴールはVARチェックで取消（オフサイド）" },
+      { t: m2(67, 0),    type: "goal",     team: "EGY", no: 11, assist: null, min: "67'",
+        label: "GOAL ジコ — リードを2点に拡大",
+        detail: "60分のVAR取消から7分、ジコが今度は正真正銘のゴール。エジプトが2-0とリード。" },
+      { t: m2(79, 0),    type: "goal",     team: "ARG", no: 13, assist: null, min: "79'",
+        label: "GOAL ロメロ — 反撃の狼煙",
+        detail: "79分、クリスティアン・ロメロが1点を返す。1-2、逆転劇の始まり。" },
+      { t: m2(83, 0),    type: "goal",     team: "ARG", no: 10, assist: null, min: "83'",
+        label: "GOAL メッシ — 4分で同点に",
+        detail: "83分、21分のPK失敗を帳消しにするメッシの同点弾。2-2でクライマックスへ。" },
+      { t: m2(92, 0),    type: "goal",     team: "ARG", no: 24, assist: null, min: "90+2'",
+        label: "GOAL エンソ・フェルナンデス — 土壇場の決勝点",
+        detail: "90+2分、エンソ・フェルナンデスが決勝点。2点差からの大逆転で準々決勝へ。3-2。" },
+      { t: m2(93, 0),    type: "yellow",   team: "EGY", no: 23, label: "警告 ショベイル", min: "90+3'" },
+      { t: m2(94, 0),    type: "yellow",   team: "EGY", no: 14, label: "警告 ファティ", min: "90+4'" },
+      { t: m2(98, 0),    type: "yellow",   team: "EGY", no: 19, label: "警告 アティア", min: "90+8'" },
+      { t: m2(102, 0),   type: "yellow",   team: "EGY", no: 12, label: "警告 H・ハサン（ベンチ・異議）", min: "90+12'" },
+      { t: 6360,         type: "fulltime", label: "試合終了 アルゼンチン 3-2 エジプト" },
+    ],
+
+    // ---- ポゼッション波形 KP（P>0: アルゼンチン保持/攻勢）----
+    // 実測 支配率64/36・シュート19/5・xG2.84/0.89 と整合するよう較正
+    possessionKP: [
+      [0, 0.18], [240, 0.36], [600, 0.47],
+      [870, -0.5], [900, -0.9], [960, -0.12],                 // 15' イブラヒム先制
+      [1150, 0.5], [1260, 0.85], [1330, 0.35],               // 21' PK獲得の猛攻→失敗
+      [1600, 0.62], [2000, 0.67], [2400, 0.63], [2880, 0.6],
+      [2960, 0.5], [3300, 0.58], [3600, 0.48],
+      [3730, -0.45], [3780, -0.8], [3900, -0.1],             // 60' ジコVAR取消
+      [4080, -0.25], [4200, -0.95], [4280, 0.18],              // 67' ジコ 2-0
+      [4500, 0.66], [4740, 0.78],
+      [4880, 0.9], [4920, 0.95], [4990, 0.4],                // 79' ロメロ
+      [5080, 0.8], [5160, 0.95], [5230, 0.45],               // 83' メッシ
+      [5400, 0.75], [5580, 0.83],
+      [5660, 0.9], [5700, 0.95], [5780, 0.2],                // 90+2 エンソ
+      [5950, 0.58], [6150, 0.66], [6360, 0.6],
+    ],
+
+    // ---- ボール・ハードアンカー（座標はモデル、時刻は記録準拠）----
+    // 前半: ARG→+X / EGY→−X（後半反転）
+    ballAnchors: [
+      { t: 0, x: 0, y: 0, hold: 6 },
+      // 15' イブラヒム（EGYは−Xへ攻撃 → ARGゴールは−52.5）
+      { t: m1(14, 40), x: -30, y: -8 },
+      { t: m1(14, 52), x: -45, y: -5 },
+      { t: m1(15, 0),  x: -52.2, y: -2.5, hold: 4 },
+      { t: m1(16, 0),  x: 0, y: 0, hold: 6 },                // ARG再開
+      // 21' メッシPK（EGYゴールは+52.5 → PKスポット+41.5）→ショベイルセーブ
+      { t: m1(20, 30), x: 41.5, y: 0, hold: 45 },            // PK準備
+      { t: m1(21, 18), x: 41.5, y: 0 },
+      { t: m1(21, 20), x: 50.5, y: 5.5 },                    // セーブ→弾く
+      { t: m1(21, 26), x: 38, y: 16, hold: 3 },
+      // 後半開始
+      { t: 2880, x: 0, y: 0, hold: 6 },
+      // 60' ジコVAR取消（後半EGYは+Xへ攻撃）
+      { t: m2(59, 40), x: 38, y: 6 },
+      { t: m2(59, 55), x: 52.0, y: 1.5, hold: 6 },           // ネットイン→VARで取消
+      { t: m2(61, 0),  x: 30, y: 0, hold: 14 },              // 再開（FK）
+      // 67' ジコ
+      { t: m2(66, 30), x: 20, y: -10 },
+      { t: m2(66, 50), x: 44, y: -6 },
+      { t: m2(67, 0),  x: 52.2, y: 2.0, hold: 4 },
+      { t: m2(68, 10), x: 0, y: 0, hold: 6 },                // ARG再開
+      // 79' ロメロ（後半ARGは−Xへ攻撃）— 波状攻撃→左CK→ファーで押し込む
+      { t: m2(78, 5),  x: -38, y: -14 },                     // 攻撃圧の蓄積（TPA）
+      { t: m2(78, 18), x: -46, y: -20 },                     // 深い位置で追い込み→CK獲得
+      { t: m2(78, 30), x: -52.5, y: -33.5, hold: 3 },        // 左CK
+      { t: m2(78, 42), x: -48, y: -8 },
+      { t: m2(78, 55), x: -46, y: -4 },
+      { t: m2(79, 0),  x: -52.2, y: 1.8, hold: 4 },
+      { t: m2(80, 0),  x: 0, y: 0, hold: 6 },                // EGY再開
+      // 83' メッシ
+      { t: m2(82, 30), x: -25, y: 4 },
+      { t: m2(82, 50), x: -36, y: 8 },
+      { t: m2(82, 57), x: -39.5, y: 3 },                     // シュート地点
+      { t: m2(83, 0),  x: -52.2, y: -3.2, hold: 4 },
+      { t: m2(84, 10), x: 0, y: 0, hold: 6 },                // EGY再開
+      // 90+2 エンソ
+      { t: m2(91, 40), x: -18, y: -4 },
+      { t: m2(91, 55), x: -33, y: -2 },
+      { t: m2(92, 0),  x: -52.2, y: 3.5, hold: 4 },
+      { t: m2(93, 10), x: 0, y: 0, hold: 6 },                // EGY再開
+      { t: 6360, x: 5, y: -3 },
+    ],
+
+    // ---- 選手アンカー（得点・セーブ再現）----
+    playerAnchors: [
+      // 15' イブラヒム: セットプレー気味に前進→押し込む
+      { t: m1(14, 52), team: "EGY", no: 2, x: -47, y: -3, sigma: 6 },
+      { t: m1(15, 0),  team: "EGY", no: 2, x: -51, y: -2, sigma: 5 },
+      // 21' PK: メッシ=キッカー / ショベイル=ゴールライン
+      { t: m1(21, 15), team: "ARG", no: 10, x: 40.2, y: 0, sigma: 5 },
+      { t: m1(21, 20), team: "EGY", no: 23, x: 52.0, y: 0.4, sigma: 4 },
+      // 60' VAR取消: ジコ
+      { t: m2(59, 55), team: "EGY", no: 11, x: 50.5, y: 1.2, sigma: 5 },
+      // 67' ジコ
+      { t: m2(66, 50), team: "EGY", no: 11, x: 42, y: -4, sigma: 6 },
+      { t: m2(67, 0),  team: "EGY", no: 11, x: 50.5, y: 1.5, sigma: 5 },
+      // 79' ロメロ（CK に合わせて進入）
+      { t: m2(78, 50), team: "ARG", no: 13, x: -46, y: -4, sigma: 6 },
+      { t: m2(79, 0),  team: "ARG", no: 13, x: -50.8, y: 1.2, sigma: 5 },
+      // 83' メッシ（PA手前から）
+      { t: m2(82, 50), team: "ARG", no: 10, x: -37, y: 7, sigma: 6 },
+      { t: m2(82, 57), team: "ARG", no: 10, x: -39.5, y: 3, sigma: 5 },
+      // 90+2 エンソ（中央突破）
+      { t: m2(91, 55), team: "ARG", no: 24, x: -34, y: -2, sigma: 6 },
+      { t: m2(92, 0),  team: "ARG", no: 24, x: -44, y: 0.5, sigma: 5 },
+    ],
+
+    // ---- 実試合スタッツ（各行に出典を明記 / Issue #1 と同じ規律）----
+    stats: [
+      { key: "ボール支配率", src: "ESPN", ARG: "64%", EGY: "36%" },
+      { key: "総シュート", src: "ESPN", ARG: 19, EGY: 5 },
+      { key: "枠内シュート", src: "ESPN", ARG: 7, EGY: 2 },
+      { key: "xG（期待得点）", src: "ESPN算出", ARG: "2.84", EGY: "0.89" },
+      { key: "パス成功", src: "ESPN", ARG: "541 (90%)", EGY: "287 (82%)" },
+      { key: "デュエル勝利", src: "ESPN", ARG: 50, EGY: 47 },
+      { key: "ファウル", src: "ESPN", ARG: 13, EGY: 11 },
+      { key: "セーブ", src: "ESPN", ARG: 0, EGY: 4 },
     ],
   };
 })();
@@ -1212,8 +1591,10 @@ window.addEventListener("error", (e) => {
     for (const k of E.teamKeys(match)) subs[k] = (match.subsActual[k] || []).map(s => ({ ...s }));
     return { id: "actual", label: "実試合", actual: true, subs, lineup: null, tweaks: null };
   };
+  // 内容ベースのハッシュ: 実試合と「実試合と同一内容のシナリオ」は同じ世界になる
+  // （同一 subs/lineup/tweaks → 同一チェーン・同一危険度 → 結果不変が構成的に成立）
   E.scenarioHash = (scenario) => {
-    if (!scenario || scenario.actual) return 0;
+    if (!scenario) return 0;
     let h = 7;
     const mix = (v) => { h = (Math.imul(h, 31) + v) | 0; };
     for (const tm of Object.keys(scenario.subs).sort())
@@ -1305,13 +1686,20 @@ window.addEventListener("error", (e) => {
     return list.concat(oc.ballAnchors || []).sort((a, b) => a.t - b.t);
   };
   const panchorCache = new Map();
+  // チェーン生成中はチェーン由来アンカー（リスタート/タックル）を注入しない
+  // — 生成がアンカーに依存すると循環するため。ガードは常に生成時のみ真＝決定論。
+  let chainBuilding = false;
   const playerAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    if (!oc) return match.playerAnchors;
+    const base = !oc
+      ? match.playerAnchors
+      : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
+    if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
-    const list = match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress))
-      .concat(oc.playerAnchors || []);
+    // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
+    const chain = buildChain(match, scenario);
+    const list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
     panchorCache.set(key, list);
     return list;
   };
@@ -1347,6 +1735,11 @@ window.addEventListener("error", (e) => {
   // 決定論生成: セグメント列 [{t0,t1,team,no,slot,fT(フライト開始),from:{team,no,slot}}]
   // ボールは保持者の基礎位置（basePlayerPos）に付く。パス/奪取はフライト補間。
   const chainRoleW = { GK: 0.03, CB: 0.75, FB: 1.05, WB: 1.15, DM: 1.25, CM: 1.35, AM: 1.35, W: 1.25, ST: 1.0 };
+  // 保持の持続性（マルコフ）: k_keep = 1 − τ·(1−π)。定常分布は π（=実測支配率）のまま、
+  // 平均連続保持 ≈ 1/(τ·(1−π)) 本 — 優勢側 ~7本 / 劣勢側 ~3.4本（実試合水準）。
+  const TURNOVER_TAU = 0.42;
+  // アウトオブプレー率（セグメント境界あたり）→ 1試合 ~60回のリスタート
+  const P_OUT = 0.052;
   const chainCache = new Map();
 
   const basePosOf = (match, scenario, team, no, slot, t) => {
@@ -1363,69 +1756,236 @@ window.addEventListener("error", (e) => {
   const buildChain = (match, scenario) => {
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (chainCache.has(key)) return chainCache.get(key);
+    chainBuilding = true;   // 生成中はチェーン由来アンカーを参照しない（循環回避・決定論）
+    try {
     const range = E.playedRange(match);
     const seed = N.seedOf(match.meta.id + "chain") ^ E.scenarioHash(scenario);
     const keys = E.teamKeys(match);
     const plus = match.possessionPlus || keys[0];
     const minus = keys.find(k => k !== plus);
-    // セグメント境界を跨げない時刻（交代・フェーズ切替・ハーフ）
+    // セグメント境界を跨げない時刻（交代・フェーズ切替・ハーフ・保持台本の境界）
     const cuts = [range.ht];
     for (const k of keys) {
       for (const s of scenario.subs[k] || []) cuts.push(s.t);
       for (const ph of E.phasesOf(match, scenario, k)) if (ph.from > 0) cuts.push(ph.from);
     }
+    if (match.chainForce) for (const w of match.chainForce) { cuts.push(w.t0); cuts.push(w.t1); }
     cuts.sort((a, b) => a - b);
 
     const segs = [];
+    const anchors = [];     // リスタート/タックルの再現アンカー（生成後に注入される）
+    // 記録イベントの直前窓では保持チームを事実へ拘束（ゴール直前に得点チームが
+    // ボールを持っていないと危険度・保持文脈が崩れる — アンカーと同じ「記録優先」原則）
+    const forcedWins = [];
+    // データ駆動の保持台本（最優先）: パスカット等の実況ストーリーをパックが指定できる
+    // 形式: match.chainForce = [{t0, t1, team, no?}] — no 指定でその選手が持ち続ける
+    if (match.chainForce) for (const w of match.chainForce) forcedWins.push({ ...w });
+    for (const ev of E.eventsOf(match, scenario)) {
+      if (ev.type === "goal") forcedWins.push({ t0: ev.t - 24, t1: ev.t + 1, team: ev.team });
+      else if (ev.type === "shot") forcedWins.push({ t0: ev.t - 12, t1: ev.t + 1, team: ev.team });
+      else if (ev.type === "save" && ev.team) {
+        const opp = ev.team === plus ? minus : plus;
+        forcedWins.push({ t0: ev.t - 12, t1: ev.t + 1, team: opp });
+      } else if (ev.type === "yellow" && ev.team) {
+        // FK: 被ファウル側がボールを持つ（テイカーがスポットに立つ — 吸着と併せて再現）
+        const opp = ev.team === plus ? minus : plus;
+        forcedWins.push({ t0: ev.t + 0.5, t1: ev.t + 16, team: opp });
+      }
+    }
+    // ゴール後のキックオフは失点側が中央から再開（帰陣完了の台形窓とセット）
+    for (const ev of E.eventsOf(match, scenario)) {
+      if (ev.type !== "goal") continue;
+      let rt = null;
+      for (const r of restartWindows(match, scenario)) if (r > ev.t && r <= ev.t + 130) { rt = r; break; }
+      if (rt == null) continue;
+      const concede = ev.team === plus ? minus : plus;
+      forcedWins.push({ t0: rt - 1, t1: rt + 6, team: concede });
+    }
+    const forcedWinAt = (tt) => {
+      for (const w of forcedWins) if (tt >= w.t0 && tt < w.t1) return w;   // 半開区間（境界の重複回避）
+      return null;
+    };
+    // ゴール後の祝祭〜再開はプレー停止 — タックル/リスタートのアンカーを重ねない
+    // （祝祭引力と加算されて速度上限を破るのを構成的に防ぐ）
+    const goalTs = [];
+    for (const ev of E.eventsOf(match, scenario)) if (ev.type === "goal") goalTs.push(ev.t);
+    const inCalm = (tt) => goalTs.some(g => tt >= g && tt <= g + 45);
     let t = range.t0 + 2;   // キックオフ・アンカー後から
     let idx = 0;
     let prev = null;        // {team,no,slot,pos}
+    let forceTeam = null;   // 直前リスタートの投げ先/蹴り先は同チーム（スローを敵に渡さない）
+    let forceRef = null;    // コーナー後の受け手参照点（ゴール前 = クロスの落下点）
+    const shareGain = match.possessionShareGain ?? 0.385;  // パック毎の較正ノブ
     while (t < range.t1 - 1) {
       const P = E.possessionAt(match, t);
-      const share = clamp(0.5 + P * 0.385, 0.07, 0.93);   // 実測支配率69/31に較正
-      const team = N.hash2(seed, idx * 17 + 3) < share ? plus : minus;
-      // 保持者選定: 近接 × 役割 × 前進バイアス × ジッター
+      const share = clamp(0.5 + P * shareGain, 0.07, 0.93); // 実測支配率へ較正（定常分布）
+      const u = N.hash2(seed, idx * 17 + 3);
+      // 持続性マルコフ: 独立抽選だと1本ごとに敵味方が入れ替わって見える（実測で平均1.4本）。
+      // k_keep = 1−τ(1−π) は定常分布 π を保ったまま連続保持を実試合水準へ伸ばす。
+      const forced = forcedWinAt(t);
+      let team;
+      if (forced) team = forced.team;
+      else if (forceTeam) { team = forceTeam; }
+      else if (!prev) team = u < share ? plus : minus;
+      else {
+        const pi = prev.team === plus ? share : 1 - share;
+        team = u < 1 - TURNOVER_TAU * (1 - pi) ? prev.team : (prev.team === plus ? minus : plus);
+      }
+      let isTurnover = !!prev && team !== prev.team;
+
+      // ---- アウトオブプレー（スローイン / コーナー / ゴールキック） ----
+      // 記録イベントの拘束窓ではリスタートを生成しない（ゴール前にスローインを挟まない）
+      let restart = null;
+      if (prev && !forced && !forceTeam && !forceRef && !inCalm(t) && N.hash2(seed, idx * 29 + 11) < P_OUT) {
+        const half = E.halfOf(match, t);
+        const dirPrev = match.dir[prev.team][half === 1 ? "h1" : "h2"];
+        const inAttackHalf = dirPrev * prev.pos.x > 8;    // 敵陣ならCK/GKもあり得る
+        const rr = N.hash2(seed, idx * 31 + 7);
+        const side = prev.pos.y >= 0 ? 1 : -1;
+        if (inAttackHalf && rr < 0.42) {
+          // コーナー: 攻撃側（=直前保持チーム）が保持継続。ボールはコーナーアークへ
+          team = prev.team;
+          restart = { type: "corner", x: dirPrev * 52.3, y: side * 33.8, delay: 6 + 2.5 * N.hash2(seed, idx * 41 + 5) };
+        } else if (inAttackHalf && rr < 0.72) {
+          // ゴールキック: 守備側GKへ（守備側の自ゴール = dirPrev 方向の先）
+          team = prev.team === plus ? minus : plus;
+          restart = { type: "goalkick", x: dirPrev * 46.5, y: (rr < 0.63 ? 1 : -1) * 8, delay: 5 + 2 * N.hash2(seed, idx * 41 + 5), gk: true };
+        } else {
+          // スローイン: 保持チームはマルコフ抽選の結果どおり（拮抗）。ボールはライン上
+          restart = {
+            type: "throwin",
+            x: clamp(prev.pos.x + (N.hash2(seed, idx * 43 + 3) * 10 - 5), -49, 49),
+            y: side * 34.0, delay: 4 + 2 * N.hash2(seed, idx * 41 + 5),
+          };
+        }
+        isTurnover = false;   // リスタートは接触奪取ではない
+      }
+
+      // ---- 保持者選定 ----
+      // パス: 中距離カーネル（自己再抽選は除外 — 除外しないと保持の55%が同一選手に戻り、
+      // 実質のパスがターンオーバー時にしか発生しない）。
+      // 奪取: 前保持者の近傍（タックル/インターセプト = 接触点の近く）。
+      // リスタート: 地点への近接で決定論選択（ジッターなし — WBがスローインを取る）。
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const half = E.halfOf(match, t);
       const dir = match.dir[team][half === 1 ? "h1" : "h2"];
       const align = Math.max(0, E.attackSign(match, team) * P);
-      const ref = prev ? prev.pos : E.ballSlowAt(match, t);
+      // 受け手参照点: コーナー直後はゴール前（クロスの落下点）/ リスタートは地点 / 通常は前保持者
+      const ref = restart ? { x: restart.x, y: restart.y }
+        : forceRef ? forceRef
+        : (prev ? prev.pos : E.ballSlowAt(match, t));
+      const kernel = restart ? 9 : forceRef ? 10 : isTurnover ? 6 : 14;
       let best = null, bestW = -1;
       for (const slot of shape) {
         const no = roster.assign[slot.id];
         if (no == null) continue;
         const entT = roster.entered[no];
         if (entT != null && t - entT < 35) continue;      // 入場走り込み中は除外
+        if (restart) {
+          if (restart.gk ? slot.role !== "GK" : slot.role === "GK") continue;
+        } else if (forced && forced.no != null) {
+          if (no !== forced.no) continue;                  // 台本指定選手のみ（自己継続=ドリブル）
+        } else if (prev && team === prev.team && no === prev.no) {
+          continue;                                        // 自己パス排除
+        }
         const pos = basePosOf(match, scenario, team, no, slot, t);
         const d = Math.hypot(pos.x - ref.x, pos.y - ref.y);
         const progress = (dir * pos.x + HALF_W) / 105;    // 0=自陣奥 → 1=敵陣奥
-        const w = Math.exp(-d / 13)
-          * (chainRoleW[slot.role] ?? 1)
-          * (0.55 + 0.9 * N.hash2(seed, idx * 97 + no))
-          * (1 + 0.55 * align * progress);
+        const w = restart
+          ? Math.exp(-d / kernel)
+          : Math.exp(-d / kernel)
+            * (chainRoleW[slot.role] ?? 1)
+            * (0.55 + 0.9 * N.hash2(seed, idx * 97 + no))
+            * (1 + 0.55 * align * progress);
         if (w > bestW) { bestW = w; best = { team, no, slot, pos }; }
       }
       if (!best) { t += 4; idx++; continue; }
-      // フライト（前保持者 → 新保持者）
+      // フライト（前保持者 → 新保持者 / リスタートは地点まで）
       let fDur = 0;
       if (prev) {
-        const d = Math.hypot(best.pos.x - prev.pos.x, best.pos.y - prev.pos.y);
-        fDur = clamp(d / 16, 0.45, 1.3);
+        const target = restart ? restart : best.pos;
+        const d = Math.hypot(target.x - prev.pos.x, target.y - prev.pos.y);
+        fDur = restart ? clamp(d / 18, 0.5, 1.4) : clamp(d / 16, 0.45, 1.3);
       }
       let hold = 2.4 + 4.2 * N.hash2(seed, idx * 53 + 7);
-      // カット時刻を跨がない
+      // リスタートは「静止 → 投げる/蹴る」で区間終了 — 次のフライトがスロー/クロスになる
+      // （旧実装はテイカーが通常ホールドを続け、自分にパスしたように見えた）
+      if (restart) hold = restart.delay + 0.5 + 0.7 * N.hash2(seed, idx * 59 + 13);
+      // 台本指定選手（独走等）は窓終端まで1本のホールド — 区間切替でu(保持確度)が
+      // 波打つとボール吸着が緩んでドリブルが途切れて見える
+      else if (forced && forced.no != null) hold = Math.max(hold, forced.t1 - (t + fDur) - 0.2);
+      // カット時刻を跨がない（フライト中に交代/フェーズ境界が落ちる場合も打ち切る —
+      // 跨ぐと交代でピッチを離れた選手が保持者として残る）
       let end = t + fDur + hold;
-      for (const c of cuts) if (c > t + fDur + 0.3 && c < end) { end = c; break; }
+      for (const c of cuts) if (c > t + 0.3 && c < end) { end = c; break; }
       hold = Math.max(0.3, end - t - fDur);
       segs.push({
         t0: t, tf: t + fDur, t1: end,
         team: best.team, no: best.no, slot: best.slot,
         from: prev ? { team: prev.team, no: prev.no, slot: prev.slot } : null,
+        restart: restart ? restart.type : null,
+        // リスタート中のボール・ピン留め用（地点と静止時間）
+        rx: restart ? restart.x : 0, ry: restart ? restart.y : 0,
+        rdelay: restart ? Math.max(0.3, Math.min(hold - 0.4, restart.delay)) : 0,
       });
+      // 次セグメントの拘束: スロー/GKは同チームの別選手へ、コーナーはゴール前へクロス
+      forceTeam = null; forceRef = null;
+      if (restart) {
+        if (restart.type === "throwin" || restart.type === "goalkick") forceTeam = best.team;
+        if (restart.type === "corner") {
+          forceRef = { x: Math.sign(restart.x) * 44, y: restart.y >= 0 ? 3 : -3 };
+        }
+      }
+      // ---- 再現アンカー（σは引き距離に比例 — ガウス窓速度 0.61·d/σ ≤ 3.2m/s を構成的に保証） ----
+      if (restart) {
+        const rx = clamp(restart.x, -52.1, 52.1), ry = clamp(restart.y, -33.6, 33.6);
+        const dPull = Math.hypot(rx - best.pos.x, ry - best.pos.y);
+        anchors.push({
+          t: t + fDur + Math.min(hold, restart.delay) * 0.4,
+          team: best.team, no: best.no, x: rx, y: ry,
+          sigma: Math.max(3.5, dPull * 0.19),
+        });
+        // コーナーの密集: 攻撃4人がボックスへ・守備5人がマーク（クロスの競り合いの絵）
+        if (restart.type === "corner") {
+          const gx = Math.sign(restart.x) * HALF_W;
+          const tCross = t + fDur + Math.min(hold, restart.delay) * 0.85;
+          const crowd = (teamK, roles, nMax, atk) => {
+            const ros = E.rosterAt(match, scenario, teamK, t);
+            const shp = F.SHAPES[ros.shape];
+            let placed = 0;
+            for (const role of roles) {
+              for (const sl of shp) {
+                if (placed >= nMax) return;
+                if (sl.role !== role) continue;
+                const pno = ros.assign[sl.id];
+                if (pno == null || (teamK === best.team && pno === best.no)) continue;
+                const pos = basePosOf(match, scenario, teamK, pno, sl, t);
+                const jx = N.hash2(seed, idx * 131 + pno) - 0.5;
+                const jy = N.hash2(seed, idx * 137 + pno) - 0.5;
+                const ax = gx - Math.sign(gx) * (atk ? 6.5 + Math.abs(jx) * 7 : 4.5 + Math.abs(jx) * 6);
+                const ay = clamp(jy * (atk ? 17 : 15), -14, 14);
+                const dp = Math.hypot(ax - pos.x, ay - pos.y);
+                anchors.push({ t: tCross, team: teamK, no: pno, x: ax, y: ay, sigma: Math.max(3.5, dp * 0.19) });
+                placed++;
+              }
+            }
+          };
+          crowd(best.team, ["ST", "AM", "CB", "W", "CM"], 4, true);
+          crowd(best.team === plus ? minus : plus, ["CB", "FB", "DM", "WB", "CM"], 5, false);
+        }
+      } else if (isTurnover && !inCalm(t)) {
+        // タックル/インターセプト: 奪取者が接触点へ収束（引き距離は9m以内に制限）
+        let cx = prev.pos.x, cy = prev.pos.y;
+        const d = Math.hypot(cx - best.pos.x, cy - best.pos.y);
+        if (d > 9) { const u9 = 9 / d; cx = best.pos.x + (cx - best.pos.x) * u9; cy = best.pos.y + (cy - best.pos.y) * u9; }
+        anchors.push({ t, team: best.team, no: best.no, x: cx, y: cy, sigma: 2.4 });
+      }
       prev = best;
       // 次セグメントの参照位置を保持者のホールド終了時位置へ更新
-      prev.pos = basePosOf(match, scenario, best.team, best.no, best.slot, Math.min(end, range.t1 - 0.5));
+      prev.pos = restart
+        ? { x: clamp(restart.x, -52.1, 52.1), y: clamp(restart.y, -33.6, 33.6) }
+        : basePosOf(match, scenario, best.team, best.no, best.slot, Math.min(end, range.t1 - 0.5));
       t = end;
       idx++;
     }
@@ -1436,9 +1996,10 @@ window.addEventListener("error", (e) => {
       if (s.team === plus) accP += d; else accM += d;
       s.accPlus = accP; s.accMinus = accM;
     }
-    const chain = { segs, plus, minus };
+    const chain = { segs, plus, minus, anchors };
     chainCache.set(key, chain);
     return chain;
+    } finally { chainBuilding = false; }
   };
 
   const segAt = (chain, t) => {
@@ -1451,7 +2012,7 @@ window.addEventListener("error", (e) => {
     return (t >= s.t0 && t <= s.t1) ? s : null;
   };
 
-  // 保持者情報: {team, no, u(確度0..1), mode:"hold"|"flight", seg}
+  // 保持者情報: {team, no, u(確度0..1), mode:"hold"|"flight", seg, restart}
   E.carrierAt = (match, scenario, t) => {
     scenario = scenario || E.actualScenario(match);
     const chain = buildChain(match, scenario);
@@ -1459,12 +2020,49 @@ window.addEventListener("error", (e) => {
     if (!s) return null;
     if (t < s.tf) {
       const u = N.smooth(clamp((t - s.t0) / Math.max(0.001, s.tf - s.t0)));
-      return { team: s.team, no: s.no, u, mode: "flight", seg: s };
+      return { team: s.team, no: s.no, u, mode: "flight", seg: s, restart: s.restart || null };
     }
     // 両端フルランプ（プレッサー引力の連続性 = 速度上限の保証に必須）
     const uIn = N.smooth(clamp((t - s.tf) / 0.6));
     const uOut = N.smooth(clamp((s.t1 - t) / 0.6));
-    return { team: s.team, no: s.no, u: uIn * uOut, mode: "hold", seg: s };
+    return { team: s.team, no: s.no, u: uIn * uOut, mode: "hold", seg: s, restart: s.restart || null };
+  };
+
+  // チェーン品質統計（テスト・検証用）: 連続保持・ターンオーバー・リスタート数
+  E.chainStats = (match, scenario) => {
+    scenario = scenario || E.actualScenario(match);
+    const chain = buildChain(match, scenario);
+    const out = {
+      segments: chain.segs.length, turnovers: 0, selfConsecutive: 0, passes: 0,
+      restarts: { throwin: 0, corner: 0, goalkick: 0 },
+      runs: {},
+    };
+    for (const k of E.teamKeys(match)) out.runs[k] = [];
+    let run = null;
+    for (let i = 0; i < chain.segs.length; i++) {
+      const s = chain.segs[i], p = chain.segs[i - 1];
+      if (s.restart) out.restarts[s.restart]++;
+      if (p) {
+        if (p.team !== s.team) { if (!s.restart) out.turnovers++; }
+        else if (p.no === s.no) out.selfConsecutive++;
+        else if (!s.restart) out.passes++;
+      }
+      if (!run || run.team !== s.team) {
+        if (run) out.runs[run.team].push(run.n);
+        run = { team: s.team, n: 0 };
+      }
+      run.n++;
+    }
+    if (run) out.runs[run.team].push(run.n);
+    for (const k of E.teamKeys(match)) {
+      const rs = out.runs[k];
+      out.runs[k] = {
+        count: rs.length,
+        avg: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0,
+        max: rs.length ? Math.max(...rs) : 0,
+      };
+    }
+    return out;
   };
 
   // 累積支配率（チェーン基準・実測波形と整合）
@@ -1485,6 +2083,64 @@ window.addEventListener("error", (e) => {
     return { [chain.plus]: aP / tot, [chain.minus]: aM / tot };
   };
 
+  // 現在の連続保持シーケンス（同一チームのチェーン連続区間 / Issue #14）
+  // 返値: { team, t0(シーケンス開始), passes(この流れの保持者数) } / チェーン外は null
+  E.sequenceAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const chain = buildChain(match, scenario);
+    const s = segAt(chain, t);
+    if (!s) return null;
+    const segs = chain.segs;
+    let lo = 0, hi = segs.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (segs[m].t0 <= t) lo = m; else hi = m; }
+    let i = segs[lo] === s ? lo : hi;
+    let i0 = i;
+    while (i0 > 0 && segs[i0 - 1].team === s.team) i0--;
+    return { team: s.team, t0: segs[i0].t0, passes: i - i0 + 1 };
+  };
+
+  // パスネットワーク（Issue #11）: 保持チェーンの同一チーム連続遷移を「パス」と数える。
+  // モデル生成チェーン由来の推定であり、実パス記録ではない（表示側で明示すること）。
+  const pnetCache = new Map();
+  E.passNetwork = (match, scenario, upTo) => {
+    scenario = scenario || E.actualScenario(match);
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${Math.round(upTo / 30)}`;
+    if (pnetCache.has(key)) return pnetCache.get(key);
+    const chain = buildChain(match, scenario);
+    const out = {};
+    for (const k of E.teamKeys(match)) out[k] = { edges: new Map(), degree: new Map(), total: 0 };
+    for (const s of chain.segs) {
+      if (s.t0 > upTo) break;
+      if (!s.from || s.from.team !== s.team) continue;
+      if (s.from.no === s.no) continue;         // 自己継続（ドリブル）はパスに数えない
+      if (s.restart) continue;                  // リスタートはパスに数えない
+      const T = out[s.team];
+      const ek = `${s.from.no}>${s.no}`;
+      T.edges.set(ek, (T.edges.get(ek) || 0) + 1);
+      T.degree.set(s.from.no, (T.degree.get(s.from.no) || 0) + 1);
+      T.degree.set(s.no, (T.degree.get(s.no) || 0) + 1);
+      T.total++;
+    }
+    // 表示用: 上位ペア（方向統合）と次数中心性（正規化）
+    for (const k of E.teamKeys(match)) {
+      const T = out[k];
+      const und = new Map();
+      for (const [ek, n] of T.edges) {
+        const [a, b] = ek.split(">").map(Number);
+        const uk = a < b ? `${a}-${b}` : `${b}-${a}`;
+        und.set(uk, (und.get(uk) || 0) + n);
+      }
+      T.pairs = [...und.entries()]
+        .map(([uk, n]) => { const [a, b] = uk.split("-").map(Number); return { a, b, n }; })
+        .sort((x, y) => y.n - x.n);
+      T.central = [...T.degree.entries()]
+        .map(([no, dg]) => ({ no, c: T.total ? dg / (2 * T.total) : 0 }))
+        .sort((x, y) => y.c - x.c);
+    }
+    pnetCache.set(key, out);
+    return out;
+  };
+
   // チェーンによる自由ボール位置（アンカー外区間で使用）
   const chainBall = (match, scenario, t) => {
     const chain = buildChain(match, scenario);
@@ -1501,34 +2157,47 @@ window.addEventListener("error", (e) => {
         y: p.y + 0.7 * N.vnoise1(seed + 31 + seg.no * 7, tt, 3.1),
       };
     };
+    // リスタート静止: ボールは再開地点（スローイン=ライン上/コーナー=アーク）に置かれ、
+    // 再開後は保持者の足元へ1.2秒でスムーズに戻る（テレポートさせない）
+    const pinned = s.restart && t <= s.tf + s.rdelay;
     if (t >= s.tf || !s.from) {
+      if (s.restart && t >= s.tf) {
+        const uOut = N.smooth(clamp((t - (s.tf + s.rdelay)) / 1.2));
+        if (uOut < 1) {
+          const p = holderPos(s, t);
+          return { x: lerp(s.rx, p.x, uOut), y: lerp(s.ry, p.y, uOut), z: 0.11 };
+        }
+      }
       const p = holderPos(s, t);
       return { x: p.x, y: p.y, z: 0.11 + 0.05 * Math.abs(N.vnoise1(9917, t, 1.7)) };
     }
-    // フライト: 送り手位置(t) → 受け手位置(t) の移動目標補間
+    // フライト: 送り手位置(t) → 受け手位置(t) の移動目標補間（リスタートは地点へ）
     const u = N.smooth(clamp((t - s.t0) / Math.max(0.001, s.tf - s.t0)));
     const a = holderPos({ team: s.from.team, no: s.from.no, slot: s.from.slot }, t);
-    const b = holderPos(s, t);
+    const b = pinned ? { x: s.rx, y: s.ry } : holderPos(s, t);
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
     const zArc = dist > 17 ? Math.sin(Math.PI * u) * Math.min(2.4, dist * 0.07) : Math.sin(Math.PI * u) * 0.25;
     return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: 0.11 + zArc };
   };
 
   // 後方互換: E.ballAt(match, t) / E.ballAt(match, scenario, t)
+  // 返値の free ∈ [0,1]: 1=チェーン駆動（保持者の足元）/ 0=アンカー駆動（得点再現等）。
+  // stateAt はこれを使い、ホールド中のボールを描画済み保持者位置へ吸着させる。
   E.ballAt = (match, a, b) => {
     let scenario, t;
     if (typeof a === "number") { t = a; scenario = b || E.actualScenario(match); }
     else { scenario = a || E.actualScenario(match); t = b; }
     const track = buildBallTrack(match, scenario);
     const n = track.length;
-    let pos, segLen = 0, segSpeed = 0, zChain = null;
-    if (n === 0) return chainBall(match, scenario, t);
+    let pos, segLen = 0, segSpeed = 0, zChain = null, free = 0;
+    if (n === 0) { const f = chainBall(match, scenario, t); return { ...f, free: 1 }; }
     if (t <= track[0].t) pos = { x: track[0].x, y: track[0].y };
     else if (t >= track[n - 1].t) {
       const f = chainBall(match, scenario, t), a2 = track[n - 1];
       const u = N.smooth(clamp((t - a2.t) / 12));
       pos = { x: lerp(a2.x, f.x, u), y: lerp(a2.y, f.y, u) };
       zChain = f.z;
+      free = u;
     } else {
       let lo = 0, hi = n - 1;
       while (hi - lo > 1) { const m = (lo + hi) >> 1; if (track[m].t <= t) lo = m; else hi = m; }
@@ -1546,10 +2215,12 @@ window.addEventListener("error", (e) => {
         if (t < a2.t + W) {
           const u = N.smooth((t - a2.t) / W);
           pos = { x: lerp(a2.x, f.x, u), y: lerp(a2.y, f.y, u) };
+          free = u;
         } else if (t > b2.t - W) {
           const u = N.smooth((b2.t - t) / W);
           pos = { x: lerp(b2.x, f.x, u), y: lerp(b2.y, f.y, u) };
-        } else pos = f;
+          free = u;
+        } else { pos = f; free = 1; }
         zChain = f.z;
         segSpeed = 0; segLen = 0;
       }
@@ -1567,7 +2238,7 @@ window.addEventListener("error", (e) => {
     } else {
       z = 0.11 + 0.05 * Math.abs(N.vnoise1(9917, t, 1.7));
     }
-    return { ...pos, z };
+    return { ...pos, z, free };
   };
 
   /* --------------------- 再開（キックオフ）と祝祭の窓 --------------------- */
@@ -1607,7 +2278,7 @@ window.addEventListener("error", (e) => {
     let my = g >= 0 ? lerp(slot.y, slot.att.y, g) : lerp(slot.y, slot.def.y, -g);
     if (tw) { mx = clamp(mx + tw.dx, 0.02, 0.98); my = clamp(my + tw.dy, -1, 1); }
     const x = dir > 0 ? mx * 105 - HALF_W : HALF_W - mx * 105;
-    const y = dir * my * HALF_H * 0.92;
+    const y = dir * my * HALF_H * 0.97;   // タッチライン際まで使う（WB/Wで|y|≈29+ノイズ）
     return { x, y };
   };
 
@@ -1622,8 +2293,7 @@ window.addEventListener("error", (e) => {
 
   /* 基礎位置（純関数・ボール実位置に非依存 — チェーン生成の土台） */
   const basePlayerPos = (match, scenario, team, no, slot, t, bctx) => {
-    const { half, dir, P, ballS } = bctx;
-    const T = match.teams[team];
+    const { half, dir, P, ballS } = bctx;   // half はFK/セットピース処理で使用
     const role = slot.role;
     const g0 = E.attackSign(match, team) * P;                 // 自チーム攻勢度
     const g = clamp(g0 + 0.12 * N.vnoise1(N.seedOf(team + "g"), t, 53), -1, 1);
@@ -1636,6 +2306,20 @@ window.addEventListener("error", (e) => {
     const cw = F.chaseWeight[role] ?? 0.3;
     x += (ballS.x - x * 0.2) * cw * 0.55;
     y += (ballS.y - y * 0.25) * cw * 0.75;
+
+    // 2.5) 集団サージ（カウンター/ビルドアップの「勢い」）:
+    // ポゼッション基調波の微分 dP/dt で、攻勢転換時は全体が押し上がり、
+    // 喪失時は全体が一斉に撤退する。ノイズを除いたスプライン差分＝純関数・低速率。
+    {
+      const dPs = (N.spline(match.possessionKP, t + 2)[0] - N.spline(match.possessionKP, t - 2)[0]) / 4;
+      const myTrend = E.attackSign(match, team) * dPs;   // >0: 自チームへ流れが来ている
+      if (Math.abs(myTrend) > 0.004) {
+        const S_ATK = { GK: 0.05, CB: 0.35, FB: 0.6, WB: 0.75, DM: 0.7, CM: 0.85, AM: 1.0, W: 1.0, ST: 1.0 };
+        const S_DEF = { GK: 0.05, CB: 0.9, FB: 1.0, WB: 1.0, DM: 1.0, CM: 0.95, AM: 0.8, W: 0.8, ST: 0.55 };
+        const scale = myTrend > 0 ? (S_ATK[role] ?? 0.7) : (S_DEF[role] ?? 0.8);
+        x += dir * clamp(180 * myTrend, -7, 7) * scale;
+      }
+    }
 
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
     const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * E.fatigueOf(match, scenario, team, no, t));
@@ -1659,9 +2343,12 @@ window.addEventListener("error", (e) => {
     }
 
     // 5) イベント・アンカー（得点再現など — ガウス窓・シナリオ実効）
+    // sigmaL/sigmaR で非対称窓: 到達を鋭く・解放を緩やかに（またはその逆）できる。
+    // 対称ガウスだと「シュート後の受け」が時間を遡って走路を先食いしてしまう。
     for (const a of playerAnchorsOf(match, scenario)) {
       if (a.team !== team || a.no !== no) continue;
-      const w = N.gauss(t, a.t, a.sigma || 6);
+      const sg = t < a.t ? (a.sigmaL ?? a.sigma ?? 6) : (a.sigmaR ?? a.sigma ?? 6);
+      const w = N.gauss(t, a.t, sg);
       if (w > 0.004) { x = lerp(x, a.x, w); y = lerp(y, a.y, w); }
     }
 
@@ -1678,6 +2365,34 @@ window.addEventListener("error", (e) => {
         x = lerp(x, bx, w * 0.9); y = lerp(y, seedy * 12, w * 0.9);
       } else if (!atk && role !== "GK" && role !== "ST") {
         x = lerp(x, bx, w * 0.85); y = lerp(y, seedy * 14, w * 0.85);
+      }
+    }
+
+    // 6.5) 直接FK（警告イベント）: 攻撃ゴール38m以内なら守備側が壁・攻撃側がボール周辺へ
+    for (const ev of E.eventsOf(match, scenario)) {
+      if (ev.type !== "yellow" || !ev.team) continue;
+      const dtEv = t - ev.t;
+      if (dtEv < 1 || dtEv > 20) continue;
+      const spot = trackPosNear(match, scenario, ev.t + 2);
+      if (!spot) continue;
+      const atkTeam = E.oppOf(match, ev.team);            // 被ファウル側が蹴る
+      const dirA = match.dir[atkTeam][half === 1 ? "h1" : "h2"];
+      const gxF = dirA * HALF_W;
+      const dGoal = Math.hypot(gxF - spot.x, spot.y);
+      if (dGoal > 38 || dGoal < 6) continue;
+      const wWin = N.smooth(clamp((dtEv - 1) / 9)) * (1 - N.smooth(clamp((dtEv - 14) / 6)));
+      if (wWin < 0.02) continue;
+      const ux = (gxF - spot.x) / dGoal, uy = (0 - spot.y) / dGoal;
+      if (team === ev.team && (role === "CB" || role === "DM" || role === "CM")) {
+        // 壁: スポットから9.15m、シュートコース上に横並び
+        const lane = ((N.hash2(N.seedOf(team + no), ev.t | 0) * 4) | 0) - 1.5;
+        const wx = spot.x + ux * 9.15 - uy * lane * 0.75;
+        const wy = spot.y + uy * 9.15 + ux * lane * 0.75;
+        x = lerp(x, wx, wWin * 0.9); y = lerp(y, wy, wWin * 0.9);
+      } else if (team === atkTeam && (role === "ST" || role === "AM")) {
+        const s2 = N.hash2(N.seedOf(team + no), (ev.t | 0) + 7) * 2 - 1;
+        x = lerp(x, spot.x - ux * 2.2 + s2, wWin * 0.6);
+        y = lerp(y, spot.y - uy * 2.2 + s2 * 2, wWin * 0.6);
       }
     }
 
@@ -1703,14 +2418,19 @@ window.addEventListener("error", (e) => {
       }
     }
 
-    // 8) 再開（キックオフ）整列 — 全員自陣（競技規則）
+    // 8) 再開（キックオフ）整列 — 全員自陣（競技規則）。
+    // 台形窓: rt−10 から集合を始め、rt+2.5 まで**保持**してから解放 —
+    // 「帰陣が終わる前に試合が始まる」のを構成的に防ぐ（ボール側も hold 6s）。
     for (const rt of restartWindows(match, scenario)) {
-      const w = N.gauss(t, rt + 1, 6.5);
+      if (t < rt - 13 || t > rt + 12) continue;
+      const inU = N.smooth(clamp((t - (rt - 12)) / 9));
+      const outU = 1 - N.smooth(clamp((t - (rt + 2.5)) / 8));
+      const w = Math.min(inU, outU);
       if (w > 0.01) {
         const base = slotWorld(slot, -0.05, dir, tw);
         if (dir > 0) base.x = Math.min(base.x, -0.8);
         else base.x = Math.max(base.x, 0.8);
-        x = lerp(x, base.x, w * 0.92); y = lerp(y, base.y, w * 0.92);
+        x = lerp(x, base.x, w * 0.94); y = lerp(y, base.y, w * 0.94);
       }
     }
 
@@ -1733,19 +2453,26 @@ window.addEventListener("error", (e) => {
       y = lerp(y, ty, 0.5);
     }
 
-    // プレッシング: 相手保持者への寄せ（最近接ほど強く・連続ゲート）
+    // プレッシング: 相手保持者への寄せ（階層化 — 最近接は強く速く、2番手はカバー）
+    // 立ち上がりを1.4sに緩めた uPress で強い重みでも速度上限を構成的に維持する。
     const c = ctx.carrier;
     if (c && c.mode === "hold" && c.team !== team && slot.role !== "GK" && ctx.carrierPos) {
       const cp = ctx.carrierPos;
       const d = Math.hypot(cp.x - x, cp.y - y);
-      const gate = Math.exp(-(d * d) / (2 * 10 * 10));       // σ=10m
-      const w = 0.22 * gate * c.u;
+      const rank = ctx.pressRank ? ctx.pressRank.get(no) : undefined;
+      let wBase = 0.22, sig = 10;
+      if (rank === 0) { wBase = 0.52; sig = 7.5; }        // ファーストプレッサー: 密着
+      else if (rank === 1) { wBase = 0.32; sig = 9; }     // セカンド: カバーシャドウ
+      const gate = Math.exp(-(d * d) / (2 * sig * sig));
+      const uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
+      const w = wBase * gate * uPress;
       if (w > 0.003) {
-        // 寄せ位置: 保持者の自ゴール側 1.4m
+        // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m）
+        const near = rank === 0 ? 0.9 : 1.6;
         const gx = -ctx.dir * HALF_W;
         const gl = Math.hypot(gx - cp.x, 0 - cp.y) || 1;
-        const px = cp.x + ((gx - cp.x) / gl) * 1.4;
-        const py = cp.y + ((0 - cp.y) / gl) * 1.4;
+        const px = cp.x + ((gx - cp.x) / gl) * near;
+        const py = cp.y + ((0 - cp.y) / gl) * near;
         x = lerp(x, px, w);
         y = lerp(y, py, w);
       }
@@ -1756,11 +2483,43 @@ window.addEventListener("error", (e) => {
     return { x, y };
   };
 
+  /* ---------------- プレスランク（保持者への近さ順・純関数+memo） ---------------- */
+  // 最近接=ファーストプレッサー/2番手=カバー。stateAt と stateFrozenPos の両方で
+  // 同一値を使うこと（f(t) の一意性 — 速度・軌跡・走行距離の整合に必須）。
+  const rankCache = new Map();
+  const pressRankAt = (match, scenario, t, carrier, carrierPos) => {
+    if (!carrier || carrier.mode !== "hold" || !carrierPos) return null;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + t;
+    const hit = rankCache.get(key);
+    if (hit !== undefined) return hit;
+    const oppTeam = E.teamKeys(match).find(k => k !== carrier.team);
+    const roster = E.rosterAt(match, scenario, oppTeam, t);
+    const shape = F.SHAPES[roster.shape];
+    const ds = [];
+    for (const slot of shape) {
+      if (slot.role === "GK") continue;
+      const no = roster.assign[slot.id];
+      if (no == null) continue;
+      const p = basePosOf(match, scenario, oppTeam, no, slot, t);
+      ds.push({ no, d: Math.hypot(p.x - carrierPos.x, p.y - carrierPos.y) });
+    }
+    ds.sort((a, b) => a.d - b.d || a.no - b.no);
+    const m = new Map();
+    ds.forEach((e, i) => m.set(e.no, i));
+    if (rankCache.size > 8000) rankCache.clear();
+    rankCache.set(key, m);
+    return m;
+  };
+
   /* ------------------------------ 状態合成 ------------------------------ */
+  // 単一スロットmemo: 同一フレーム内の重複呼び出し（描画・PSY・ピック等）を1回に
+  let stateMemo = null;
   E.stateAt = (match, scenario, t) => {
     scenario = scenario || E.actualScenario(match);
     const range = E.playedRange(match);
     t = clamp(t, range.t0, range.t1);
+    const memoKey = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + t;
+    if (stateMemo && stateMemo.key === memoKey) return stateMemo.st;
     const half = E.halfOf(match, t);
     const P = E.possessionAt(match, t);
     const ball = E.ballAt(match, scenario, t);
@@ -1771,13 +2530,14 @@ window.addEventListener("error", (e) => {
     if (carrier && carrier.mode === "hold") {
       carrierPos = basePosOf(match, scenario, carrier.team, carrier.no, carrier.seg.slot, t);
     }
+    const pressRank = pressRankAt(match, scenario, t, carrier, carrierPos);
     const players = [];
 
     for (const team of E.teamKeys(match)) {
       const dir = match.dir[team][half === 1 ? "h1" : "h2"];
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
-      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos };
+      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, t };
       // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
@@ -1817,9 +2577,7 @@ window.addEventListener("error", (e) => {
           team, no, name: p.name, ja: p.ja, label: p.label, pos2: p.pos,
           role: slot.role, slot: slot.id, x: pos.x, y: pos.y,
           onPitch: true, entering, attrs: p.attrs, captain: false,
-          // アンカー再現中（ボールが保持者から離れている間）はフラグを立てない
-          hasBall: !!(carrier && carrier.mode === "hold" && carrier.team === team && carrier.no === no
-            && Math.hypot(pos.x - ball.x, pos.y - ball.y) < 3.5),
+          hasBall: false,   // ボール吸着の後段で確定（アンカー再現中は立たない）
         });
       }
       // 退場アニメ: 交代でOUTした選手（30秒だけベンチへ歩く）
@@ -1845,13 +2603,49 @@ window.addEventListener("error", (e) => {
       }
     }
 
-    return {
+    // ボール吸着: ホールド中はボールを「描画済みの保持者」の足元へ。
+    // チェーンはベース位置基準のため、フェーズ切替ブレンド(45s)や入場アニメ中に
+    // 描画位置とズレる — ×1実時間再生で見える保持の不正確さをここで解消する。
+    // free（チェーン駆動度）と保持確度 u で重み付け — アンカー再現（得点等）は不変。
+    const restPin = carrier && carrier.seg && carrier.seg.restart && t <= carrier.seg.tf + carrier.seg.rdelay + 1.2;
+    if (carrier && carrier.mode === "hold" && !restPin) {
+      const cp = players.find(q => q.onPitch && q.team === carrier.team && q.no === carrier.no);
+      if (cp) {
+        // 吸着重み: チェーン駆動度 free に加え、アンカー再現中でも保持者が4m以内なら
+        // 足元へ引き寄せる（独走ドリブルやFKでボールと選手が離れて見えるのを防ぐ）。
+        // シュート等でアンカーが選手から離れ出すと near が消えて自然にリリースされる。
+        const dNow = Math.hypot(cp.x - ball.x, cp.y - ball.y);
+        const near = N.smooth(clamp((5.2 - dNow) / 2.8));
+        const w = Math.max(ball.free, near * 0.9) * N.smooth(clamp(carrier.u * 1.6));
+        if (w > 0.02) {
+          const dseed = N.seedOf(match.meta.id + "dribble");
+          const ax = cp.x + 0.7 * N.vnoise1(dseed + carrier.no * 7, t, 2.9);
+          const ay = cp.y + 0.7 * N.vnoise1(dseed + 31 + carrier.no * 7, t, 3.1);
+          ball.x = lerp(ball.x, ax, w);
+          ball.y = lerp(ball.y, ay, w);
+        }
+      }
+    }
+    // 保持フラグ（吸着後のボール位置で判定）
+    if (carrier && carrier.mode === "hold") {
+      const cp = players.find(q => q.onPitch && q.team === carrier.team && q.no === carrier.no);
+      if (cp && Math.hypot(cp.x - ball.x, cp.y - ball.y) < 3.5) cp.hasBall = true;
+    }
+
+    const st = {
       t, half, clock: E.clockAt(match, t),
       score: E.scoreAt(match, t, scenario),
       possession: P, ball, players,
-      carrier: carrier ? { team: carrier.team, no: carrier.no, mode: carrier.mode, u: carrier.u } : null,
+      carrier: carrier ? {
+        team: carrier.team, no: carrier.no, mode: carrier.mode, u: carrier.u,
+        restart: carrier.restart || null,
+        tf: carrier.seg.tf, rdelay: carrier.seg.rdelay || 0,
+        from: carrier.seg.from ? { team: carrier.seg.from.team, no: carrier.seg.from.no } : null,
+      } : null,
       scenarioId: scenario.id || "actual",
     };
+    stateMemo = { key: memoKey, st };
+    return st;
   };
 
   // 特定選手の位置を直接評価（退場アニメ始点・軌跡・距離積分）
@@ -1873,6 +2667,7 @@ window.addEventListener("error", (e) => {
       half, dir, P: E.possessionAt(match, tt),
       ballS: E.ballSlowAt(match, tt), ball: E.ballAt(match, scenario, tt),
       carrier, carrierPos,
+      pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos), t: tt,
     };
     return playerPos(match, scenario, team, no, slot, tt, ctx);
   };
@@ -1903,9 +2698,22 @@ window.addEventListener("error", (e) => {
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= upto) lo = m; else hi = m; }
     return arr.ds[lo];
   };
+  // 瞬時速度[km/h]: 位置が純関数なので中央差分で厳密（速度上限9.9m/s≈35.6km/hを継承）
+  E.speedKmh = (match, scenario, team, no, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const pr = E.presenceOf(match, scenario, team, no);
+    if (!pr || t < pr.from + 0.6 || t > pr.to) return 0;
+    const dt = 0.5;
+    const a = E.stateFrozenPos(match, scenario, team, no, t - dt);
+    const b = E.stateFrozenPos(match, scenario, team, no, t);
+    return (Math.hypot(b.x - a.x, b.y - a.y) / dt) * 3.6;
+  };
+
   E.clearCaches = () => {
     distCache.clear(); chainCache.clear(); trackCache.clear();
-    restartCache.clear(); celeCache.clear(); panchorCache.clear();
+    restartCache.clear(); celeCache.clear(); panchorCache.clear(); pnetCache.clear();
+    rankCache.clear();
+    stateMemo = null;
   };
 })();
 
@@ -1960,7 +2768,12 @@ window.addEventListener("error", (e) => {
     return clamp(decay * (0.35 + 0.65 * open));
   };
 
-  const influence = (p) => 5.5 + (p.attrs ? p.attrs.pac / 100 : 0.75) * 3;
+  // 空間支配核の半径: 既定は速度属性（モデル推定レーティング）依存 σ = 5.5 + pac/100×3。
+  // Issue #13: 推定属性への依存を分離できるよう「幾何のみモード」（全員一律 σ=7.0）を提供。
+  let GEOM_ONLY = false;
+  D.setGeomOnly = (v) => { GEOM_ONLY = !!v; D.clearCaches(); };
+  D.isGeomOnly = () => GEOM_ONLY;
+  const influence = (p) => GEOM_ONLY ? 7.0 : 5.5 + (p.attrs ? p.attrs.pac / 100 : 0.75) * 3;
 
   // セル支配率: 攻撃側スコア / (攻+守)
   const ctrlAt = (cx, cy, atk, def) => {
@@ -2139,7 +2952,7 @@ window.addEventListener("error", (e) => {
     return out;
   };
   const latticeAt = (match, scenario, gt, opts) => {
-    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${opts.includeGK ? 1 : 0}`;
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${opts.includeGK ? 1 : 0}|g${GEOM_ONLY ? 1 : 0}`;
     let m = pressLattice.get(key);
     if (!m) { m = new Map(); pressLattice.set(key, m); }
     if (m.has(gt)) return m.get(gt);
@@ -2308,7 +3121,7 @@ window.addEventListener("error", (e) => {
   /* ---- タイムライン曲線（チャンク計算・キャッシュ） ---- */
   const curveCache = new Map();
   const curveKey = (match, scenario, step, opts) =>
-    `${match.meta.id}|${E.scenarioKey(scenario)}|${step}|${opts.includeGK ? 1 : 0}`;
+    `${match.meta.id}|${E.scenarioKey(scenario)}|${step}|${opts.includeGK ? 1 : 0}|g${GEOM_ONLY ? 1 : 0}`;
   D.curve = (match, scenario, opts = {}) => {
     scenario = scenario || E.actualScenario(match);
     const step = opts.step || 6;
@@ -2351,6 +3164,24 @@ window.addEventListener("error", (e) => {
     chunk();
   };
   D.curveKeyOf = curveKey;
+
+  /* ---- 保持シーケンス単位の危険度蓄積（Issue #14） ----
+     現在の連続保持（チェーンの同一チーム連続区間）における危険度の積分。
+     TPA（32秒の減衰記憶）より長い「この攻撃の流れでどれだけ圧を築いたか」を表す。 */
+  D.seqAccumAt = (match, scenario, t, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const seq = E.sequenceAt(match, scenario, t);
+    if (!seq) return null;
+    const pts = D.curve(match, scenario, { step: opts.step || 8, includeGK: !!opts.includeGK });
+    if (!pts.length) return { ...seq, accum: 0 };
+    const step = opts.step || 8;
+    let acc = 0;
+    const i0 = Math.max(0, Math.round((seq.t0 - pts[0].t) / step));
+    const i1 = Math.min(pts.length - 1, Math.round((t - pts[0].t) / step));
+    for (let i = i0; i <= i1; i++) acc += pts[i].v[seq.team] * step;
+    return { ...seq, accum: acc / 60 };   // pt·分（表示しやすい規模）
+  };
+
   D.clearCaches = () => { curveCache.clear(); pressLattice.clear(); };
 })();
 
@@ -2874,7 +3705,7 @@ window.addEventListener("error", (e) => {
           { t: t - 9, x: d * 20, y: gy * 4 },
           { t: t - 1.2, x: d * 40, y: gy * 2.2 },
           { t: t, x: d * 52.2, y: gy, hold: 4 },
-          { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 2 },
+          { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 6 },
         );
         playerAnchors.push(
           { t: t - 8, team, no: scorer.no, x: d * 24, y: gy * 3, sigma: 7 },
@@ -2914,6 +3745,658 @@ window.addEventListener("error", (e) => {
     const oc = SIM.outcome(match, scenario, opts);
     scenario.outcome = oc;
     return oc;
+  };
+})();
+
+
+/* ===== src/psy.mjs ===== */
+/* =========================================================================
+   RPDX.psy — PSY レイヤー v1（精神疲労・覚醒水準・自律神経・集中力）
+   ---------------------------------------------------------------------------
+   ■ 位置づけ: 読み取り専用の「解釈支援」レイヤー。エンジン/危険度の公開出力
+     のみを入力とし、位置・イベント・結果へは一切フィードバックしない
+     （stateAt の出力は不変）。非予測・ヒューリスティック（Issue #3/#4/#15）。
+   ■ 決定論: 全指標は t の純関数。イベント×指数減衰の閉形式と、TPAと同じ
+     決定論格子（8秒グリッド+線形補間）のみで構成 — スクラブ完全一致。
+   ■ アルゴリズム出典（形状のみ借用・効果量はヒューリスティック）:
+     - 心理モメンタム: テニスの忘却係数付きイベント連鎖 M_i = f·M_{i-1} + ΔM
+       （PMC11687916）→ 連続時間閉形式 M(t) = Σ w(ev)·exp(−Δt/τ)
+     - 覚醒-遂行: Yerkes-Dodson 逆U字（過小/過大覚醒で集中力が落ちる）
+     - 自律神経/HRV: 交感優位で HRV 低下・精神疲労は生理的覚醒の反応性を
+       下げる（biorxiv 2020.08.24.264812 / PMC9855644）
+     - 精神疲労: time-on-task の累積 + 認知負荷（被危険度曝露）(PMC8504464)
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const PSY = (R.psy = {});
+  const N = R.noise, E = R.engine, D = R.danger;
+  const clamp = N.clamp;
+
+  /* ---------------- パラメータ（一元管理・出典コメント付き） ---------------- */
+  PSY.PARAMS = {
+    // モメンタム: イベント重み（テニス・モメンタム連鎖の正負イベント表を移植。
+    // 得点者側+1.0/被弾側−0.85 の非対称はサーバー/レシーバー α=1.2/β=1.0 の類推）
+    M_EV: {
+      goal:   { own: +1.00, opp: -0.85 },
+      save:   { own: +0.40, opp: -0.30 },   // 決定機を止めた側+/止められた側−
+      shot:   { own: +0.25, opp: -0.05 },
+      corner: { own: +0.10, opp: 0.00 },
+      yellow: { own: -0.30, opp: +0.12 },
+    },
+    M_SUB: +0.10,          // 交代投入（フレッシュネス）
+    M_TAU: 300,            // モメンタム忘却時定数[s]（f=0.6+0.4e^-λΔt の連続化）
+    // 覚醒: イベントは valence でなく activation — 失点も警告も覚醒を上げる
+    AR_EV: {
+      goal:   { own: +18, opp: +22, scorer: +26 },
+      save:   { own: +10, opp: +8 },
+      shot:   { own: +8,  opp: +9 },
+      corner: { own: +5,  opp: +5 },
+      yellow: { own: +14, opp: +6, carded: +20 },
+    },
+    AR_SUB_SELF: +16,      // 自分の投入直後
+    AR_TAU: 240,           // 覚醒インパルス減衰[s]
+    AR_BASE: 48,
+    AR_KICKOFF: 10,        // キックオフ直後の初期活性
+    AR_CLUTCH: 14,         // 接戦×終盤の文脈活性（最大）
+    AR_DANGER: 0.14,       // 現在危険度→活性（×指数0..100）
+    AR_MF_DAMP: 0.40,      // 精神疲労による反応性低下（biorxiv: MF→低生理的覚醒）
+    AR_MF_DROP: 12,        // 精神疲労によるベースライン低下
+    // 精神疲労
+    MF_TIME: 0.34,         // time-on-task 基本勾配（90分→約0.35）
+    MF_TIME_STA: 0.12,     // 低スタミナの追加勾配
+    MF_HT_KEEP: 0.70,      // HT を跨いだ time-on-task の持ち越し率（部分回復）
+    MF_STRAIN_HT_KEEP: 0.55, // HT を跨いだ被危険度曝露の持ち越し率
+    MF_STRAIN_TAU: 1500,   // 被危険度曝露の減衰時定数[s]（約25分）
+    MF_STRAIN_RATE: 0.022, // 曝露の蓄積率（危険度45が続くと平衡≈0.25）
+    MF_PHYS: 0.22,         // 身体疲労→精神疲労のクロス項
+    MF_YELLOW: 0.07,       // 自分の警告ストレス（τ=900sで減衰）
+    MF_CONCEDE: 0.05,      // 在場中の失点（τ=1200sで減衰）
+    MF_TRAIL: 0.05,        // ビハインド時間の累積（30分で飽和）
+    // 集中力: Yerkes-Dodson 逆U字
+    CN_PEAK: 60,           // 至適覚醒
+    CN_SIGMA0: 22,         // 逆U字の幅（基準）
+    CN_SIGMA_TEC: 8,       // 技術が高いほど至適域が広い（tec=100で+8）
+    CN_MF: 0.45,           // 精神疲労による上限低下
+    CN_PHYS: 0.15,         // 身体疲労による上限低下
+    // 自律神経
+    SNS_BASE: 0.30, SNS_AR: 0.55, SNS_MF: 0.18,
+    HRV_MF: 0.40,
+    // 役割別の守備ストレス重み（被危険度曝露を最も受けるのは最終ライン）
+    ROLE_W: { GK: 0.85, CB: 1.0, FB: 0.95, WB: 0.95, DM: 0.95, CM: 0.88, AM: 0.80, W: 0.80, ST: 0.75, OUT: 0.8 },
+  };
+  const P = PSY.PARAMS;
+
+  const dispSign = (ev, team) => (ev.team === team ? "own" : "opp");
+
+  /* ============ チーム心理モメンタム M(t) ∈ [-1.2, +1.2]（閉形式） ============ */
+  PSY.momentumAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const out = {};
+    const keys = E.teamKeys(match);
+    for (const k of keys) out[k] = 0;
+    for (const ev of E.eventsOf(match, scenario)) {
+      if (ev.t > t) break;
+      const w = P.M_EV[ev.type];
+      if (!w || !ev.team) continue;
+      const decay = Math.exp(-(t - ev.t) / P.M_TAU);
+      for (const k of keys) out[k] += (w[dispSign(ev, k)] || 0) * decay;
+    }
+    for (const k of keys) {
+      for (const s of scenario.subs[k] || []) {
+        if (s.t <= t) out[k] += P.M_SUB * Math.exp(-(t - s.t) / P.M_TAU);
+      }
+      out[k] = clamp(out[k], -1.2, 1.2);
+    }
+    return out;
+  };
+
+  /* ============ 被危険度曝露 strain（決定論格子・TPAパターン） ============ */
+  // D.curve（正準: step=8, GK除外）から S_i = S_{i-1}·e^(−Δ/τ) + v_opp·rate を
+  // 前進蓄積した格子を築き、任意時刻は2点線形補間 — スクラブ完全一致。
+  const strainCache = new Map();
+  const strainGrid = (match, scenario) => {
+    const key = match.meta.id + "|" + E.scenarioKey(scenario);
+    if (strainCache.has(key)) return strainCache.get(key);
+    const pts = D.curve(match, scenario, { step: 8, includeGK: false });
+    const keys = E.teamKeys(match);
+    const h2 = match.time.h2.start;
+    const kDecay = Math.exp(-8 / P.MF_STRAIN_TAU);
+    const grid = { ts: [], v: {} };
+    for (const k of keys) grid.v[k] = [];
+    const S = {};
+    for (const k of keys) S[k] = 0;
+    let prevT = null;
+    for (const pt of pts) {
+      if (prevT != null && prevT < h2 && pt.t >= h2) {
+        for (const k of keys) S[k] *= P.MF_STRAIN_HT_KEEP;   // HT部分回復
+      }
+      for (const k of keys) {
+        const opp = keys.find(q => q !== k);
+        // 平衡値: 危険度45が続くと S∞ ≈ 0.25（τ=25分の一次系）
+        S[k] = S[k] * kDecay + (pt.v[opp] / 100) * (8 / 60) * P.MF_STRAIN_RATE;
+        grid.v[k].push(S[k]);
+      }
+      grid.ts.push(pt.t);
+      prevT = pt.t;
+    }
+    strainCache.set(key, grid);
+    return grid;
+  };
+  const strainAt = (match, scenario, team, t) => {
+    const g = strainGrid(match, scenario);
+    const ts = g.ts, vs = g.v[team];
+    if (!ts.length) return 0;
+    if (t <= ts[0]) return 0;
+    if (t >= ts[ts.length - 1]) return vs[vs.length - 1];
+    let lo = 0, hi = ts.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= t) lo = m; else hi = m; }
+    const u = (t - ts[lo]) / (ts[hi] - ts[lo] || 1);
+    return vs[lo] + (vs[hi] - vs[lo]) * u;
+  };
+  // 危険度の現在値（活性項用・正準曲線の補間）
+  const dangerNow = (match, scenario, t) => {
+    const pts = D.curve(match, scenario, { step: 8, includeGK: false });
+    if (!pts.length) return {};
+    const i = clamp(Math.round((t - pts[0].t) / 8), 0, pts.length - 1);
+    return pts[i].v;
+  };
+
+  /* ---------------- ビハインド累積時間（分・イベント走査） ---------------- */
+  const trailingMins = (match, scenario, team, from, t) => {
+    const goals = E.eventsOf(match, scenario).filter(e => e.type === "goal" && e.t <= t);
+    let diff = 0, acc = 0, seg0 = from;
+    const keys = E.teamKeys(match);
+    const opp = keys.find(k => k !== team);
+    for (const g of goals) {
+      const gt = Math.max(from, Math.min(g.t, t));
+      if (diff < 0) acc += Math.max(0, gt - seg0);
+      seg0 = gt;
+      diff += g.team === team ? 1 : g.team === opp ? -1 : 0;
+    }
+    if (diff < 0) acc += Math.max(0, t - seg0);
+    return acc / 60;
+  };
+
+  /* ============ 選手別 PSY 状態（すべて t の純関数） ============ */
+  // 返値: { on, mf, ar, cn, sns, pns, ans, hrv, load } — mf/ar/cn/hrv は 0..100
+  PSY.playerAt = (match, scenario, team, no, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const pr = E.presenceOf(match, scenario, team, no);
+    if (!pr) return null;
+    const on = t >= pr.from && t <= pr.to;
+    const te = clamp(t, pr.from, pr.to);          // 場外では入退場時点で凍結
+    const p = match.teams[team].squad.find(q => q.no === no);
+    if (!p) return null;
+    const h2 = match.time.h2.start;
+
+    /* --- 精神疲労 MF (0..1) --- */
+    // time-on-task（HT持ち越し 0.7 = 部分回復）
+    let minsH1 = 0, minsH2 = 0;
+    if (pr.from < h2) { minsH1 = (Math.min(te, h2) - pr.from) / 60; }
+    if (te > h2) { minsH2 = (te - Math.max(pr.from, h2)) / 60; }
+    const timeTask = (te >= h2 ? minsH1 * P.MF_HT_KEEP : minsH1) + minsH2;
+    const sta = p.attrs ? p.attrs.sta : 75;
+    let mf = (timeTask / 95) * (P.MF_TIME + P.MF_TIME_STA * (1 - sta / 100) * 2);
+    // 被危険度曝露 × 役割重み（在場中のみ蓄積された格子を参照）
+    const roleW = P.ROLE_W[p.pos === "GK" ? "GK" : p.pos === "DF" ? "CB" : p.pos === "MF" ? "CM" : "ST"] || 0.9;
+    mf += strainAt(match, scenario, team, te) * roleW * clamp((te - pr.from) / 900);
+    // 身体疲労クロス項
+    const load = E.fatigueOf(match, scenario, team, no, te);
+    mf += P.MF_PHYS * load;
+    // 警告ストレス・在場中の失点・ビハインド文脈
+    const evs = E.eventsOf(match, scenario);
+    for (const ev of evs) {
+      if (ev.t > te) break;
+      if (ev.type === "yellow" && ev.team === team && ev.no === no)
+        mf += P.MF_YELLOW * Math.exp(-(te - ev.t) / 900);
+      if (ev.type === "goal" && ev.team !== team && ev.t >= pr.from)
+        mf += P.MF_CONCEDE * Math.exp(-(te - ev.t) / 1200);
+    }
+    mf += P.MF_TRAIL * N.smooth(clamp(trailingMins(match, scenario, team, pr.from, te) / 30));
+    mf = clamp(mf);
+
+    /* --- 覚醒水準 AR (0..100) --- */
+    let imp = 0;
+    for (const ev of evs) {
+      if (ev.t > te) break;
+      const w = P.AR_EV[ev.type];
+      if (!w || !ev.team) continue;
+      const decay = Math.exp(-(te - ev.t) / P.AR_TAU);
+      let a = w[dispSign(ev, team)] || 0;
+      if (ev.type === "goal" && ev.team === team && ev.no === no) a = w.scorer;
+      if (ev.type === "yellow" && ev.team === team && ev.no === no) a = w.carded;
+      imp += a * decay;
+    }
+    for (const s of scenario.subs[team] || []) {
+      if (s.in === no && s.t <= te) imp += P.AR_SUB_SELF * Math.exp(-(te - s.t) / 300);
+    }
+    // キックオフ活性（両ハーフ）
+    imp += P.AR_KICKOFF * Math.exp(-(te - E.playedRange(match).t0) / 180);
+    if (te >= h2) imp += P.AR_KICKOFF * 0.6 * Math.exp(-(te - h2) / 180);
+    // 接戦×終盤 clutch + 現在危険度
+    const score = E.scoreAt(match, te, scenario);
+    const keys = E.teamKeys(match);
+    const opp = keys.find(k => k !== team);
+    const diff = Math.abs(score[team] - score[opp]);
+    const clock = E.clockAt(match, te).clock;
+    const late = clamp((clock - 4320) / 1080);            // 72'→90' で 0→1
+    let clutch = P.AR_CLUTCH * (1 - Math.min(diff, 2) / 2) * late;
+    if (clock > 5400) clutch *= 1.25;                     // 90+ の AT
+    const dNow = dangerNow(match, scenario, te);
+    const act = P.AR_DANGER * Math.max(dNow[team] || 0, dNow[opp] || 0);
+    // 精神疲労による反応性低下 + ベースライン低下
+    let ar = P.AR_BASE + (imp + clutch + act) * (1 - P.AR_MF_DAMP * mf) - P.AR_MF_DROP * mf;
+    ar = clamp(ar, 5, 98);
+
+    /* --- 集中力 CN: Yerkes-Dodson 逆U字 × 疲労上限 --- */
+    const cn = PSY.cnOf(ar, mf, load, p.attrs ? p.attrs.tec : 75);
+
+    /* --- 自律神経: 交感/副交感・HRVプロキシ --- */
+    const sns = clamp(P.SNS_BASE + P.SNS_AR * ar / 100 + P.SNS_MF * mf, 0, 1);
+    const pns = 1 - sns;
+    const hrvRaw = (1 - sns) * (1 - P.HRV_MF * mf);
+    const hrv = clamp(hrvRaw / REST_HRV, 0, 1.35) * 100;  // 安静基準比%
+
+    return {
+      on, team, no,
+      mf: mf * 100, ar, cn,
+      sns, pns, ans: sns - pns,
+      hrv, load: load * 100,
+    };
+  };
+
+  // Yerkes-Dodson 逆U字（純形状関数 — テスト用に公開）
+  PSY.cnOf = (ar, mf01orPct, load01orPct, tec) => {
+    const mf = mf01orPct > 1 ? mf01orPct / 100 : mf01orPct;
+    const load = load01orPct > 1 ? load01orPct / 100 : load01orPct;
+    const sigma = P.CN_SIGMA0 + P.CN_SIGMA_TEC * clamp(((tec ?? 75) - 70) / 30, -1, 1);
+    const shape = Math.exp(-Math.pow(ar - P.CN_PEAK, 2) / (2 * sigma * sigma));
+    return clamp(shape * (1 - P.CN_MF * mf) * (1 - P.CN_PHYS * load)) * 100;
+  };
+  const REST_HRV = (1 - clamp(P.SNS_BASE + P.SNS_AR * P.AR_BASE / 100, 0, 1));
+
+  /* ============ チーム集計（出場11人の平均 + モメンタム） ============ */
+  PSY.teamAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const mom = PSY.momentumAt(match, scenario, t);
+    const out = {};
+    for (const team of E.teamKeys(match)) {
+      const roster = E.rosterAt(match, scenario, team, t);
+      let mf = 0, ar = 0, cn = 0, hrv = 0, n = 0;
+      for (const slot in roster.assign) {
+        const st = PSY.playerAt(match, scenario, team, roster.assign[slot], t);
+        if (!st) continue;
+        mf += st.mf; ar += st.ar; cn += st.cn; hrv += st.hrv; n++;
+      }
+      out[team] = {
+        momentum: mom[team],
+        mf: n ? mf / n : 0, ar: n ? ar / n : 0,
+        cn: n ? cn / n : 0, hrv: n ? hrv / n : 0, n,
+      };
+    }
+    return out;
+  };
+
+  /* ============ 意思決定困難度（Issue #9: 選択肢 × 時間 × プレッシャー） ============
+     保持者の意思決定の難しさを距離・幾何のみから決定論算出するヒューリスティック。
+     - 選択肢: 開通パスレーン数（守備者ガウス遮蔽の積 ≥ 0.25 の味方受け手）
+     - 時間: 最近接プレッサーまでの距離（8mで正規化 — 到達猶予の代理）
+     - プレッシャー: 半径8mガウスの守備者密度
+     ※ 非予測の解釈支援。ターンオーバー確率等の予測値ではない。 */
+  PSY.decisionAt = (match, scenario, t, stateOpt) => {
+    scenario = scenario || E.actualScenario(match);
+    const st = stateOpt || E.stateAt(match, scenario, t);
+    const c = st.carrier;
+    if (!c || c.mode !== "hold") return null;
+    const me = st.players.find(p => p.onPitch && p.team === c.team && p.no === c.no);
+    if (!me) return null;
+    const mates = st.players.filter(p => p.onPitch && p.team === c.team && p.no !== c.no);
+    const opps = st.players.filter(p => p.onPitch && p.team !== c.team && p.role !== "GK");
+    // 選択肢（開通レーン数）
+    let options = 0;
+    for (const r of mates) {
+      const lx = r.x - me.x, ly = r.y - me.y;
+      const len = Math.hypot(lx, ly);
+      if (len < 3 || len > 55) continue;
+      let lane = 1;
+      for (const d of opps) {
+        const u = clamp(((d.x - me.x) * lx + (d.y - me.y) * ly) / (len * len));
+        const px = me.x + u * lx, py = me.y + u * ly;
+        const dd = Math.hypot(d.x - px, d.y - py);
+        lane *= 1 - Math.exp(-(dd * dd) / 9);
+        if (lane < 0.02) break;
+      }
+      if (lane >= 0.25) options++;
+    }
+    // 時間余裕とプレッシャー密度
+    let dn = 1e9, press = 0;
+    for (const d of opps) {
+      const dd = Math.hypot(d.x - me.x, d.y - me.y);
+      if (dd < dn) dn = dd;
+      press += Math.exp(-(dd * dd) / (8 * 8));
+    }
+    const timeSlack = clamp(dn / 8);
+    const dd100 = clamp(
+      0.50 * (1 - timeSlack) +
+      0.30 * clamp(press / 2.5) +
+      0.20 * (1 - clamp(options / 5))) * 100;
+    return { team: c.team, no: c.no, dd: dd100, options, presserDist: dn, press };
+  };
+
+  /* ---------------- モメンタム曲線（スパークライン用・キャッシュ） ---------------- */
+  const mcurveCache = new Map();
+  PSY.momentumCurve = (match, scenario, step = 12) => {
+    scenario = scenario || E.actualScenario(match);
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${step}`;
+    if (mcurveCache.has(key)) return mcurveCache.get(key);
+    const range = E.playedRange(match);
+    const pts = [];
+    for (let t = range.t0; t <= range.t1; t += step) {
+      pts.push({ t, v: PSY.momentumAt(match, scenario, t) });
+    }
+    mcurveCache.set(key, pts);
+    return pts;
+  };
+
+  PSY.clearCaches = () => { strainCache.clear(); mcurveCache.clear(); };
+
+  /* ---------------- UI 向けの注記（非予測の明示） ---------------- */
+  PSY.DISCLAIMER =
+    "PSYレイヤーは位置・イベント・危険度から導く決定論ヒューリスティック推定です。" +
+    "生体計測ではなく、心理状態の断定・予測でもありません（解釈支援）。";
+})();
+
+
+/* ===== src/duel.mjs ===== */
+/* =========================================================================
+   RPDX.duel — 接触・デュエル（Issue #22 v1）
+   ---------------------------------------------------------------------------
+   チェーンのターンオーバー（奪取フライト）から「接触」を決定論抽出する純関数層。
+   位置・イベント・危険度には影響しない（描画のスタンブル/シールド演出が消費）。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const DUEL = (R.duel = {});
+  const E = R.engine;
+
+  // 現在時刻がタックル/インターセプト直後なら {t0, winner, loser, u} を返す
+  // u ∈ (0,1]: 接触からの経過（1=接触直後 → 0=収束）。リスタートは接触ではない。
+  DUEL.tackleAt = (match, scenario, t, windowSec = 1.3) => {
+    scenario = scenario || E.actualScenario(match);
+    const c = E.carrierAt(match, scenario, t);
+    if (!c || !c.seg || c.seg.restart) return null;
+    const s = c.seg;
+    if (!s.from || s.from.team === s.team) return null;      // 奪取ではない
+    const dt = t - s.t0;
+    if (dt < 0 || dt > windowSec) return null;
+    return {
+      t0: s.t0,
+      winner: { team: s.team, no: s.no },
+      loser: { team: s.from.team, no: s.from.no },
+      u: 1 - dt / windowSec,
+    };
+  };
+
+  // シールド判定（保持者が最近接プレッサーから体を入れるべきか）— 描画用幾何
+  DUEL.shieldAt = (state) => {
+    const c = state.carrier;
+    if (!c || c.mode !== "hold" || c.restart) return null;
+    const holder = state.players.find(p => p.onPitch && p.team === c.team && p.no === c.no);
+    if (!holder) return null;
+    let presser = null, dn = 1e9;
+    for (const p of state.players) {
+      if (!p.onPitch || p.team === c.team || p.role === "GK") continue;
+      const d = Math.hypot(p.x - holder.x, p.y - holder.y);
+      if (d < dn) { dn = d; presser = p; }
+    }
+    if (!presser || dn > 4.5) return null;
+    return { holder: { team: holder.team, no: holder.no }, presser: { team: presser.team, no: presser.no }, dist: dn };
+  };
+})();
+
+
+/* ===== src/physio.mjs ===== */
+/* =========================================================================
+   RPDX.physio — 運動生理・代謝負荷（Issue #21 v1・異分野輸入）
+   ---------------------------------------------------------------------------
+   di Prampero らの「等価傾斜」モデルで加速度ランニングのエネルギーコストを推定:
+     ES = a/g（等価傾斜） / EC(ES) = 155.4ES⁵ −30.4ES⁴ −43.3ES³ +46.3ES² +19.5ES +3.6 [J/kg/m]
+     P = EC × v [W/kg]（メタボリックパワー）
+   出典: di Prampero et al. 2005 / Osgnach et al. 2010（係数は文献値・モデル推定表示）。
+   位置は合成モデル由来 — 値は「推定」であり実測GPS/LPSの代替ではない。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const PHYS = (R.physio = {});
+  const E = R.engine, N = R.noise;
+  const clamp = N.clamp;
+
+  PHYS.HSR_MS = 5.5;        // 高強度走行 19.8km/h
+  PHYS.SPRINT_MS = 7.0;     // スプリント 25.2km/h（進入） / 6.2 で解除
+  PHYS.STEP = 3;            // サンプリング[s]
+
+  // 等価傾斜のエネルギーコスト [J/kg/m]（文献多項式・|ES|は現実域にクランプ）
+  PHYS.ecCost = (es) => {
+    es = clamp(es, -0.45, 0.45);
+    return clamp(
+      155.4 * es ** 5 - 30.4 * es ** 4 - 43.3 * es ** 3 + 46.3 * es ** 2 + 19.5 * es + 3.6,
+      0.8, 14);
+  };
+
+  const cache = new Map();
+  PHYS.clearCaches = () => cache.clear();
+
+  // 選手の試合内サマリ: { avgP, peakP, hsr, sprints, peakV, mins, n }
+  // avgP/peakP [W/kg], hsr [m], peakV [m/s]。決定論・presence範囲のみ。
+  PHYS.summary = (match, scenario, team, no, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const step = opts.step || PHYS.STEP;
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${team}|${no}|${step}`;
+    if (cache.has(key)) return cache.get(key);
+    const pr = E.presenceOf(match, scenario, team, no);
+    if (!pr) return null;
+    let vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let inSprint = false;
+    for (let t = pr.from + 1; t <= pr.to; t += step) {
+      const v = E.speedKmh(match, scenario, team, no, t) / 3.6;
+      const a = n === 0 ? 0 : (v - vPrev) / step;
+      const P = PHYS.ecCost(a / 9.81) * v;
+      sumP += P; peakP = Math.max(peakP, P);
+      if (v >= PHYS.HSR_MS) hsr += v * step;
+      if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
+      else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
+      peakV = Math.max(peakV, v);
+      vPrev = v; n++;
+    }
+    const out = {
+      avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV,
+      mins: (pr.to - pr.from) / 60, n,
+    };
+    cache.set(key, out);
+    return out;
+  };
+
+  // UI向け: チャンク計算（メインスレッドを塞がない）。cb(summary) を完了時に呼ぶ。
+  PHYS.summaryAsync = (match, scenario, team, no, cb, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const step = opts.step || PHYS.STEP;
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${team}|${no}|${step}`;
+    if (cache.has(key)) { cb(cache.get(key)); return; }
+    const pr = E.presenceOf(match, scenario, team, no);
+    if (!pr) { cb(null); return; }
+    let t = pr.from + 1, vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let inSprint = false;
+    const chunk = () => {
+      const t1 = Math.min(t + 240, pr.to);
+      for (; t <= t1; t += step) {
+        const v = E.speedKmh(match, scenario, team, no, t) / 3.6;
+        const a = n === 0 ? 0 : (v - vPrev) / step;
+        const P = PHYS.ecCost(a / 9.81) * v;
+        sumP += P; peakP = Math.max(peakP, P);
+        if (v >= PHYS.HSR_MS) hsr += v * step;
+        if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
+        else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
+        peakV = Math.max(peakV, v);
+        vPrev = v; n++;
+      }
+      if (t <= pr.to) { setTimeout(chunk, 0); return; }
+      const out = { avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV, mins: (pr.to - pr.from) / 60, n };
+      cache.set(key, out);
+      cb(out);
+    };
+    chunk();
+  };
+})();
+
+
+/* ===== src/filter.mjs ===== */
+/* =========================================================================
+   RPDX.filter — 状態空間フィルタ（Issue #20 v1・異分野輸入）
+   ---------------------------------------------------------------------------
+   α-β-γ（定常ゲイン・カルマン等価）トラッキングフィルタ。
+   実測トラッキング（#12）のノイズ平滑・欠測補間・速度/加速度の安定推定に使う。
+   依存ゼロ・決定論。samples: [{t, x, y}]（x,y=null で欠測=コースト予測）。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const FILTER = (R.filter = {});
+
+  // 標準ゲイン: 中程度の計測ノイズ（σ≈0.5-1.5m・~10Hzトラック）向け。
+  // β/dt・2γ/dt² と増幅されるため高レートでは小さめが正しい。
+  // α=位置補正 / β=速度補正 / γ=加速度補正（小さいほど滑らか・大きいほど追従）
+  FILTER.DEFAULTS = { alpha: 0.30, beta: 0.055, gamma: 0.0035 };
+
+  FILTER.abg = (samples, opts = {}) => {
+    const { alpha, beta, gamma } = { ...FILTER.DEFAULTS, ...opts };
+    const out = new Array(samples.length);
+    let init = false;
+    let x = 0, y = 0, vx = 0, vy = 0, ax = 0, ay = 0, tPrev = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      const dt = init ? Math.max(1e-3, s.t - tPrev) : 0;
+      if (!init) {
+        if (s.x == null) { out[i] = { t: s.t, x: null, y: null, vx: 0, vy: 0, ax: 0, ay: 0, coast: true }; continue; }
+        x = s.x; y = s.y; init = true; tPrev = s.t;
+        out[i] = { t: s.t, x, y, vx: 0, vy: 0, ax: 0, ay: 0, coast: false };
+        continue;
+      }
+      // 予測（等加速度）
+      const xp = x + vx * dt + 0.5 * ax * dt * dt;
+      const yp = y + vy * dt + 0.5 * ay * dt * dt;
+      const vxp = vx + ax * dt, vyp = vy + ay * dt;
+      if (s.x == null) {
+        // 欠測: コースト（予測をそのまま採用・加速度は減衰）
+        x = xp; y = yp; vx = vxp; vy = vyp; ax *= 0.9; ay *= 0.9;
+        out[i] = { t: s.t, x, y, vx, vy, ax, ay, coast: true };
+      } else {
+        const rx = s.x - xp, ry = s.y - yp;
+        x = xp + alpha * rx; y = yp + alpha * ry;
+        vx = vxp + (beta / dt) * rx; vy = vyp + (beta / dt) * ry;
+        ax += (2 * gamma / (dt * dt)) * rx; ay += (2 * gamma / (dt * dt)) * ry;
+        out[i] = { t: s.t, x, y, vx, vy, ax, ay, coast: false };
+      }
+      tPrev = s.t;
+    }
+    return out;
+  };
+})();
+
+
+/* ===== src/uq.mjs ===== */
+/* =========================================================================
+   RPDX.uq — 不確実性定量化・検証（Issue #19 v1・異分野輸入）
+   ---------------------------------------------------------------------------
+   「断定できる解析」の要石: 主張 = 点推定 + 区間 + 検証統計。
+   v1 は D²-Field のゴール窓警報性能を全収録試合で評価する:
+     - TPR/FPR に Wilson 90%信頼区間（閉形式・依存ゼロ）
+     - Brier スコアとベースライン比スキル
+   注意: 評価世界はゴール再現アンカーを含む（真の予測力の主張には実測データが必要 — #7/#12）。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const UQ = (R.uq = {});
+  const E = R.engine, D = R.danger, N = R.noise;
+  const clamp = N.clamp;
+
+  // Wilson スコア区間（z=1.645 → 90%）
+  UQ.wilson = (k, n, z = 1.645) => {
+    if (!n) return { p: 0, lo: 0, hi: 1, n };
+    const p = k / n, z2 = z * z;
+    const den = 1 + z2 / n;
+    const c = p + z2 / (2 * n);
+    const half = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+    return { p, lo: Math.max(0, (c - half) / den), hi: Math.min(1, (c + half) / den), n };
+  };
+
+  // 危険度ピーク → 「30秒内ゴール」の粗い確率写像（表示・Brier用の単調写像）
+  const pmap = (peak) => clamp(Math.pow(peak / 100, 1.6) * 0.5, 0.02, 0.98);
+
+  /* ゴール窓警報の評価（全試合・決定論）
+     正例: 各ゴールの [t-30, t+2] / 負例: 120秒格子（ゴール±60s除外）×両チーム */
+  UQ.evaluate = (matches, opts = {}) => {
+    const thr = opts.thr ?? D.CRIT_AT;
+    const step = 8;
+    let tp = 0, fn = 0, fp = 0, tn = 0;
+    let se = 0, seBase = 0, nAll = 0, nPos = 0;
+    const rows = [];
+    const samples = [];   // {p, y}
+    for (const m of matches) {
+      const sc = E.actualScenario(m);
+      const pts = D.curve(m, sc, { step, includeGK: false });
+      const at = (t, team) => {
+        const i = Math.max(0, Math.min(pts.length - 1, Math.round((t - pts[0].t) / step)));
+        return pts[i].v[team];
+      };
+      const peakIn = (t0, t1, team) => {
+        let p = 0;
+        for (let t = t0; t <= t1; t += 4) p = Math.max(p, at(t, team));
+        return p;
+      };
+      const goals = m.events.filter(e => e.type === "goal");
+      for (const g of goals) {
+        const pk = peakIn(g.t - 30, g.t + 2, g.team);
+        samples.push({ p: pmap(pk), y: 1 });
+        if (pk >= thr) tp++; else fn++;
+        rows.push({ match: m.meta.id, min: g.min, team: g.team, peak: pk });
+      }
+      const range = E.playedRange(m);
+      for (let t = range.t0 + 90; t < range.t1 - 40; t += 120) {
+        if (goals.some(g => Math.abs(g.t - t) < 60)) continue;
+        for (const team of E.teamKeys(m)) {
+          const pk = peakIn(t - 30, t + 2, team);
+          samples.push({ p: pmap(pk), y: 0 });
+          if (pk >= thr) fp++; else tn++;
+        }
+      }
+    }
+    nPos = tp + fn;
+    nAll = samples.length;
+    const base = nPos / nAll;
+    for (const s of samples) {
+      se += (s.p - s.y) ** 2;
+      seBase += (base - s.y) ** 2;
+    }
+    const brier = se / nAll, brierBase = seBase / nAll;
+    return {
+      thr, tp, fn, fp, tn,
+      tpr: UQ.wilson(tp, tp + fn),
+      fpr: UQ.wilson(fp, fp + tn),
+      brier, brierBase,
+      skill: brierBase > 0 ? 1 - brier / brierBase : 0,
+      rows,
+    };
+  };
+
+  // 表示用テキスト（区間つきの「責任ある断定」形式）
+  UQ.reportText = (r) => {
+    const pct = (w) => `${Math.round(w.p * 100)}%（90%CI ${Math.round(w.lo * 100)}–${Math.round(w.hi * 100)}%・n=${w.n}）`;
+    return [
+      `警報しきい値 CRITICAL ≥ ${r.thr}`,
+      `ゴール検知率 TPR = ${pct(r.tpr)}`,
+      `誤警報率 FPR = ${pct(r.fpr)}`,
+      `Brier ${r.brier.toFixed(4)} / ベースライン ${r.brierBase.toFixed(4)} → スキル ${(r.skill * 100).toFixed(1)}%`,
+      `注: 評価世界はゴール再現アンカーを含む（真の予測力の検証には実測トラッキングが必要 — #7/#12）`,
+    ].join("\n");
   };
 })();
 
@@ -3029,7 +4512,7 @@ window.addEventListener("error", (e) => {
     // ---- 得点の決定論合成 ----
     const events = [{ t: 0, type: "kickoff", team: kA, label: "キックオフ" },
       { t: H2, type: "halftime", label: "前半終了" }, { t: H2, type: "kickoff", team: kB, label: "後半開始" }];
-    const ballAnchors = [{ t: 0, x: 0, y: 0, hold: 2 }, { t: H2, x: 0, y: 0, hold: 2 }];
+    const ballAnchors = [{ t: 0, x: 0, y: 0, hold: 6 }, { t: H2, x: 0, y: 0, hold: 6 }];
     const possessionKP = [[0, bias * 0.3]];
     const dir = { [kA]: { h1: +1, h2: -1 }, [kB]: { h1: -1, h2: +1 } };
 
@@ -3062,7 +4545,7 @@ window.addEventListener("error", (e) => {
         ballAnchors.push({ t: t - 9, x: d * 22, y: gy * 4 });
         ballAnchors.push({ t: t - 1.2, x: d * 40, y: gy * 2.2 });
         ballAnchors.push({ t: t, x: d * 52.2, y: gy, hold: 4 });
-        ballAnchors.push({ t: Math.min(t + 55, time.h2.end - 5), x: 0, y: 0, hold: 2 });
+        ballAnchors.push({ t: Math.min(t + 55, time.h2.end - 5), x: 0, y: 0, hold: 6 });
         possessionKP.push([t - 60, (g.team === kA ? +1 : -1) * 0.55 + bias * 0.2]);
         possessionKP.push([t, (g.team === kA ? +1 : -1) * 0.95]);
         possessionKP.push([t + 90, bias * 0.3]);
@@ -3164,6 +4647,17 @@ window.addEventListener("error", (e) => {
       const c = Math.cos(ry), s = Math.sin(ry);
       return new Float32Array([c*sx,0,-s*sx,0, 0,sy,0,0, s*sz,0,c*sz,0, x,y,z,1]);
     },
+    rotX(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+    },
+    t(x, y, z) {
+      return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+    },
+    scale(sx, sy, sz) {
+      return new Float32Array([sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1]);
+    },
+    chain(...ms) { let o = ms[0]; for (let i = 1; i < ms.length; i++) o = M4.mul(o, ms[i]); return o; },
   };
 
   /* ------------------------------ meshes ------------------------------ */
@@ -3273,9 +4767,12 @@ window.addEventListener("error", (e) => {
   }`;
   const FS_FLAT = `#version 300 es
   precision highp float; in vec2 vUv; out vec4 o;
-  uniform vec3 uColor; uniform float uAlpha, uRing, uSoft;
+  uniform vec3 uColor; uniform float uAlpha, uRing, uSoft, uRect;
   void main(){
-    float r = length(vUv - 0.5) * 2.0;
+    // uRect>0.5: 角丸矩形距離（ゾーンハイライト用） / それ以外: 円距離
+    float r = uRect > 0.5
+      ? max(abs(vUv.x - 0.5), abs(vUv.y - 0.5)) * 2.0
+      : length(vUv - 0.5) * 2.0;
     float a;
     if (uRing > 0.0) { a = smoothstep(uRing+uSoft, uRing, r) * smoothstep(uRing-0.22-uSoft, uRing-0.22, r); }
     else { a = smoothstep(1.0, 1.0-uSoft, r); }
@@ -3434,16 +4931,27 @@ window.addEventListener("error", (e) => {
     return cv;
   };
 
-  const makeAdCanvas = () => {
+  // 広告ボードは試合メタからデータ駆動生成（マッチパック切替に追従）
+  const makeAdCanvas = (m) => {
     const cv = document.createElement("canvas");
     cv.width = 2048; cv.height = 64;
     const g = cv.getContext("2d");
     g.fillStyle = "#0B1322"; g.fillRect(0, 0, 2048, 64);
     g.font = "700 30px ui-monospace, Menlo, monospace";
-    const items = ["RPD-X", "D²-FIELD // 距離危険度場", "FIFA WORLD CUP 2026™", "BRA 2-1 JPN", "NRG STADIUM HOUSTON", "SAMURAI BLUE", "SELEÇÃO"];
-    let x = 30;
+    const keys = m.teamOrder || Object.keys(m.teams);
+    const [a, b] = keys;
+    const score = m.meta.score || {};
+    const items = [
+      "RPD-X", "D²-FIELD // 距離危険度場",
+      (m.meta.competition || "").toUpperCase() || "FOOTBALL",
+      `${a} ${score[a] ?? ""}-${score[b] ?? ""} ${b}`,
+      (m.meta.venue || "").toUpperCase(),
+      (m.teams[a].nameEn || a).toUpperCase(),
+      (m.teams[b].nameEn || b).toUpperCase(),
+    ].filter(s => s && s.trim());
+    let x = 30, ci = 0;
     for (let k = 0; k < 3; k++) for (const it of items) {
-      g.fillStyle = ["#6FA0FF", "#FFC61A", "#93A3C0"][Math.floor(Math.random() * 3)];
+      g.fillStyle = ["#6FA0FF", "#FFC61A", "#93A3C0"][ci++ % 3];
       g.globalAlpha = 0.8;
       g.fillText(it, x, 42);
       x += g.measureText(it).width + 90;
@@ -3604,9 +5112,43 @@ window.addEventListener("error", (e) => {
 
     const txPitch = canvasTex(gl, makePitchCanvas());
     const txCrowd = canvasTex(gl, makeCrowdCanvas());
-    const txAd = canvasTex(gl, makeAdCanvas());
+    let txAd = canvasTex(gl, makeAdCanvas(match));
     const txNet = canvasTex(gl, makeNetCanvas(), false);
     const txGlow = canvasTex(gl, makeGlowCanvas(), false);
+
+    // 汎用テキスト・テクスチャ（速度ラベル/選手タグ — 内容キーでキャッシュ）
+    const textCache = new Map();
+    const textTex = (key, draw) => {
+      if (textCache.has(key)) return textCache.get(key);
+      const cv = document.createElement("canvas");
+      draw(cv);
+      const entry = { tx: canvasTex(gl, cv), w: cv.width, h: cv.height };
+      textCache.set(key, entry);
+      return entry;
+    };
+    // 「24 | SANO」タグ（選手毎キャッシュ）
+    const nameTagTex = (team, p) => textTex(`tag:${team}:${p.no}`, (cv) => {
+      cv.width = 512; cv.height = 80;
+      const g = cv.getContext("2d");
+      const surname = (p.name || "").trim().split(/\s+/).pop().toUpperCase();
+      g.font = "600 46px -apple-system, 'Helvetica Neue', sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.shadowColor = "rgba(4,8,16,0.9)"; g.shadowBlur = 10; g.shadowOffsetY = 2;
+      g.fillStyle = "rgba(233,240,250,0.92)";
+      g.fillText(`${p.no} | ${surname}`, 256, 40, 500);
+    });
+    // 「18 km/h」（整数km/h × チーム色でキャッシュ — 生成は最大 ~36×2 枚）
+    const speedTagTex = (kmh, colorCss) => textTex(`spd:${kmh}:${colorCss}`, (cv) => {
+      cv.width = 384; cv.height = 84;
+      const g = cv.getContext("2d");
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.shadowColor = "rgba(4,8,16,0.9)"; g.shadowBlur = 10; g.shadowOffsetY = 2;
+      g.fillStyle = colorCss;
+      g.font = "800 58px -apple-system, 'Helvetica Neue', sans-serif";
+      g.fillText(`${kmh}`, 132, 44);
+      g.font = "700 34px -apple-system, 'Helvetica Neue', sans-serif";
+      g.fillText("km/h", 256, 50);
+    });
 
     // ヒートマップ動的テクスチャ
     const heatCv = document.createElement("canvas");
@@ -3771,6 +5313,7 @@ window.addEventListener("error", (e) => {
       gl.uniform1f(U(prFlat, "uAlpha"), opts.alpha ?? 1);
       gl.uniform1f(U(prFlat, "uRing"), opts.ring ?? 0);
       gl.uniform1f(U(prFlat, "uSoft"), opts.soft ?? 0.25);
+      gl.uniform1f(U(prFlat, "uRect"), opts.rect ?? 0);
     };
     // ビルボード行列（カメラに正対）
     const billboard = (x, y, z, w, h) => {
@@ -3781,6 +5324,110 @@ window.addEventListener("error", (e) => {
       m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
       m[12] = x; m[13] = y; m[14] = z;
       return m;
+    };
+
+    /* ------------------- 人型フィギュア（ゲイトつき低ポリ） ------------------- */
+    // 肌・髪トーン（選手ごとに決定論選択 — 表示上の多様性のみ・実在特徴の推定ではない）
+    const SKIN = [[0.95,0.80,0.62],[0.85,0.65,0.45],[0.66,0.47,0.31],[0.47,0.32,0.21]];
+    const HAIR = [[0.10,0.09,0.08],[0.22,0.15,0.09],[0.05,0.05,0.06],[0.30,0.24,0.15]];
+    const toneOf = (team, no) => {
+      const u = N.hash2(N.seedOf(team + "skin"), no * 13 + 5);
+      const i = Math.min(SKIN.length - 1, (u * SKIN.length) | 0);
+      return { skin: SKIN[i], hair: HAIR[Math.min(HAIR.length - 1, ((u * 7919) % 1 * HAIR.length) | 0)] };
+    };
+    // 描画側の歩容状態（向き・位相・速度）— 見た目のみ・データは純関数のまま
+    const figState = new Map();
+    const figOf = (key) => {
+      let f = figState.get(key);
+      if (!f) { f = { yaw: Math.PI / 2, phase: Math.random() * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }
+      return f;
+    };
+    const lerpAngle = (a, b, u) => {
+      let d = b - a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return a + d * u;
+    };
+    // 1人分を描画: base位置(px,pz) + キット色 + 透明度。extras: {stumble, shieldX, shieldZ}
+    // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
+    // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
+    // 歩きと走りの差: ケイデンス・膝屈曲（二節脚）・前傾・上下動を速度で連続変調。
+    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex) => {
+      const f = figOf(key);
+      if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
+      const dx = px - f.lx, dz = pz - f.lz;
+      const dist = Math.hypot(dx, dz);
+      let backpedal = false;
+      const dbx = bx - px, dbz = bz - pz;
+      const dBall = Math.hypot(dbx, dbz);
+      const stumble = ex && ex.stumble ? ex.stumble : 0;
+      const shield = ex && ex.shield ? ex.shield : null;
+      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
+      else if (dt > 0) {
+        const vInst = Math.min(dist / dt, 10);
+        f.v += (vInst - f.v) * Math.min(1, dt * 5);
+        if (shield && f.v < 3) {
+          // シールド: プレッサーへ背を向けボールと相手の間に体を入れる
+          const target = Math.atan2(px - shield.x, pz - shield.z);
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 4.5));
+        } else if (f.v > 0.6 && dist > 0.002) {
+          const dot = (dx * dbx + dz * dbz) / (dist * (dBall || 1));
+          backpedal = dot < -0.35 && f.v < 4.5 && dBall < 45;
+          const target = backpedal ? Math.atan2(dbx, dbz) : Math.atan2(dx, dz);
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * (backpedal ? 5 : 7)));
+        } else if (f.v <= 0.6) {
+          const target = dBall < 30 ? Math.atan2(dbx, dbz) : defYaw;
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 2.2));
+        }
+        // ケイデンス: 歩き~0.9Hz → スプリント~1.6Hz（ストライド）
+        f.phase += dt * (4.2 + f.v * 0.85) * (f.v > 0.3 ? 1 : 0.25);
+        f.lx = px; f.lz = pz;
+      }
+      const run = clamp(f.v / 6, 0, 1);
+      const gaitAmp = backpedal ? 0.55 : 1;
+      const hipA = (0.10 + 0.75 * run) * gaitAmp;             // 股スイング振幅
+      const kneeB = 0.35 + 1.05 * run;                        // 膝屈曲（走りほど深い）
+      const lean = stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
+        : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
+      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0);
+      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
+      const op = { emiss: 0.04, alpha };
+      // 脚 = 腿 + 脛の二節（膝屈曲で歩走が一目で分かる）
+      const legC = [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
+      for (const s of [-1, 1]) {
+        const phi = f.phase + (s < 0 ? Math.PI : 0);
+        const hip = Math.sin(phi) * hipA;
+        const knee = kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
+        const hipT = M4.chain(base, M4.t(s * 0.13, 0.94, 0), M4.rotX(hip));
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
+        drawMesh(mCapsule);
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.rotX(knee), M4.t(0, -0.44, 0), M4.scale(0.088, 0.44, 0.088)), legC, op);
+        drawMesh(mCapsule);
+      }
+      // 上半身ピボット: 前傾 + 脚と逆位相のひねり（肩の回旋 — 人形っぽさを消す）
+      const twist = Math.sin(f.phase) * (0.05 + 0.16 * run) * gaitAmp;
+      const upper = M4.chain(base, M4.t(0, 0.90, 0), M4.rotX(lean), M4.trs(0, 0, 0, 1, 1, 1, twist));
+      // ショーツ → 胴（シャツ） → 頭（髪/肌スプリット・首はひねりを6割打ち消す）
+      useLambert(M4.chain(base, M4.t(0, 0.68, 0), M4.scale(0.21, 0.36, 0.185)), shorts, op);
+      drawMesh(mCapsule);
+      useLambert(M4.chain(upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
+      drawMesh(mCapsule);
+      const headY = bob + 0.90 + 0.80 * Math.cos(lean);
+      useLambert(
+        M4.chain(upper, M4.trs(0, 0, 0, 1, 1, 1, -twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
+        tone.hair, { color2: tone.skin, split: headY - 0.02, emiss: 0.03, alpha });
+      drawMesh(mSphere);
+      // 腕 = 上腕 + 前腕（肘 — 走るほど深く曲げてポンピング・スタンブルでバランス）
+      for (const s of [-1, 1]) {
+        const armSw = -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
+        const elbow = 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
+        const shoulder = M4.chain(upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(armSw));
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
+        drawMesh(mCapsule);
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.rotX(-elbow), M4.t(0, -0.27, 0), M4.scale(0.060, 0.27, 0.060)), tone.skin, op);
+        drawMesh(mCapsule);
+      }
+      return f.v;
     };
 
     /* ---------------------------- static world ---------------------------- */
@@ -3967,6 +5614,22 @@ window.addEventListener("error", (e) => {
         gl.disable(gl.BLEND);
       }
 
+      // 危険ホットゾーン矩形（WARNING以上 — 放送グラフィクスのエリア強調）
+      if (scene.hotZone) {
+        const hz = scene.hotZone;
+        const pulse = 0.8 + 0.2 * Math.sin(time * 2.6);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        // 面のウォッシュ + 枠線（角丸矩形リング）
+        useFlat(M4.trs(hz.x, 0.05, -hz.y, hz.w, 1, hz.h), hz.color, { alpha: hz.alpha * 0.55 * pulse, soft: 0.5, rect: 1 });
+        drawMesh(mQuad);
+        useFlat(M4.trs(hz.x, 0.055, -hz.y, hz.w, 1, hz.h), hz.color, { alpha: hz.alpha * 1.6 * pulse, ring: 0.97, soft: 0.03, rect: 1 });
+        drawMesh(mQuad);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
       /* ---- 粒子場の構築（ゾーニング + 危険場粒子モード） ---- */
       partReset();
       const zoneView = scene.zoneView || "BOTH";
@@ -4038,25 +5701,69 @@ window.addEventListener("error", (e) => {
         }
       }
 
-      // 軌跡（ボール）
+      // 軌跡（ボール = 光跡コメット / 選手 = 点線ラントレイル）
       if (options.trails && scene.ballTrail) {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         gl.depthMask(false);
         const tr = scene.ballTrail;
         for (let i = 1; i < tr.length; i++) {
-          const a = (i / tr.length) * 0.5;
-          useFlat(M4.trs(tr[i].x, 0.09, -tr[i].y, 0.5, 1, 0.5), [1, 1, 1], { alpha: a, soft: 0.9 });
+          const u = i / tr.length;
+          const a = Math.pow(u, 1.5) * 0.85;               // テール減衰 → ヘッド輝き
+          const s = 0.22 + u * 0.72;
+          useFlat(M4.trs(tr[i].x, 0.09 + (tr[i].z || 0) * 0.5, -tr[i].y, s, 1, s), [0.86, 0.93, 1], { alpha: a, soft: 0.85 });
           drawMesh(mQuad);
         }
         if (scene.playerTrail) {
+          // 等間隔ドット（点線）: 走路の見た目を放送グラフィクスに揃える
           const pt = scene.playerTrail;
+          let acc = 0;
           for (let i = 1; i < pt.length; i++) {
-            const a = (i / pt.length) * 0.6;
-            useFlat(M4.trs(pt[i].x, 0.09, -pt[i].y, 0.7, 1, 0.7), pt.color, { alpha: a, soft: 0.9 });
+            const d = Math.hypot(pt[i].x - pt[i - 1].x, pt[i].y - pt[i - 1].y);
+            acc += d;
+            if (acc < 1.4) continue;
+            acc = 0;
+            const u = i / pt.length;
+            useFlat(M4.trs(pt[i].x, 0.09, -pt[i].y, 0.42, 1, 0.42), pt.color, { alpha: 0.15 + u * 0.75, soft: 0.35 });
             drawMesh(mQuad);
           }
         }
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      // パスライン（フライト中の点線 — カット=赤系・ボール付近が明るい・受け手にリング）
+      if (scene.passLine) {
+        const pl = scene.passLine;
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        const dx = pl.x2 - pl.x1, dy = pl.y2 - pl.y1;
+        const len = Math.hypot(dx, dy);
+        const nDots = Math.max(2, Math.floor(len / 1.5));
+        const col = pl.cut ? [1, 0.42, 0.32] : [0.85, 0.92, 1];
+        for (let i = 0; i <= nDots; i++) {
+          const uD = i / nDots;
+          const a2 = 0.10 + 0.55 * Math.max(0, 1 - Math.abs(uD - pl.u) * 2.6);
+          useFlat(M4.trs(pl.x1 + dx * uD, 0.1, -(pl.y1 + dy * uD), 0.34, 1, 0.34), col, { alpha: a2, soft: 0.4 });
+          drawMesh(mQuad);
+        }
+        useFlat(M4.trs(pl.x2, 0.05, -pl.y2, 3.2, 1, 3.2), col, { alpha: 0.5 * (0.35 + 0.65 * pl.u), ring: 0.8, soft: 0.12 });
+        drawMesh(mQuad);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      // PSY オーラ（選択選手の覚醒状態 — 低:青 / 至適:金 / 過覚醒:赤）
+      if (scene.psyAura) {
+        const au = scene.psyAura;
+        const pulse = 0.75 + 0.25 * Math.sin(time * (2.2 + au.k * 3.4));
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        useFlat(M4.trs(au.x, 0.045, -au.y, 5.4 + au.k * 1.2, 1, 5.4 + au.k * 1.2), au.color,
+          { alpha: (0.3 + 0.45 * au.k) * pulse, ring: 0.86, soft: 0.16 });
+        drawMesh(mQuad);
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
@@ -4068,6 +5775,25 @@ window.addEventListener("error", (e) => {
         const db = (eye[0] - b.x) ** 2 + (eye[2] + b.y) ** 2;
         return db - da;
       });
+      // ソフト分離（描画のみ）: 近接ペアの体の重なりを押し離す — データ座標は不変
+      const sepMap = new Map();
+      {
+        const on = state.players.filter(p => p.onPitch);
+        for (let i = 0; i < on.length; i++) for (let j = i + 1; j < on.length; j++) {
+          const a = on[i], b = on[j];
+          const ddx = b.x - a.x, ddy = b.y - a.y;
+          const d = Math.hypot(ddx, ddy);
+          if (d >= 0.6 || d < 1e-4) continue;
+          const push = Math.min(0.3, (0.6 - d) * 0.5);
+          const ux = ddx / d, uy = ddy / d;
+          const ka = a.team + ":" + a.no, kb = b.team + ":" + b.no;
+          const sa = sepMap.get(ka) || { x: 0, y: 0 };
+          const sb = sepMap.get(kb) || { x: 0, y: 0 };
+          sa.x -= ux * push; sa.y -= uy * push;
+          sb.x += ux * push; sb.y += uy * push;
+          sepMap.set(ka, sa); sepMap.set(kb, sb);
+        }
+      }
       const bodyAlpha = options.solidPlayers ? 1 : 0.87;
       for (const p of sorted) {
         const T = match.teams[p.team];
@@ -4108,13 +5834,22 @@ window.addEventListener("error", (e) => {
         }
         gl.depthMask(true);
 
-        // 体（カプセル: 上=シャツ/下=ショーツ・フレネル半透明）
-        useLambert(
-          M4.trs(px, 0, pz, 0.42, 1.78, 0.42),
-          shirt,
-          { color2: shorts, split: 0.62, emiss: 0.04, alpha: bodyAlpha * alpha }
+        // 体（人型フィギュア: 胴・頭・腕2・二節脚 + 歩走ゲイト・接触演出）
+        const half = state.half || 1;
+        const dir = (match.dir && match.dir[p.team]) ? match.dir[p.team][half === 1 ? "h1" : "h2"] : 1;
+        const figKey = p.team + ":" + p.no;
+        const sep = sepMap.get(figKey);
+        const ex = {
+          stumble: scene.tackle && scene.tackle.loserKey === figKey ? scene.tackle.u : 0,
+          shield: scene.shield && scene.shield.holderKey === figKey
+            ? { x: scene.shield.px, z: scene.shield.pz } : null,
+        };
+        drawFigure(
+          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
+          shirt, shorts, toneOf(p.team, p.no),
+          bodyAlpha * alpha, Math.atan2(dir, 0),
+          state.ball.x, -state.ball.y, ex
         );
-        drawMesh(mCapsule);
         gl.disable(gl.BLEND);
       }
 
@@ -4156,6 +5891,34 @@ window.addEventListener("error", (e) => {
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
+
+      // 速度ラベル（放送グラフィクス風「24 | SANO / 18 km/h」— 番号ラベルとは独立）
+      if (scene.speedLabels && scene.speedLabels.length) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        for (const L of scene.speedLabels) {
+          const T = match.teams[L.team];
+          const p = T.squad.find(q => q.no === L.no);
+          if (!p) continue;
+          const d = Math.hypot(eye[0] - L.x, eye[1] - 2, eye[2] + L.y);
+          const s = clamp(d * 0.045, 1.7, 5.6);   // 放送グラフィクス並みの視認性
+          const kitCss = T.kit ? T.kit.shirt : (T.color || "#FFE24A");
+          const spd = speedTagTex(Math.min(L.kmh, 36), kitCss);
+          const yBase = options.labels ? 3.75 : 2.9;      // 番号ラベルと重ならない高さ
+          if (L.withName) {
+            const tag = nameTagTex(L.team, p);
+            useTex(billboard(L.x, yBase + s * 0.62, -L.y, s * 2.4, s * 0.375), tag.tx, { alpha: 0.95, fog: 1e9 });
+            drawMesh(mVQuad);
+          }
+          if (L.kmh >= 1) {
+            useTex(billboard(L.x, yBase + s * (L.withName ? 0.28 : 0.34), -L.y, s * 1.55, s * 0.34), spd.tx, { alpha: 0.95, fog: 1e9 });
+            drawMesh(mVQuad);
+          }
+        }
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
     };
 
     // ピッキング（クリック → 選手）
@@ -4189,7 +5952,14 @@ window.addEventListener("error", (e) => {
       return { hit: best, moved };
     };
 
-    api.setMatch = (m) => { match = m; labelCache.clear(); };
+    api.setMatch = (m) => {
+      match = m;
+      labelCache.clear();
+      textCache.clear();
+      figState.clear();
+      gl.deleteTexture(txAd);
+      txAd = canvasTex(gl, makeAdCanvas(match));   // 広告ボードを新試合のメタで再生成
+    };
     api.gl = gl;
     return api;
   };
@@ -4203,9 +5973,14 @@ window.addEventListener("error", (e) => {
    ========================================================================= */
 (() => {
   const R = globalThis.RPDX;
-  const E = R.engine, D = R.danger, S = R.subs, G = R.generic, F = R.formations, SIM = R.sim;
+  const E = R.engine, D = R.danger, S = R.subs, G = R.generic, F = R.formations, SIM = R.sim, PSY = R.psy;
+  const DUEL = R.duel, PHYS = R.physio, UQ = R.uq;
   const $ = (s) => document.querySelector(s);
   const clamp = R.noise.clamp;
+  const hex2rgb = (h) => {
+    const v = parseInt(h.slice(1), 16);
+    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+  };
 
   const SERIES = { plus: "#BA8608", plusBright: "#FFC61A", minus: "#4A7DFF", minusBright: "#7FA6FF" };
   const STATUS = { OK: "ok", WARNING: "warn", CRITICAL: "crit" };
@@ -4219,6 +5994,7 @@ window.addEventListener("error", (e) => {
       labels: true, trails: true, includeGK: false,
       fieldMode: "particles",     // particles | surface | off
       zones: true, solidPlayers: false,
+      speedLabels: true, psy: true,
     },
     zoneView: "BOTH",
     selected: null, hover: null,
@@ -4226,6 +6002,8 @@ window.addEventListener("error", (e) => {
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
     lastIx: null, lastField: null, lastZone: null,
+    lastPsy: null, lastPsySel: null, speedMap: new Map(), sprintSet: new Set(),
+    hotZone: null,
   });
 
   const teamOrder = () => App.match.teamOrder || Object.keys(App.match.teams);
@@ -4242,6 +6020,22 @@ window.addEventListener("error", (e) => {
     if (code === "JPN") {
       g.fillStyle = "#F4F6FA"; g.fillRect(0, 0, 52, 36);
       g.fillStyle = "#BC002D"; g.beginPath(); g.arc(26, 18, 10.5, 0, 7); g.fill();
+    } else if (code === "ARG") {
+      g.fillStyle = "#74ACDF"; g.fillRect(0, 0, 52, 36);
+      g.fillStyle = "#F4F6FA"; g.fillRect(0, 12, 52, 12);
+      g.fillStyle = "#F6B40E"; g.beginPath(); g.arc(26, 18, 4.6, 0, 7); g.fill();
+      g.strokeStyle = "#F6B40E"; g.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        g.beginPath(); g.moveTo(26 + Math.cos(a) * 5.5, 18 + Math.sin(a) * 5.5);
+        g.lineTo(26 + Math.cos(a) * 7.5, 18 + Math.sin(a) * 7.5); g.stroke();
+      }
+    } else if (code === "EGY") {
+      g.fillStyle = "#CE1126"; g.fillRect(0, 0, 52, 12);
+      g.fillStyle = "#F4F6FA"; g.fillRect(0, 12, 52, 12);
+      g.fillStyle = "#0A0A0A"; g.fillRect(0, 24, 52, 12);
+      g.fillStyle = "#C09300"; g.beginPath();
+      g.moveTo(26, 13.5); g.lineTo(29.5, 22.5); g.lineTo(26, 21); g.lineTo(22.5, 22.5); g.closePath(); g.fill();
     } else if (code === "BRA") {
       g.fillStyle = "#009C3B"; g.fillRect(0, 0, 52, 36);
       g.fillStyle = "#FFDF00"; g.beginPath();
@@ -4286,6 +6080,8 @@ window.addEventListener("error", (e) => {
         const [a, b] = teamOrder();
         toast(`結果が変化 — ${App.match.teams[a].name} ${oc.score[a]}–${oc.score[b]} ${App.match.teams[b].name}（実試合 ${oc.actualScore[a]}–${oc.actualScore[b]}）`, GOLD);
       }
+      // outcome付与後の世界の正準曲線（PSYレイヤーが参照）+ 表示曲線
+      ensureCurveFor(sc, { includeGK: false }, () => {});
       ensureCurveFor(sc, { includeGK: App.options.includeGK }, () => {});
     });
   };
@@ -4307,15 +6103,20 @@ window.addEventListener("error", (e) => {
   };
   const actualCurve = () => curveStore.get(curveKeyOf(E.actualScenario(App.match), { includeGK: App.options.includeGK }));
   const activeCurve = () => curveStore.get(curveKeyOf(activeScenario(), { includeGK: App.options.includeGK }));
+  // PSY は正準曲線（step8・GK除外）を参照する — キャッシュ済みの時だけ呼ぶ（同期再計算のヒッチ防止）
+  const psyReady = () => curveStore.has(curveKeyOf(activeScenario(), { includeGK: false }));
 
   /* ------------------------------ 起動 ------------------------------ */
   // URLパラメータ: ?t=秒 &cam=broadcast|tactical|goal|pitch|fly &play=0|1 &speed=n
   const urlq = new URLSearchParams(location.search);
   let renderer, tlCtx;
   const boot = () => {
+    // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
+    const mq = urlq.get("match");
+    if (mq && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     renderer = R.render3d.create($("#gl"), App.match);
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
-    const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); };
+    const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
     window.addEventListener("resize", fit);
     fit();
     buildStatic();
@@ -4359,7 +6160,7 @@ window.addEventListener("error", (e) => {
       if (m) { $("#loadFill").style.width = m[1] + "%"; $("#loadMsg").textContent = `D²-Field v2 曲線を事前計算中… ${m[1]}%`; }
     });
     obs.observe(origStatus, { childList: true });
-    requestAnimationFrame(loop);
+    startWhenReady();
   };
 
   const buildStatic = () => {
@@ -4368,19 +6169,23 @@ window.addEventListener("error", (e) => {
     drawFlag($("#flagB"), b, App.match.teams[b].color);
     $("#nameA").textContent = App.match.teams[a].nameEn || a;
     $("#nameB").textContent = App.match.teams[b].nameEn || b;
+    document.title = `RPD-X | ${App.match.teams[a].name} × ${App.match.teams[b].name} — D²-Field 戦術解析`;
     buildRosterTabs();
     buildRoster();
     buildEditorStatic();
     buildScenarioChips();
     buildSubList();
     buildKikenTiles();
+    buildPsyPanel();
+    buildMatchSel();
     buildZoneViewBtns();
     buildInfoModal();
     buildModelModal();
     renderOutcome();
     $("#tlLegend").innerHTML = teamOrder().map(k =>
       `<span><i class="sw" style="background:${seriesColor(k)}"></i>${App.match.teams[k].name} 危険度</span>`
-    ).join("") + `<span><i class="sw" style="background:transparent;border-top:2px dashed ${GOLD}"></i>シナリオ</span>`;
+    ).join("") + `<span><i class="sw" style="background:transparent;border-top:2px dashed ${GOLD}"></i>シナリオ</span>` +
+      `<span title="ピンの来歴: ○=公式記録のイベント / ◆=SIMが生成したイベント（モデル）">○記録 ◆SIM生成</span>`;
     $("#fieldLegend").innerHTML =
       `<span><i class="sw" style="background:linear-gradient(90deg,#FF9D2E,#FF3B2E)"></i>${App.match.teams[teamOrder()[0]].name}の脅威</span>` +
       `<span><i class="sw" style="background:linear-gradient(90deg,#3F8CFF,#7FE7FF)"></i>${App.match.teams[teamOrder()[1]].name}の脅威</span>`;
@@ -4835,7 +6640,9 @@ window.addEventListener("error", (e) => {
             <div class="v" style="color:${seriesColor(k, true)}">${oc.teamDelta[k].deltaPct >= 0 ? "+" : ""}${oc.teamDelta[k].deltaPct}%</div>
           </div>`).join("")}
       </div>
-      <div class="hint">決定論 — 同じシナリオは常に同じ結果。判定は危険度プロセス曲線（20人・GK除外）に基づく。</div>`;
+      <div class="hint">決定論 — 同じシナリオは常に同じ結果。判定は危険度プロセス曲線（20人・GK除外）に基づく。<br>
+      これは「起こり得た未来」の<b>予測ではなく</b>、モデル規則による決定論的<b>再構成</b>です。
+      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>`;
   };
 
   /* --------------------------- D²ダッシュボード --------------------------- */
@@ -4859,6 +6666,112 @@ window.addEventListener("error", (e) => {
             <span class="v num" id="mv-${k}-${m}">0</span>
           </div>`).join("")}
       </div>`).join("");
+  };
+
+  /* --------------------------- PSY パネル --------------------------- */
+  let psyCtx = null;
+  const fitPsy = () => {
+    const cv = $("#psySpark");
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round((cv.clientWidth || 292) * dpr);
+    cv.height = Math.round(54 * dpr);
+    psyCtx = cv.getContext("2d");
+    psyCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  const buildPsyPanel = () => {
+    $("#psyMomo").innerHTML = teamOrder().map(k => `
+      <div class="momo-row" title="心理モメンタム（イベント連鎖・忘却付き / テニス解析の移植）">
+        <span class="tag" style="color:${seriesColor(k, true)}">${k}</span>
+        <div class="momo-track"><div class="momo-zero"></div><div class="momo-fill" id="momo-${k}"></div></div>
+        <span class="mv num" id="momoV-${k}">0</span>
+      </div>`).join("");
+    $("#psyTeams").innerHTML = teamOrder().map(k => `
+      <div class="psy-team">
+        <div class="eyebrow" style="color:${seriesColor(k, true)}">${App.match.teams[k].nameEn || k} — 出場11人平均</div>
+        <div class="psy-mini">
+          <div class="cell"><div class="k">集中</div><div class="v num" id="psy-${k}-cn">—</div></div>
+          <div class="cell"><div class="k">覚醒</div><div class="v num" id="psy-${k}-ar">—</div></div>
+          <div class="cell"><div class="k">精神疲労</div><div class="v num" id="psy-${k}-mf">—</div></div>
+          <div class="cell"><div class="k">HRV%</div><div class="v num" id="psy-${k}-hrv">—</div></div>
+        </div>
+      </div>`).join("");
+    $("#psyHint").textContent = PSY.DISCLAIMER;
+  };
+  const updatePsyPanel = (psy) => {
+    for (const k of teamOrder()) {
+      const m = psy[k].momentum;                       // [-1.2, 1.2]
+      const fill = $(`#momo-${k}`);
+      const w = Math.min(Math.abs(m) / 1.2, 1) * 50;
+      fill.style.left = m >= 0 ? "50%" : `${50 - w}%`;
+      fill.style.width = `${w}%`;
+      fill.style.background = seriesColor(k, true);
+      $(`#momoV-${k}`).textContent = (m >= 0 ? "+" : "") + m.toFixed(2);
+      $(`#psy-${k}-cn`).textContent = Math.round(psy[k].cn);
+      $(`#psy-${k}-ar`).textContent = Math.round(psy[k].ar);
+      $(`#psy-${k}-mf`).textContent = Math.round(psy[k].mf);
+      $(`#psy-${k}-hrv`).textContent = Math.round(psy[k].hrv);
+    }
+    drawPsySpark();
+  };
+  const drawPsySpark = () => {
+    if (!psyCtx) return;
+    const cv = $("#psySpark");
+    const W = cv.clientWidth || 292, H = 54;
+    const g = psyCtx;
+    const range = E.playedRange(App.match);
+    const pts = PSY.momentumCurve(App.match, activeScenario(), 12);
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = "rgba(5,9,17,.55)";
+    g.fillRect(0, 0, W, H);
+    const X = (t) => (t / range.t1) * W;
+    const Y = (m) => H / 2 - (m / 1.2) * (H / 2 - 5);
+    // ゼロ線 + HT
+    g.strokeStyle = "rgba(196,212,240,.22)";
+    g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+    g.strokeStyle = "rgba(196,212,240,.3)"; g.setLineDash([2, 3]);
+    g.beginPath(); g.moveTo(X(App.match.time.h1.end), 3); g.lineTo(X(App.match.time.h1.end), H - 3); g.stroke();
+    g.setLineDash([]);
+    // ゴールピン
+    for (const ev of E.eventsOf(App.match, activeScenario())) {
+      if (ev.type !== "goal") continue;
+      g.fillStyle = seriesColor(ev.team, true);
+      g.beginPath(); g.arc(X(ev.t), ev.team === teamOrder()[0] ? 6 : H - 6, 2.2, 0, 7); g.fill();
+    }
+    // モメンタム曲線
+    for (const k of teamOrder()) {
+      g.strokeStyle = seriesColor(k, true); g.lineWidth = 1.5; g.globalAlpha = 0.9;
+      g.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const x = X(pts[i].t), y = Y(pts[i].v[k]);
+        i ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+    // 再生ヘッド
+    g.strokeStyle = GOLD;
+    g.beginPath(); g.moveTo(X(App.t), 2); g.lineTo(X(App.t), H - 2); g.stroke();
+  };
+
+  /* --------------------------- 試合スイッチャ --------------------------- */
+  const buildMatchSel = () => {
+    const sel = $("#matchSel");
+    const reg = R.data.MATCHES || { [App.match.meta.id]: App.match };
+    const ids = Object.keys(reg);
+    sel.style.display = ids.length > 1 ? "" : "none";
+    sel.innerHTML = ids.map(id => {
+      const m = reg[id];
+      const [a, b] = m.teamOrder || Object.keys(m.teams);
+      return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
+    }).join("");
+    sel.onchange = () => {
+      const m = reg[sel.value];
+      if (m && m !== App.match) {
+        setMatch(m);
+        toast(`試合を切替 — ${m.meta.competition} ${m.meta.stage}`, GOLD);
+      }
+    };
   };
 
   const buildZoneViewBtns = () => {
@@ -4926,6 +6839,15 @@ window.addEventListener("error", (e) => {
       .map(([k, v]) => `<div class="attr"><span>${k}</span><div class="track"><div class="fill" style="width:${v}%;background:${seriesColor(team)}"></div></div><span class="num">${v}</span></div>`).join("");
     $("#inspector").classList.add("open");
     updateInspector(true);
+    // 代謝負荷サマリ（#21 physio — チャンク計算・キャッシュ命中時は即時）
+    $("#inspMet").textContent = "…";
+    $("#inspSpr").textContent = "…";
+    PHYS.summaryAsync(App.match, activeScenario(), team, no, (s) => {
+      if (!App.selected || App.selected.team !== team || App.selected.no !== no) return;
+      if (!s) { $("#inspMet").textContent = "—"; $("#inspSpr").textContent = "—"; return; }
+      $("#inspMet").textContent = s.avgP.toFixed(1) + " W/kg";
+      $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
+    });
   };
   $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); buildRoster(); };
 
@@ -4946,9 +6868,18 @@ window.addEventListener("error", (e) => {
     const goals = evs.filter(e => e.type === "goal" && e.team === team && e.no === no && e.t <= App.t).length;
     const yellow = App.match.events.some(e => e.type === "yellow" && e.team === team && e.no === no && e.t <= App.t);
     $("#inspStat").innerHTML = `${st.label}${goals ? ` · G×${goals}` : ""}${yellow ? ' · <span class="ycard"></span>' : ""}`;
+    // PSY（正準曲線が用意できてから — 決定論・非予測のヒューリスティック推定）
+    const ps = psyReady() ? PSY.playerAt(App.match, activeScenario(), team, no, App.t) : null;
+    App.lastPsySel = ps;
+    $("#inspCn").textContent = ps ? Math.round(ps.cn) : "—";
+    $("#inspAr").textContent = ps ? Math.round(ps.ar) : "—";
+    $("#inspMf").textContent = ps ? Math.round(ps.mf) + "%" : "—";
+    $("#inspHrv").textContent = ps ? Math.round(ps.hrv) + "%" : "—";
   };
 
   /* ----------------------------- タイムライン ----------------------------- */
+  const trailCache = new Map();   // 軌跡メモ（キーにscenarioKeyを含むため明示無効化は不要）
+  let tlLastSig = null;           // 再描画スキップ用（停止中に毎フレーム描かない）
   const fitTimeline = () => {
     const cv = $("#tlCanvas");
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -4956,6 +6887,7 @@ window.addEventListener("error", (e) => {
     cv.height = Math.round(cv.clientHeight * dpr);
     tlCtx = cv.getContext("2d");
     tlCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tlLastSig = null;
   };
 
   // 記号マーカー（絵文字を使わない）
@@ -4993,6 +6925,12 @@ window.addEventListener("error", (e) => {
 
   const drawTimeline = () => {
     if (!tlCtx) return;
+    // 内容が変わらないフレームは描かない（停止中のCPU/GPU節約）
+    const sc0 = activeScenario();
+    const sig = `${App.t.toFixed(2)}|${App.match.meta.id}|${E.scenarioKey(sc0)}|` +
+      `${actualCurve() ? 1 : 0}${activeCurve() ? 1 : 0}`;
+    if (sig === tlLastSig) return;
+    tlLastSig = sig;
     const cv = $("#tlCanvas");
     const W = cv.clientWidth, H = cv.clientHeight;
     const g = tlCtx;
@@ -5114,7 +7052,7 @@ window.addEventListener("error", (e) => {
       }
       const evs = E.eventsOf(App.match, activeScenario());
       const near = evs.filter(ev => Math.abs(ev.t - t) < 60 && ev.label);
-      if (near.length) html += `<br><span style="color:var(--muted)">${near[0].min || ""} ${near[0].label}</span>`;
+      if (near.length) html += `<br><span style="color:var(--muted)">${near[0].min || ""} ${near[0].label}${near[0].sim ? "〔SIM生成〕" : "〔記録〕"}</span>`;
       tip.innerHTML = html;
       tip.style.display = "block";
       tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 320) + "px";
@@ -5213,8 +7151,20 @@ window.addEventListener("error", (e) => {
       <div style="margin:4px 0 8px">${xiRows(a)}</div>
       <div><b style="color:${seriesColor(b, true)}">${m.teams[b].name}</b>（${m.teams[b].phases[0].shape} / ${m.teams[b].coach}）</div>
       <div style="margin:4px 0 8px">${xiRows(b)}</div>
-      <h4>スタッツ（実測）</h4>
-      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
+      <h4>スタッツ（実測 — 各行に出典 / プロバイダにより差があり得ます）</h4>
+      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}${s.src ? `<div class="statsrc">出典: ${s.src}</div>` : ""}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
+      <h4>パスネットワーク上位（モデル推定 — 保持チェーン由来・実パス記録ではない）</h4>
+      ${(() => {
+        const range = E.playedRange(m);
+        const net = E.passNetwork(m, E.actualScenario(m), range.t1);
+        return teamOrder().map(k => {
+          const T = net[k];
+          const nameOf = (no) => m.teams[k].squad.find(q => q.no === no)?.label ?? no;
+          const pairs = T.pairs.slice(0, 4).map(pr => `<span class="chip" style="margin:2px 3px 2px 0">${pr.a} ${nameOf(pr.a)} ⇄ ${pr.b} ${nameOf(pr.b)} ×${pr.n}</span>`).join("");
+          const cent = T.central.slice(0, 3).map(c => `${c.no} ${nameOf(c.no)} ${(c.c * 100).toFixed(0)}%`).join(" · ");
+          return `<div style="margin:4px 0 8px"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b>（推定パス${T.total}本）<br>${pairs}<br><span style="color:var(--muted);font-size:11px">次数中心性: ${cent}</span></div>`;
+        }).join("");
+      })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
@@ -5249,15 +7199,35 @@ window.addEventListener("error", (e) => {
 KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.66 × 1.60)</div>
       <div><span class="chip warn">WARNING ≥ 45</span> <span class="chip crit" style="margin-left:6px">CRITICAL ≥ 75</span>
       — 実試合の3得点すべてが直前にCRITICALへ到達するよう較正済（52'の決定機セーブも97）。</div>
-      <h4>ポゼッション・チェーン</h4>
-      ボールは<b>保持チームの選手の足元</b>に付きます。保持者列（ホールド→パス→奪取）を実測支配率69/31と
-      整合するよう決定論生成し、金色リングが現在の保持者を示します。交代・布陣変更でチェーンも再構成されます。
+      <h4>ポゼッション・チェーン v2</h4>
+      ボールは<b>保持チームの選手の足元</b>に付きます。保持者列は<b>持続性マルコフ</b>
+      （k_keep = 1−τ(1−π), τ=0.42）で生成 — 定常分布は実測支配率のまま、連続保持が
+      優勢側~7本/劣勢側~3.4本の実試合水準になります（独立抽選だと1.4本でパス交換に見える）。
+      パスは中距離カーネル・自己再抽選なし、<b>奪取は前保持者の近傍</b>（タックル収束アンカー付き）。
+      さらに<b>スローイン/コーナー/ゴールキック</b>（1試合~60回）を決定論挿入し、テイカーが
+      ライン際・コーナーアークへ移動して再開します。<b>記録イベント（得点・シュート・セーブ）の
+      直前窓では保持チームを記録へ拘束</b>（アンカーと同じ記録優先の原則）。
+      金色リングが現在の保持者、ステータス帯がリスタート種別を示します。
       <h4>結果再構成（What-if Outcome）</h4>
       交代・布陣は<b>試合結果そのもの</b>を変えます:
       (1) 得点者/アシスト者がピッチ外なら実ゴールは消滅
       (2) 直前の攻撃危険度が実試合比55%未満に落ちても消滅
       (3) 危険度増分の積分から決定論ポアソンで追加ゴールが発生。
       すべて乱数なし — 同じシナリオは常に同じ結末です。
+      <b>これは予測ではありません</b>: モデル規則による決定論的な再構成であり、実ゴール再現は
+      アンカー（記録準拠の再現指定）に基づくため、その説明は因果の発見ではありません。
+      <h4>支配核と「幾何のみ」モード</h4>
+      空間支配のガウス核は既定で σ = 5.5 + pace/100×3（paceは<b>モデル推定能力値</b>）。
+      推定属性への依存を分離検証できるよう、「幾何のみ（等能力 σ=7.0）」モードを算定モジュール
+      パネルで切替できます。切替は危険度・PSY・シナリオ結果に一貫適用（キャッシュ分離）されます。
+      <h4>保持シーケンス蓄積 / 意思決定負荷（推定）</h4>
+      TPA（32秒減衰）より長い「攻撃の流れ」を見るため、同一チーム連続保持の危険度積分
+      （pt·分）を表示します。保持者の意思決定負荷は 開通レーン数 × 最近接プレッサー距離 ×
+      守備密度の幾何ヒューリスティック — <b>ターンオーバー確率などの予測値ではありません</b>。
+      <h4>本ツールの位置づけ</h4>
+      公式記録の可視化と、決定論モデルによる<b>解釈支援（教育・分析検討用）</b>です。
+      予測・ベッティング・スカウティング用途の製品ではなく、選手・審判・チームの実際の
+      心理状態や能力を断定するものでもありません。
       <h4>ムーブメント・エンジン</h4>
       位置は<b>純関数 f(t)</b> — 帯域制限ノイズ＋攻守モーフ＋イベントアンカー＋チェーン調整の合成で、
       どの時刻へスクラブしても完全に同一の世界を返します。速度上限（≤9.9m/s）は各項の周波数×振幅と
@@ -5265,9 +7235,41 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       <h4>交代 — ロジック不可侵</h4>
       FIFA規則（5人・3窓・HT非カウント・再入場禁止・GK同士・常時11人）は<b>バリデータ層</b>が強制。
       AI提案も布陣エディタも手動編集もこの層を必ず通過します。
+      <h4>PSY レイヤー v1 — 心理生理（推定・非予測）</h4>
+      テニス解析のアルゴリズムをサッカーへ移植した<b>読み取り専用の解釈レイヤー</b>です。
+      位置・イベント・結果には一切影響しません。
+      <div class="formula">モメンタム M(t) = Σ_ev w(ev)·±·e^(−Δt/300s)   （忘却係数付きイベント連鎖の連続化）
+覚醒 AR   = 基線48 + Σ活性化インパルス·(1−0.4·MF) + 接戦×終盤 + 現在危険度 − 12·MF
+精神疲労 MF = time-on-task + 被危険度曝露の減衰積分(τ25分) + 0.22·身体疲労 + 文脈(警告/失点/ビハインド)
+集中力 CN  = 100·e^(−(AR−60)²/2σ²)·(1−0.45·MF)·(1−0.15·身体疲労)   （Yerkes-Dodson 逆U字）
+自律神経   = 交感 SNS=0.30+0.55·AR/100+0.18·MF ⇄ 副交感 / HRVプロキシ=(1−SNS)(1−0.4·MF) 安静比%</div>
+      <b>重要</b>: これは生体計測ではなく、決定論ヒューリスティックによる<b>解釈支援</b>です。
+      心理状態の断定・予測ではありません。効果量は文献の定性形状のみ借用し、実試合への適合最適化は行っていません。
+      出典: テニス・モメンタム連鎖（PMC11687916）/ HRVと試合プレッシャー / Yerkes-Dodson / 精神疲労とHRV反応性低下。
       <h4>検証</h4>
-      Node.js テスト（背番号・XI・交代・時計・速度上限・決定論・規則・単調性・結果再構成）全通過。
-      チャート配色はCVD分離で機械検証済み。`;
+      Node.js テスト（背番号・XI・交代・時計・速度上限・決定論・規則・単調性・結果再構成・PSY性質・
+      チェーン品質・接触・生理負荷・フィルタ・UQ）全通過。チャート配色はCVD分離で機械検証済み。
+      <h4>検証を実行 — UQ（区間つきの断定・Issue #19）</h4>
+      <div>D²-Field の「ゴール30秒前警報」を<b>全収録試合</b>で評価し、Wilson 90%信頼区間つきで表示します。</div>
+      <div style="margin:8px 0"><button class="btn gold" id="btnRunUQ">全収録試合で警報性能を評価</button></div>
+      <div class="formula" id="uqOut">未実行（ボタンで評価 — 曲線未計算の試合は先に計算します）</div>`;
+    $("#btnRunUQ").onclick = () => {
+      const out = $("#uqOut");
+      const matches = Object.values(R.data.MATCHES || { [App.match.meta.id]: App.match });
+      out.textContent = "危険度曲線を準備中…";
+      const prep = (i) => {
+        if (i >= matches.length) {
+          const r = UQ.evaluate(matches);
+          out.textContent = UQ.reportText(r) +
+            "\nゴール別直前ピーク: " + r.rows.map(x => `${x.match.slice(-7)} ${x.min} ${Math.round(x.peak)}`).join(" / ");
+          return;
+        }
+        D.curveAsync(matches[i], E.actualScenario(matches[i]), { step: 8, includeGK: false },
+          (p) => { out.textContent = `曲線計算中 ${i + 1}/${matches.length} — ${Math.round(p * 100)}%`; },
+          () => prep(i + 1));
+      };
+      prep(0);
+    };
   };
 
   $("#customTemplate").onclick = () => { $("#customJson").value = JSON.stringify(G.template(), null, 2); };
@@ -5295,8 +7297,11 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     App.t = 0; App.selected = null; App.pickOut = null; App.pickIn = null;
     App.editorSel = null; App.editorDrag = null;
     App.lastIx = null; App.lastField = null; App.lastZone = null;
+    App.lastPsy = null; App.lastPsySel = null; App.hotZone = null;
+    App.speedMap.clear(); App.sprintSet.clear();
     App.zoneView = "BOTH";
-    E.clearCaches(); D.clearCaches(); curveStore.clear();
+    E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
+    App.tackle = null;
     renderer.setMatch(m);
     App.rosterTab = teamOrder()[1] || teamOrder()[0];
     buildStatic();
@@ -5337,6 +7342,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   bindTog("#togZones", "zones");
   bindTog("#togTrail", "trails");
   bindTog("#togLabel", "labels");
+  bindTog("#togSpeed", "speedLabels");
+  bindTog("#togPsy", "psy");
   const setGK = (inc) => {
     App.options.includeGK = inc;
     $("#gk20").classList.toggle("on", !inc);
@@ -5346,6 +7353,22 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   };
   $("#gk20").onclick = () => setGK(false);
   $("#gk22").onclick = () => setGK(true);
+  // 支配核モード（Issue #13: pace属性依存の分離 — 幾何のみ=全員一律σ）
+  const setCore = (geom) => {
+    if (D.isGeomOnly() === geom) return;
+    D.setGeomOnly(geom);                  // danger内部キャッシュは自動クリア
+    PSY.clearCaches();
+    curveStore.clear();
+    $("#corePace").classList.toggle("on", !geom);
+    $("#coreGeom").classList.toggle("on", geom);
+    ensureCurveFor(E.actualScenario(App.match), { includeGK: false }, () => {
+      ensureCurveFor(E.actualScenario(App.match), { includeGK: App.options.includeGK }, () => {});
+      if (isSim()) computeOutcome(App.scenario);
+    });
+    toast(geom ? "支配核: 幾何のみ（等能力・推定属性に非依存）" : "支配核: pace反映（モデル推定属性）", GOLD);
+  };
+  $("#corePace").onclick = () => setCore(false);
+  $("#coreGeom").onclick = () => setCore(true);
   $("#toggleL").onclick = () => $("#dockL").classList.toggle("shown");
   $("#toggleR").onclick = () => $("#dockR").classList.toggle("shown");
 
@@ -5358,6 +7381,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     else if (e.code === "KeyZ") $("#togZones").click();
     else if (e.code === "KeyT") $("#togTrail").click();
     else if (e.code === "KeyL") $("#togLabel").click();
+    else if (e.code === "KeyV") $("#togSpeed").click();
+    else if (e.code === "KeyP") $("#togPsy").click();
     else if (e.code === "KeyG") setGK(!App.options.includeGK);
     else if (e.code.startsWith("Digit")) {
       const i = +e.code.slice(5) - 1;
@@ -5369,10 +7394,15 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ------------------------------ メインループ ------------------------------ */
   let lastNow = performance.now(), lastHUD = 0, lastRosterMin = -1;
   const maxFrames = +(urlq.get("shotframes") || 0) || Infinity; // ヘッドレス検証用
-  let frameCount = 0;
+  let frameCount = 0, curveReadyAt = -1;
   const loop = (now) => {
     const dt = Math.min((now - lastNow) / 1000, 0.1);
     lastNow = now;
+    // 正準曲線の準備完了を検知したら即HUD更新（ヘッドレスでPSY/曲線が確実に載る）
+    if (curveReadyAt < 0 && curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }))) {
+      curveReadyAt = frameCount;
+      lastHUD = 0;
+    }
     const range = E.playedRange(App.match);
     const t0 = App.t;
     if (App.playing) {
@@ -5403,19 +7433,92 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       $("#possA").style.width = pa + "%";
       $("#possAv").textContent = pa;
       $("#possBv").textContent = 100 - pa;
-      // 現在の保持者
+      // 現在の保持者（リスタート中は種別を明示）
       const cr = state.carrier;
-      if (cr && cr.mode === "hold") {
+      const RESTART_JA = { throwin: "スローイン", corner: "コーナーキック", goalkick: "ゴールキック" };
+      if (cr && cr.restart && App.t <= cr.tf + cr.rdelay + 0.5) {
+        const p = App.match.teams[cr.team].squad.find(q => q.no === cr.no);
+        $("#carrierChip").textContent = `${RESTART_JA[cr.restart]} — ${App.match.teams[cr.team].name} ${cr.no} ${p?.label ?? ""}`;
+      } else if (cr && cr.mode === "hold") {
         const p = App.match.teams[cr.team].squad.find(q => q.no === cr.no);
         $("#carrierChip").textContent = `保持 ${App.match.teams[cr.team].name} ${cr.no} ${p?.label ?? ""}`;
       } else if (cr && cr.mode === "flight") {
-        $("#carrierChip").textContent = "パス進行中";
+        $("#carrierChip").textContent = cr.restart ? `${RESTART_JA[cr.restart]}へ` : "パス進行中";
       } else {
         $("#carrierChip").textContent = "";
       }
       updateInspector();
       const min = Math.floor(App.t / 30);
       if (min !== lastRosterMin) { lastRosterMin = min; buildRoster(); }
+
+      // PSY（正準曲線キャッシュ後のみ — 決定論・読み取り専用）
+      if (App.options.psy && psyReady()) {
+        App.lastPsy = PSY.teamAt(App.match, sc, App.t);
+        updatePsyPanel(App.lastPsy);
+      }
+      // 保持者の意思決定負荷（#9 — 幾何のみ・非予測）
+      const dd = App.options.psy ? PSY.decisionAt(App.match, sc, App.t, state) : null;
+      if (dd) {
+        const p = App.match.teams[dd.team].squad.find(q => q.no === dd.no);
+        $("#psyDD").innerHTML =
+          `保持者の意思決定負荷（推定）: <b style="color:${seriesColor(dd.team, true)}">${Math.round(dd.dd)}</b>` +
+          ` — ${p?.label ?? dd.no} · 開通レーン${dd.options} · 最近接${dd.presserDist.toFixed(1)}m`;
+      } else {
+        $("#psyDD").textContent = "";
+      }
+      // タックル/接触（#22 — 描画のスタンブル演出が消費）
+      App.tackle = DUEL.tackleAt(App.match, sc, App.t);
+      // 保持シーケンス蓄積（#14）
+      if (psyReady()) {
+        const sq = D.seqAccumAt(App.match, sc, App.t, { includeGK: false });
+        $("#seqInfo").innerHTML = sq
+          ? `保持シーケンス: <b style="color:${seriesColor(sq.team, true)}">${App.match.teams[sq.team].name}</b> ` +
+            `${sq.passes}本目 · <span class="num">${E.clockAt(App.match, sq.t0).disp}</span>開始 · 危険度蓄積 <b class="num">${sq.accum.toFixed(1)}</b> pt·分`
+          : "";
+      }
+      // 選手速度（8Hzで値を更新・描画は毎フレームの位置に追従）
+      App.speedMap.clear(); App.sprintSet.clear();
+      if (App.options.speedLabels) {
+        for (const p of state.players) {
+          if (!p.onPitch || p.entering) continue;      // 入場走り込み中は対象外
+          const v = E.speedKmh(App.match, sc, p.team, p.no, App.t);
+          const key = p.team + ":" + p.no;
+          App.speedMap.set(key, v);
+          // ヒステリシス（無状態・決定論）: 現在≥20 かつ 0.8秒前≥17 で疾走
+          // （第2サンプルは疾走候補のみ計算 — 不要な位置評価を95%削減）
+          if (v >= 20 && E.speedKmh(App.match, sc, p.team, p.no, App.t - 0.8) >= 17) {
+            App.sprintSet.add(key);
+          }
+        }
+      }
+      // 危険ホットゾーン矩形（WARNING以上のチームの脅威極大セル）
+      App.hotZone = null;
+      if (App.lastField && App.lastIx) {
+        const f = App.lastField;
+        let team = null, total = 0;
+        for (const k of teamOrder()) {
+          const v = App.lastIx[k].total;
+          if (v >= D.WARN_AT && v > total) { total = v; team = k; }
+        }
+        if (team) {
+          const sign = team === f.plus ? 1 : -1;
+          let best = -1, bi = 0;
+          for (let i = 0; i < f.grid.length; i++) {
+            const v = f.grid[i] * sign;
+            if (v > best) { best = v; bi = i; }
+          }
+          if (best > 0.02) {
+            const ci = bi % f.nx, cj = (bi / f.nx) | 0;
+            App.hotZone = {
+              x: -52.5 + ((ci + 0.5) / f.nx) * 105,
+              y: -34 + ((cj + 0.5) / f.ny) * 68,
+              w: (105 / f.nx) * 3.4, h: (68 / f.ny) * 3.4,
+              color: hex2rgb(seriesColor(team, true)),
+              alpha: 0.16 + 0.3 * clamp((total - D.WARN_AT) / (100 - D.WARN_AT)),
+            };
+          }
+        }
+      }
     }
 
     // 3D シーン
@@ -5425,21 +7528,93 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
     let ballTrail = null, playerTrail = null;
     if (App.options.trails) {
+      // 軌跡は0.42s/0.62s格子に量子化してメモ化 — 毎フレームの純関数再評価を排除
+      const sk = E.scenarioKey(sc) + "|" + App.match.meta.id;
+      if (trailCache.size > 30000) trailCache.clear();
       ballTrail = [];
-      for (let i = 16; i >= 1; i--) ballTrail.push(E.ballAt(App.match, sc, Math.max(0, App.t - i * 0.42)));
+      for (let i = 16; i >= 1; i--) {
+        const q = Math.max(0, Math.round((App.t - i * 0.42) / 0.42));
+        const key = "b|" + sk + "|" + q;
+        let pt = trailCache.get(key);
+        if (!pt) { pt = E.ballAt(App.match, sc, q * 0.42); trailCache.set(key, pt); }
+        ballTrail.push(pt);
+      }
       if (App.selected) {
         const pr = E.presenceOf(App.match, sc, App.selected.team, App.selected.no);
         if (pr && App.t > pr.from && App.t <= pr.to) {
           playerTrail = [];
-          for (let i = 12; i >= 1; i--) {
-            const tt = Math.max(pr.from + 0.1, App.t - i * 0.55);
-            playerTrail.push(E.stateFrozenPos(App.match, sc, App.selected.team, App.selected.no, tt));
+          for (let i = 22; i >= 1; i--) {
+            const q = Math.round(Math.max(pr.from + 0.1, App.t - i * 0.62) / 0.62);
+            const key = "p|" + sk + "|" + App.selected.team + App.selected.no + "|" + q;
+            let pt = trailCache.get(key);
+            if (!pt) {
+              pt = E.stateFrozenPos(App.match, sc, App.selected.team, App.selected.no,
+                Math.max(pr.from + 0.1, q * 0.62));
+              trailCache.set(key, pt);
+            }
+            playerTrail.push(pt);
           }
           const col = seriesColor(App.selected.team, true);
           const v = parseInt(col.slice(1), 16);
           playerTrail.color = [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
         }
       }
+    }
+    // 速度ラベル（値は8Hz更新・位置は現フレームの選手に追従）
+    let speedLabels = null;
+    if (App.options.speedLabels && App.speedMap.size) {
+      speedLabels = [];
+      const selKey = App.selected ? App.selected.team + ":" + App.selected.no : null;
+      for (const p of state.players) {
+        if (!p.onPitch) continue;
+        const key = p.team + ":" + p.no;
+        const isSel = key === selKey;
+        if (!isSel && !App.sprintSet.has(key)) continue;
+        speedLabels.push({
+          x: p.x, y: p.y, team: p.team, no: p.no,
+          kmh: Math.round(App.speedMap.get(key) || 0),
+          name: p.name, withName: isSel, sel: isSel,
+        });
+      }
+      speedLabels.sort((a, b) => (b.sel - a.sel) || (b.kmh - a.kmh));
+      speedLabels = speedLabels.slice(0, 5);
+    }
+    // PSY オーラ（選択選手の覚醒状態を色相で — 低:青 / 至適:金 / 過覚醒:赤）
+    let psyAura = null;
+    if (App.options.psy && App.selected && App.lastPsySel && App.lastPsySel.on) {
+      const p = state.players.find(q => q.onPitch && q.team === App.selected.team && q.no === App.selected.no);
+      if (p) {
+        const ar = App.lastPsySel.ar;
+        const cLow = [0.31, 0.49, 1], cOpt = [0.91, 0.8, 0.59], cHi = [1, 0.35, 0.28];
+        const u = clamp((ar - 30) / 45);
+        const v = clamp((ar - 72) / 22);
+        const col = [
+          cLow[0] + (cOpt[0] - cLow[0]) * u + (cHi[0] - cOpt[0]) * v,
+          cLow[1] + (cOpt[1] - cLow[1]) * u + (cHi[1] - cOpt[1]) * v,
+          cLow[2] + (cOpt[2] - cLow[2]) * u + (cHi[2] - cOpt[2]) * v,
+        ];
+        psyAura = { x: p.x, y: p.y, color: col, k: ar / 100, mf: App.lastPsySel.mf / 100 };
+      }
+    }
+    // パスライン（フライト中: 出し手→受け手の点線・カットは赤系 — sample解析映像準拠）
+    let passLine = null;
+    const crF = state.carrier;
+    if (crF && crF.mode === "flight" && crF.from) {
+      const a = state.players.find(p => p.onPitch && p.team === crF.from.team && p.no === crF.from.no);
+      const b = state.players.find(p => p.onPitch && p.team === crF.team && p.no === crF.no);
+      if (a && b) passLine = { x1: a.x, y1: a.y, x2: b.x, y2: b.y, u: crF.u, cut: crF.from.team !== crF.team };
+    }
+    // 接触・シールド演出（描画のみ — データ不変）
+    let tackleFx = null;
+    if (App.tackle) {
+      const u = 1 - (App.t - App.tackle.t0) / 1.3;
+      if (u > 0 && u <= 1) tackleFx = { loserKey: App.tackle.loser.team + ":" + App.tackle.loser.no, u };
+    }
+    let shieldFx = null;
+    const sh = DUEL.shieldAt(state);
+    if (sh) {
+      const pr = state.players.find(q => q.onPitch && q.team === sh.presser.team && q.no === sh.presser.no);
+      if (pr) shieldFx = { holderKey: sh.holder.team + ":" + sh.holder.no, px: pr.x, pz: -pr.y };
     }
     renderer.frame(now / 1000, dt, {
       state,
@@ -5450,9 +7625,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       selected: App.selected,
       hover: App.hover,
       contribMap, ballTrail, playerTrail,
+      speedLabels, psyAura,
+      hotZone: App.hotZone,
+      tackle: tackleFx, shield: shieldFx, passLine,
     });
     drawTimeline();
     if (++frameCount < maxFrames) requestAnimationFrame(loop);
+  };
+  // ヘッドレス（shotframes指定時）: 正準曲線の完了を待ってから描画開始
+  // — 仮想時間を計算に集中させ、全フレームにPSY/曲線が確実に載る
+  const startLoop = () => requestAnimationFrame(loop);
+  const startWhenReady = () => {
+    if (maxFrames === Infinity) { startLoop(); return; }
+    const ready = () => curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }));
+    const wait = () => (ready() ? startLoop() : setTimeout(wait, 40));
+    wait();
   };
 
   /* boot */

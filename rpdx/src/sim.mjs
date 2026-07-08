@@ -171,7 +171,7 @@
           { t: t - 9, x: d * 20, y: gy * 4 },
           { t: t - 1.2, x: d * 40, y: gy * 2.2 },
           { t: t, x: d * 52.2, y: gy, hold: 4 },
-          { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 2 },
+          { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 6 },
         );
         playerAnchors.push(
           { t: t - 8, team, no: scorer.no, x: d * 24, y: gy * 3, sigma: 7 },

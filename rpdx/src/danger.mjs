@@ -47,7 +47,12 @@
     return clamp(decay * (0.35 + 0.65 * open));
   };
 
-  const influence = (p) => 5.5 + (p.attrs ? p.attrs.pac / 100 : 0.75) * 3;
+  // 空間支配核の半径: 既定は速度属性（モデル推定レーティング）依存 σ = 5.5 + pac/100×3。
+  // Issue #13: 推定属性への依存を分離できるよう「幾何のみモード」（全員一律 σ=7.0）を提供。
+  let GEOM_ONLY = false;
+  D.setGeomOnly = (v) => { GEOM_ONLY = !!v; D.clearCaches(); };
+  D.isGeomOnly = () => GEOM_ONLY;
+  const influence = (p) => GEOM_ONLY ? 7.0 : 5.5 + (p.attrs ? p.attrs.pac / 100 : 0.75) * 3;
 
   // セル支配率: 攻撃側スコア / (攻+守)
   const ctrlAt = (cx, cy, atk, def) => {
@@ -226,7 +231,7 @@
     return out;
   };
   const latticeAt = (match, scenario, gt, opts) => {
-    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${opts.includeGK ? 1 : 0}`;
+    const key = `${match.meta.id}|${E.scenarioKey(scenario)}|${opts.includeGK ? 1 : 0}|g${GEOM_ONLY ? 1 : 0}`;
     let m = pressLattice.get(key);
     if (!m) { m = new Map(); pressLattice.set(key, m); }
     if (m.has(gt)) return m.get(gt);
@@ -395,7 +400,7 @@
   /* ---- タイムライン曲線（チャンク計算・キャッシュ） ---- */
   const curveCache = new Map();
   const curveKey = (match, scenario, step, opts) =>
-    `${match.meta.id}|${E.scenarioKey(scenario)}|${step}|${opts.includeGK ? 1 : 0}`;
+    `${match.meta.id}|${E.scenarioKey(scenario)}|${step}|${opts.includeGK ? 1 : 0}|g${GEOM_ONLY ? 1 : 0}`;
   D.curve = (match, scenario, opts = {}) => {
     scenario = scenario || E.actualScenario(match);
     const step = opts.step || 6;
@@ -438,5 +443,23 @@
     chunk();
   };
   D.curveKeyOf = curveKey;
+
+  /* ---- 保持シーケンス単位の危険度蓄積（Issue #14） ----
+     現在の連続保持（チェーンの同一チーム連続区間）における危険度の積分。
+     TPA（32秒の減衰記憶）より長い「この攻撃の流れでどれだけ圧を築いたか」を表す。 */
+  D.seqAccumAt = (match, scenario, t, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const seq = E.sequenceAt(match, scenario, t);
+    if (!seq) return null;
+    const pts = D.curve(match, scenario, { step: opts.step || 8, includeGK: !!opts.includeGK });
+    if (!pts.length) return { ...seq, accum: 0 };
+    const step = opts.step || 8;
+    let acc = 0;
+    const i0 = Math.max(0, Math.round((seq.t0 - pts[0].t) / step));
+    const i1 = Math.min(pts.length - 1, Math.round((t - pts[0].t) / step));
+    for (let i = i0; i <= i1; i++) acc += pts[i].v[seq.team] * step;
+    return { ...seq, accum: acc / 60 };   // pt·分（表示しやすい規模）
+  };
+
   D.clearCaches = () => { curveCache.clear(); pressLattice.clear(); };
 })();

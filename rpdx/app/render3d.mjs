@@ -40,6 +40,17 @@
       const c = Math.cos(ry), s = Math.sin(ry);
       return new Float32Array([c*sx,0,-s*sx,0, 0,sy,0,0, s*sz,0,c*sz,0, x,y,z,1]);
     },
+    rotX(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+    },
+    t(x, y, z) {
+      return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+    },
+    scale(sx, sy, sz) {
+      return new Float32Array([sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1]);
+    },
+    chain(...ms) { let o = ms[0]; for (let i = 1; i < ms.length; i++) o = M4.mul(o, ms[i]); return o; },
   };
 
   /* ------------------------------ meshes ------------------------------ */
@@ -149,9 +160,12 @@
   }`;
   const FS_FLAT = `#version 300 es
   precision highp float; in vec2 vUv; out vec4 o;
-  uniform vec3 uColor; uniform float uAlpha, uRing, uSoft;
+  uniform vec3 uColor; uniform float uAlpha, uRing, uSoft, uRect;
   void main(){
-    float r = length(vUv - 0.5) * 2.0;
+    // uRect>0.5: 角丸矩形距離（ゾーンハイライト用） / それ以外: 円距離
+    float r = uRect > 0.5
+      ? max(abs(vUv.x - 0.5), abs(vUv.y - 0.5)) * 2.0
+      : length(vUv - 0.5) * 2.0;
     float a;
     if (uRing > 0.0) { a = smoothstep(uRing+uSoft, uRing, r) * smoothstep(uRing-0.22-uSoft, uRing-0.22, r); }
     else { a = smoothstep(1.0, 1.0-uSoft, r); }
@@ -310,16 +324,27 @@
     return cv;
   };
 
-  const makeAdCanvas = () => {
+  // 広告ボードは試合メタからデータ駆動生成（マッチパック切替に追従）
+  const makeAdCanvas = (m) => {
     const cv = document.createElement("canvas");
     cv.width = 2048; cv.height = 64;
     const g = cv.getContext("2d");
     g.fillStyle = "#0B1322"; g.fillRect(0, 0, 2048, 64);
     g.font = "700 30px ui-monospace, Menlo, monospace";
-    const items = ["RPD-X", "D²-FIELD // 距離危険度場", "FIFA WORLD CUP 2026™", "BRA 2-1 JPN", "NRG STADIUM HOUSTON", "SAMURAI BLUE", "SELEÇÃO"];
-    let x = 30;
+    const keys = m.teamOrder || Object.keys(m.teams);
+    const [a, b] = keys;
+    const score = m.meta.score || {};
+    const items = [
+      "RPD-X", "D²-FIELD // 距離危険度場",
+      (m.meta.competition || "").toUpperCase() || "FOOTBALL",
+      `${a} ${score[a] ?? ""}-${score[b] ?? ""} ${b}`,
+      (m.meta.venue || "").toUpperCase(),
+      (m.teams[a].nameEn || a).toUpperCase(),
+      (m.teams[b].nameEn || b).toUpperCase(),
+    ].filter(s => s && s.trim());
+    let x = 30, ci = 0;
     for (let k = 0; k < 3; k++) for (const it of items) {
-      g.fillStyle = ["#6FA0FF", "#FFC61A", "#93A3C0"][Math.floor(Math.random() * 3)];
+      g.fillStyle = ["#6FA0FF", "#FFC61A", "#93A3C0"][ci++ % 3];
       g.globalAlpha = 0.8;
       g.fillText(it, x, 42);
       x += g.measureText(it).width + 90;
@@ -480,9 +505,43 @@
 
     const txPitch = canvasTex(gl, makePitchCanvas());
     const txCrowd = canvasTex(gl, makeCrowdCanvas());
-    const txAd = canvasTex(gl, makeAdCanvas());
+    let txAd = canvasTex(gl, makeAdCanvas(match));
     const txNet = canvasTex(gl, makeNetCanvas(), false);
     const txGlow = canvasTex(gl, makeGlowCanvas(), false);
+
+    // 汎用テキスト・テクスチャ（速度ラベル/選手タグ — 内容キーでキャッシュ）
+    const textCache = new Map();
+    const textTex = (key, draw) => {
+      if (textCache.has(key)) return textCache.get(key);
+      const cv = document.createElement("canvas");
+      draw(cv);
+      const entry = { tx: canvasTex(gl, cv), w: cv.width, h: cv.height };
+      textCache.set(key, entry);
+      return entry;
+    };
+    // 「24 | SANO」タグ（選手毎キャッシュ）
+    const nameTagTex = (team, p) => textTex(`tag:${team}:${p.no}`, (cv) => {
+      cv.width = 512; cv.height = 80;
+      const g = cv.getContext("2d");
+      const surname = (p.name || "").trim().split(/\s+/).pop().toUpperCase();
+      g.font = "600 46px -apple-system, 'Helvetica Neue', sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.shadowColor = "rgba(4,8,16,0.9)"; g.shadowBlur = 10; g.shadowOffsetY = 2;
+      g.fillStyle = "rgba(233,240,250,0.92)";
+      g.fillText(`${p.no} | ${surname}`, 256, 40, 500);
+    });
+    // 「18 km/h」（整数km/h × チーム色でキャッシュ — 生成は最大 ~36×2 枚）
+    const speedTagTex = (kmh, colorCss) => textTex(`spd:${kmh}:${colorCss}`, (cv) => {
+      cv.width = 384; cv.height = 84;
+      const g = cv.getContext("2d");
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.shadowColor = "rgba(4,8,16,0.9)"; g.shadowBlur = 10; g.shadowOffsetY = 2;
+      g.fillStyle = colorCss;
+      g.font = "800 58px -apple-system, 'Helvetica Neue', sans-serif";
+      g.fillText(`${kmh}`, 132, 44);
+      g.font = "700 34px -apple-system, 'Helvetica Neue', sans-serif";
+      g.fillText("km/h", 256, 50);
+    });
 
     // ヒートマップ動的テクスチャ
     const heatCv = document.createElement("canvas");
@@ -647,6 +706,7 @@
       gl.uniform1f(U(prFlat, "uAlpha"), opts.alpha ?? 1);
       gl.uniform1f(U(prFlat, "uRing"), opts.ring ?? 0);
       gl.uniform1f(U(prFlat, "uSoft"), opts.soft ?? 0.25);
+      gl.uniform1f(U(prFlat, "uRect"), opts.rect ?? 0);
     };
     // ビルボード行列（カメラに正対）
     const billboard = (x, y, z, w, h) => {
@@ -657,6 +717,110 @@
       m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
       m[12] = x; m[13] = y; m[14] = z;
       return m;
+    };
+
+    /* ------------------- 人型フィギュア（ゲイトつき低ポリ） ------------------- */
+    // 肌・髪トーン（選手ごとに決定論選択 — 表示上の多様性のみ・実在特徴の推定ではない）
+    const SKIN = [[0.95,0.80,0.62],[0.85,0.65,0.45],[0.66,0.47,0.31],[0.47,0.32,0.21]];
+    const HAIR = [[0.10,0.09,0.08],[0.22,0.15,0.09],[0.05,0.05,0.06],[0.30,0.24,0.15]];
+    const toneOf = (team, no) => {
+      const u = N.hash2(N.seedOf(team + "skin"), no * 13 + 5);
+      const i = Math.min(SKIN.length - 1, (u * SKIN.length) | 0);
+      return { skin: SKIN[i], hair: HAIR[Math.min(HAIR.length - 1, ((u * 7919) % 1 * HAIR.length) | 0)] };
+    };
+    // 描画側の歩容状態（向き・位相・速度）— 見た目のみ・データは純関数のまま
+    const figState = new Map();
+    const figOf = (key) => {
+      let f = figState.get(key);
+      if (!f) { f = { yaw: Math.PI / 2, phase: Math.random() * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }
+      return f;
+    };
+    const lerpAngle = (a, b, u) => {
+      let d = b - a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return a + d * u;
+    };
+    // 1人分を描画: base位置(px,pz) + キット色 + 透明度。extras: {stumble, shieldX, shieldZ}
+    // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
+    // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
+    // 歩きと走りの差: ケイデンス・膝屈曲（二節脚）・前傾・上下動を速度で連続変調。
+    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex) => {
+      const f = figOf(key);
+      if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
+      const dx = px - f.lx, dz = pz - f.lz;
+      const dist = Math.hypot(dx, dz);
+      let backpedal = false;
+      const dbx = bx - px, dbz = bz - pz;
+      const dBall = Math.hypot(dbx, dbz);
+      const stumble = ex && ex.stumble ? ex.stumble : 0;
+      const shield = ex && ex.shield ? ex.shield : null;
+      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
+      else if (dt > 0) {
+        const vInst = Math.min(dist / dt, 10);
+        f.v += (vInst - f.v) * Math.min(1, dt * 5);
+        if (shield && f.v < 3) {
+          // シールド: プレッサーへ背を向けボールと相手の間に体を入れる
+          const target = Math.atan2(px - shield.x, pz - shield.z);
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 4.5));
+        } else if (f.v > 0.6 && dist > 0.002) {
+          const dot = (dx * dbx + dz * dbz) / (dist * (dBall || 1));
+          backpedal = dot < -0.35 && f.v < 4.5 && dBall < 45;
+          const target = backpedal ? Math.atan2(dbx, dbz) : Math.atan2(dx, dz);
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * (backpedal ? 5 : 7)));
+        } else if (f.v <= 0.6) {
+          const target = dBall < 30 ? Math.atan2(dbx, dbz) : defYaw;
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 2.2));
+        }
+        // ケイデンス: 歩き~0.9Hz → スプリント~1.6Hz（ストライド）
+        f.phase += dt * (4.2 + f.v * 0.85) * (f.v > 0.3 ? 1 : 0.25);
+        f.lx = px; f.lz = pz;
+      }
+      const run = clamp(f.v / 6, 0, 1);
+      const gaitAmp = backpedal ? 0.55 : 1;
+      const hipA = (0.10 + 0.75 * run) * gaitAmp;             // 股スイング振幅
+      const kneeB = 0.35 + 1.05 * run;                        // 膝屈曲（走りほど深い）
+      const lean = stumble > 0 ? 0.15 + 0.55 * Math.sin(stumble * Math.PI)
+        : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
+      const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0);
+      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
+      const op = { emiss: 0.04, alpha };
+      // 脚 = 腿 + 脛の二節（膝屈曲で歩走が一目で分かる）
+      const legC = [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
+      for (const s of [-1, 1]) {
+        const phi = f.phase + (s < 0 ? Math.PI : 0);
+        const hip = Math.sin(phi) * hipA;
+        const knee = kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
+        const hipT = M4.chain(base, M4.t(s * 0.13, 0.94, 0), M4.rotX(hip));
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
+        drawMesh(mCapsule);
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.rotX(knee), M4.t(0, -0.44, 0), M4.scale(0.088, 0.44, 0.088)), legC, op);
+        drawMesh(mCapsule);
+      }
+      // 上半身ピボット: 前傾 + 脚と逆位相のひねり（肩の回旋 — 人形っぽさを消す）
+      const twist = Math.sin(f.phase) * (0.05 + 0.16 * run) * gaitAmp;
+      const upper = M4.chain(base, M4.t(0, 0.90, 0), M4.rotX(lean), M4.trs(0, 0, 0, 1, 1, 1, twist));
+      // ショーツ → 胴（シャツ） → 頭（髪/肌スプリット・首はひねりを6割打ち消す）
+      useLambert(M4.chain(base, M4.t(0, 0.68, 0), M4.scale(0.21, 0.36, 0.185)), shorts, op);
+      drawMesh(mCapsule);
+      useLambert(M4.chain(upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
+      drawMesh(mCapsule);
+      const headY = bob + 0.90 + 0.80 * Math.cos(lean);
+      useLambert(
+        M4.chain(upper, M4.trs(0, 0, 0, 1, 1, 1, -twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
+        tone.hair, { color2: tone.skin, split: headY - 0.02, emiss: 0.03, alpha });
+      drawMesh(mSphere);
+      // 腕 = 上腕 + 前腕（肘 — 走るほど深く曲げてポンピング・スタンブルでバランス）
+      for (const s of [-1, 1]) {
+        const armSw = -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
+        const elbow = 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
+        const shoulder = M4.chain(upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(armSw));
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
+        drawMesh(mCapsule);
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.rotX(-elbow), M4.t(0, -0.27, 0), M4.scale(0.060, 0.27, 0.060)), tone.skin, op);
+        drawMesh(mCapsule);
+      }
+      return f.v;
     };
 
     /* ---------------------------- static world ---------------------------- */
@@ -843,6 +1007,22 @@
         gl.disable(gl.BLEND);
       }
 
+      // 危険ホットゾーン矩形（WARNING以上 — 放送グラフィクスのエリア強調）
+      if (scene.hotZone) {
+        const hz = scene.hotZone;
+        const pulse = 0.8 + 0.2 * Math.sin(time * 2.6);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        // 面のウォッシュ + 枠線（角丸矩形リング）
+        useFlat(M4.trs(hz.x, 0.05, -hz.y, hz.w, 1, hz.h), hz.color, { alpha: hz.alpha * 0.55 * pulse, soft: 0.5, rect: 1 });
+        drawMesh(mQuad);
+        useFlat(M4.trs(hz.x, 0.055, -hz.y, hz.w, 1, hz.h), hz.color, { alpha: hz.alpha * 1.6 * pulse, ring: 0.97, soft: 0.03, rect: 1 });
+        drawMesh(mQuad);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
       /* ---- 粒子場の構築（ゾーニング + 危険場粒子モード） ---- */
       partReset();
       const zoneView = scene.zoneView || "BOTH";
@@ -914,25 +1094,69 @@
         }
       }
 
-      // 軌跡（ボール）
+      // 軌跡（ボール = 光跡コメット / 選手 = 点線ラントレイル）
       if (options.trails && scene.ballTrail) {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         gl.depthMask(false);
         const tr = scene.ballTrail;
         for (let i = 1; i < tr.length; i++) {
-          const a = (i / tr.length) * 0.5;
-          useFlat(M4.trs(tr[i].x, 0.09, -tr[i].y, 0.5, 1, 0.5), [1, 1, 1], { alpha: a, soft: 0.9 });
+          const u = i / tr.length;
+          const a = Math.pow(u, 1.5) * 0.85;               // テール減衰 → ヘッド輝き
+          const s = 0.22 + u * 0.72;
+          useFlat(M4.trs(tr[i].x, 0.09 + (tr[i].z || 0) * 0.5, -tr[i].y, s, 1, s), [0.86, 0.93, 1], { alpha: a, soft: 0.85 });
           drawMesh(mQuad);
         }
         if (scene.playerTrail) {
+          // 等間隔ドット（点線）: 走路の見た目を放送グラフィクスに揃える
           const pt = scene.playerTrail;
+          let acc = 0;
           for (let i = 1; i < pt.length; i++) {
-            const a = (i / pt.length) * 0.6;
-            useFlat(M4.trs(pt[i].x, 0.09, -pt[i].y, 0.7, 1, 0.7), pt.color, { alpha: a, soft: 0.9 });
+            const d = Math.hypot(pt[i].x - pt[i - 1].x, pt[i].y - pt[i - 1].y);
+            acc += d;
+            if (acc < 1.4) continue;
+            acc = 0;
+            const u = i / pt.length;
+            useFlat(M4.trs(pt[i].x, 0.09, -pt[i].y, 0.42, 1, 0.42), pt.color, { alpha: 0.15 + u * 0.75, soft: 0.35 });
             drawMesh(mQuad);
           }
         }
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      // パスライン（フライト中の点線 — カット=赤系・ボール付近が明るい・受け手にリング）
+      if (scene.passLine) {
+        const pl = scene.passLine;
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        const dx = pl.x2 - pl.x1, dy = pl.y2 - pl.y1;
+        const len = Math.hypot(dx, dy);
+        const nDots = Math.max(2, Math.floor(len / 1.5));
+        const col = pl.cut ? [1, 0.42, 0.32] : [0.85, 0.92, 1];
+        for (let i = 0; i <= nDots; i++) {
+          const uD = i / nDots;
+          const a2 = 0.10 + 0.55 * Math.max(0, 1 - Math.abs(uD - pl.u) * 2.6);
+          useFlat(M4.trs(pl.x1 + dx * uD, 0.1, -(pl.y1 + dy * uD), 0.34, 1, 0.34), col, { alpha: a2, soft: 0.4 });
+          drawMesh(mQuad);
+        }
+        useFlat(M4.trs(pl.x2, 0.05, -pl.y2, 3.2, 1, 3.2), col, { alpha: 0.5 * (0.35 + 0.65 * pl.u), ring: 0.8, soft: 0.12 });
+        drawMesh(mQuad);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      // PSY オーラ（選択選手の覚醒状態 — 低:青 / 至適:金 / 過覚醒:赤）
+      if (scene.psyAura) {
+        const au = scene.psyAura;
+        const pulse = 0.75 + 0.25 * Math.sin(time * (2.2 + au.k * 3.4));
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        useFlat(M4.trs(au.x, 0.045, -au.y, 5.4 + au.k * 1.2, 1, 5.4 + au.k * 1.2), au.color,
+          { alpha: (0.3 + 0.45 * au.k) * pulse, ring: 0.86, soft: 0.16 });
+        drawMesh(mQuad);
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
@@ -944,6 +1168,25 @@
         const db = (eye[0] - b.x) ** 2 + (eye[2] + b.y) ** 2;
         return db - da;
       });
+      // ソフト分離（描画のみ）: 近接ペアの体の重なりを押し離す — データ座標は不変
+      const sepMap = new Map();
+      {
+        const on = state.players.filter(p => p.onPitch);
+        for (let i = 0; i < on.length; i++) for (let j = i + 1; j < on.length; j++) {
+          const a = on[i], b = on[j];
+          const ddx = b.x - a.x, ddy = b.y - a.y;
+          const d = Math.hypot(ddx, ddy);
+          if (d >= 0.6 || d < 1e-4) continue;
+          const push = Math.min(0.3, (0.6 - d) * 0.5);
+          const ux = ddx / d, uy = ddy / d;
+          const ka = a.team + ":" + a.no, kb = b.team + ":" + b.no;
+          const sa = sepMap.get(ka) || { x: 0, y: 0 };
+          const sb = sepMap.get(kb) || { x: 0, y: 0 };
+          sa.x -= ux * push; sa.y -= uy * push;
+          sb.x += ux * push; sb.y += uy * push;
+          sepMap.set(ka, sa); sepMap.set(kb, sb);
+        }
+      }
       const bodyAlpha = options.solidPlayers ? 1 : 0.87;
       for (const p of sorted) {
         const T = match.teams[p.team];
@@ -984,13 +1227,22 @@
         }
         gl.depthMask(true);
 
-        // 体（カプセル: 上=シャツ/下=ショーツ・フレネル半透明）
-        useLambert(
-          M4.trs(px, 0, pz, 0.42, 1.78, 0.42),
-          shirt,
-          { color2: shorts, split: 0.62, emiss: 0.04, alpha: bodyAlpha * alpha }
+        // 体（人型フィギュア: 胴・頭・腕2・二節脚 + 歩走ゲイト・接触演出）
+        const half = state.half || 1;
+        const dir = (match.dir && match.dir[p.team]) ? match.dir[p.team][half === 1 ? "h1" : "h2"] : 1;
+        const figKey = p.team + ":" + p.no;
+        const sep = sepMap.get(figKey);
+        const ex = {
+          stumble: scene.tackle && scene.tackle.loserKey === figKey ? scene.tackle.u : 0,
+          shield: scene.shield && scene.shield.holderKey === figKey
+            ? { x: scene.shield.px, z: scene.shield.pz } : null,
+        };
+        drawFigure(
+          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
+          shirt, shorts, toneOf(p.team, p.no),
+          bodyAlpha * alpha, Math.atan2(dir, 0),
+          state.ball.x, -state.ball.y, ex
         );
-        drawMesh(mCapsule);
         gl.disable(gl.BLEND);
       }
 
@@ -1032,6 +1284,34 @@
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
+
+      // 速度ラベル（放送グラフィクス風「24 | SANO / 18 km/h」— 番号ラベルとは独立）
+      if (scene.speedLabels && scene.speedLabels.length) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        for (const L of scene.speedLabels) {
+          const T = match.teams[L.team];
+          const p = T.squad.find(q => q.no === L.no);
+          if (!p) continue;
+          const d = Math.hypot(eye[0] - L.x, eye[1] - 2, eye[2] + L.y);
+          const s = clamp(d * 0.045, 1.7, 5.6);   // 放送グラフィクス並みの視認性
+          const kitCss = T.kit ? T.kit.shirt : (T.color || "#FFE24A");
+          const spd = speedTagTex(Math.min(L.kmh, 36), kitCss);
+          const yBase = options.labels ? 3.75 : 2.9;      // 番号ラベルと重ならない高さ
+          if (L.withName) {
+            const tag = nameTagTex(L.team, p);
+            useTex(billboard(L.x, yBase + s * 0.62, -L.y, s * 2.4, s * 0.375), tag.tx, { alpha: 0.95, fog: 1e9 });
+            drawMesh(mVQuad);
+          }
+          if (L.kmh >= 1) {
+            useTex(billboard(L.x, yBase + s * (L.withName ? 0.28 : 0.34), -L.y, s * 1.55, s * 0.34), spd.tx, { alpha: 0.95, fog: 1e9 });
+            drawMesh(mVQuad);
+          }
+        }
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
     };
 
     // ピッキング（クリック → 選手）
@@ -1065,7 +1345,14 @@
       return { hit: best, moved };
     };
 
-    api.setMatch = (m) => { match = m; labelCache.clear(); };
+    api.setMatch = (m) => {
+      match = m;
+      labelCache.clear();
+      textCache.clear();
+      figState.clear();
+      gl.deleteTexture(txAd);
+      txAd = canvasTex(gl, makeAdCanvas(match));   // 広告ボードを新試合のメタで再生成
+    };
     api.gl = gl;
     return api;
   };

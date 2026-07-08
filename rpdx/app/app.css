@@ -405,6 +405,32 @@ body.showkeys #keyhelp { display: block; }
   #viewbar { top: auto; bottom: 130px; }
   #timelineWrap { bottom: 8px; left: 8px; right: 8px; }
 }
+/* ---------- PSY 心理生理レイヤー ---------- */
+.momo-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.momo-row .tag { width: 34px; font-family: var(--mono); font-size: 10px; font-weight: 700; }
+.momo-track {
+  position: relative; flex: 1; height: 12px; border-radius: 6px;
+  background: rgba(5, 9, 17, 0.8); border: 1px solid var(--line); overflow: hidden;
+}
+.momo-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(196,212,240,.3); }
+.momo-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; transition: none; }
+.momo-row .mv { width: 40px; text-align: right; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+#psySpark { width: 100%; height: 54px; display: block; margin-top: 8px; border-radius: 7px; }
+.psy-team { margin-top: 9px; }
+.psy-mini { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; }
+.psy-mini .cell { background: rgba(5,9,17,.55); border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; }
+.psy-mini .k { font-size: 8.5px; color: var(--faint); letter-spacing: .06em; }
+.psy-mini .v { font-family: var(--mono); font-size: 13px; font-weight: 700; margin-top: 1px; }
+#inspector .stats.psy { margin-top: 6px; }
+#inspector .stats.psy .k { color: var(--gold-deep); }
+
+/* 試合スイッチャ */
+#matchSel { max-width: 210px; }
+
+/* 推定チップ（事実 vs 推定の常時明示） */
+.chip.est { color: var(--faint); border-color: var(--line); font-weight: 600; margin-left: 8px; }
+.statsrc { font-size: 8.5px; color: var(--faint); letter-spacing: .04em; }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

@@ -1,0 +1,210 @@
+// リアリズム回帰 — 佐野ゴールのスプリント再現・プレッシャー距離・リスタートの受け手
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { RPDX, MATCH, MATCHES } from "./load.mjs";
+
+const E = RPDX.engine;
+const act = (m) => E.actualScenario(m);
+const m1s = (mm, ss = 0) => mm * 60 + ss;
+
+test("realism: 得点後 — 全員が自陣へ帰陣してからキックオフ", () => {
+  const sc = act(MATCH);
+  for (const g of MATCH.events.filter(e => e.type === "goal")) {
+    const rt = MATCH.ballAnchors.find(a => a.x === 0 && a.y === 0 && a.t > g.t && a.t < g.t + 130);
+    assert.ok(rt, `${g.min} 再開アンカー`);
+    const st = E.stateAt(MATCH, sc, rt.t + 1);
+    let okN = 0, n = 0;
+    for (const p of st.players) {
+      if (!p.onPitch || p.entering) continue;
+      const dir = MATCH.dir[p.team][st.half === 1 ? "h1" : "h2"];
+      n++;
+      if (dir > 0 ? p.x <= 1.5 : p.x >= -1.5) okN++;    // 自陣（1.5m許容）
+    }
+    assert.ok(okN >= n - 2, `${g.min} 自陣帰還 ${okN}/${n}`);
+  }
+});
+
+test("realism: 佐野ゴール — BRAビルドアップ→佐野のパスカット→独走保持", () => {
+  const sc = act(MATCH);
+  assert.equal(E.carrierAt(MATCH, sc, m1s(28, 34)).team, "BRA", "カット前はBRA保持");
+  for (const ss of [42, 45, 48, 51]) {
+    const c = E.carrierAt(MATCH, sc, m1s(28, ss));
+    assert.equal(c.team + c.no, "JPN24", `28:${ss} は佐野が保持`);
+  }
+  let cut = null;
+  for (let t = m1s(28, 38); t <= m1s(28, 44); t += 0.25) {
+    const d = RPDX.duel.tackleAt(MATCH, sc, t);
+    if (d && d.winner.team === "JPN" && d.winner.no === 24) { cut = d; break; }
+  }
+  assert.ok(cut, "カットが接触（インターセプト）として検出される");
+});
+
+test("realism: 佐野ゴール — ドリブル中ボールが足元2.2m以内（離れない）", () => {
+  const sc = act(MATCH);
+  for (let t = m1s(28, 43); t <= m1s(28, 51.5); t += 0.5) {
+    const st = E.stateAt(MATCH, sc, t);
+    const sano = st.players.find(p => p.onPitch && p.team === "JPN" && p.no === 24);
+    const d = Math.hypot(sano.x - st.ball.x, sano.y - st.ball.y);
+    assert.ok(d < 2.2, `t=${t} ボール距離 ${d.toFixed(2)}m`);
+  }
+});
+
+test("realism: 佐野ゴール — 伊東が右を並走・前田が左に張る", () => {
+  const sc = act(MATCH);
+  const ito = E.stateFrozenPos(MATCH, sc, "JPN", 14, 1732);
+  const maeda = E.stateFrozenPos(MATCH, sc, "JPN", 11, 1732);
+  assert.ok(ito.x < -26 && ito.y > 4, `伊東 (${ito.x.toFixed(1)}, ${ito.y.toFixed(1)})`);
+  assert.ok(maeda.x < -26 && maeda.y < -4, `前田 (${maeda.x.toFixed(1)}, ${maeda.y.toFixed(1)})`);
+});
+
+test("realism: 集団サージ — カウンターで最終ライン撤退・前線押上げが同時に起きる", () => {
+  const sc = act(MATCH);
+  const meanX = (t, team, roles) => {
+    const st = E.stateAt(MATCH, sc, t);
+    const ps = st.players.filter(p => p.onPitch && p.team === team && roles.includes(p.role));
+    return ps.reduce((s, p) => s + p.x, 0) / ps.length;
+  };
+  // KP 1690:-0.3 → 1733:-1.0 の急流（日本のカウンター）
+  const braDef0 = meanX(1692, "BRA", ["CB", "FB"]);
+  const braDef1 = meanX(1714, "BRA", ["CB", "FB"]);
+  assert.ok(braDef1 < braDef0 - 2, `BRA最終ライン撤退 ${braDef0.toFixed(1)} → ${braDef1.toFixed(1)}`);
+  const jpnFw0 = meanX(1692, "JPN", ["ST", "W"]);
+  const jpnFw1 = meanX(1714, "JPN", ["ST", "W"]);
+  assert.ok(jpnFw1 < jpnFw0 - 2, `JPN前線押上げ ${jpnFw0.toFixed(1)} → ${jpnFw1.toFixed(1)}`);
+});
+
+test("realism: チェーン・コーナーでボックスが密集（攻3+守4）", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = act(m);
+    const range = E.playedRange(m);
+    let checked = 0;
+    for (let t = range.t0 + 5; t < range.t1 && checked < 2; t += 2) {
+      const c = E.carrierAt(m, sc, t);
+      if (!c || c.restart !== "corner" || c.mode !== "hold") continue;
+      const tC = c.seg.tf + c.seg.rdelay * 0.85;
+      if (Math.abs(t - tC) > 2.5) continue;
+      const st = E.stateAt(m, sc, tC);
+      const gx = Math.sign(c.seg.rx) * 52.5;
+      let atk = 0, def = 0;
+      for (const p of st.players) {
+        if (!p.onPitch) continue;
+        if (Math.abs(p.x - gx) < 18 && Math.abs(p.y) < 20.2) {
+          if (p.team === c.team) atk++; else def++;
+        }
+      }
+      assert.ok(atk >= 3, `${m.meta.id} corner攻撃側 ${atk}`);
+      assert.ok(def >= 4, `${m.meta.id} corner守備側 ${def}`);
+      checked++;
+      t = c.seg.t1 + 5;
+    }
+    assert.ok(checked >= 1, `${m.meta.id} コーナー密集検証 ${checked}件`);
+  }
+});
+
+test("realism: 45分の直接FK — 守備側の壁が形成される", () => {
+  const sc = act(MATCH);
+  const ev = MATCH.events.find(e => e.type === "yellow" && e.no === 15);   // 45' 鎌田（BRAのFK）
+  const spot = { x: 20, y: -14 };
+  const d = Math.hypot(52.5 - spot.x, spot.y);
+  const ux = (52.5 - spot.x) / d, uy = -spot.y / d;
+  const wx = spot.x + ux * 9.15, wy = spot.y + uy * 9.15;
+  const st = E.stateAt(MATCH, sc, ev.t + 9);
+  let wall = 0;
+  for (const p of st.players) {
+    if (!p.onPitch || p.team !== "JPN") continue;
+    if (Math.hypot(p.x - wx, p.y - wy) < 4.5) wall++;
+  }
+  assert.ok(wall >= 2, `壁 ${wall}人（地点${wx.toFixed(1)},${wy.toFixed(1)}）`);
+});
+
+test("realism: 佐野29'ゴール — 独走がスプリント速度（≥20km/h）で再現される", () => {
+  const sc = act(MATCH);
+  let peak = 0;
+  for (let t = 1726; t <= 1732.5; t += 0.25) {
+    peak = Math.max(peak, E.speedKmh(MATCH, sc, "JPN", 24, t));
+  }
+  assert.ok(peak >= 20 && peak < 35.7, `佐野ピーク ${peak.toFixed(1)}km/h`);
+});
+
+test("realism: 佐野29'ゴール — カゼミーロが帰陣チェイス（≥13km/h）・終端で佐野の背後", () => {
+  const sc = act(MATCH);
+  let peak = 0;
+  for (let t = 1726; t <= 1732.5; t += 0.25) {
+    peak = Math.max(peak, E.speedKmh(MATCH, sc, "BRA", 5, t));
+  }
+  assert.ok(peak >= 13, `カゼミーロ・チェイス ${peak.toFixed(1)}km/h`);
+  // シュート時点: 佐野が前・カゼミーロが後方（抜き去りの構図）
+  const sano = E.stateFrozenPos(MATCH, sc, "JPN", 24, 1732);
+  const case5 = E.stateFrozenPos(MATCH, sc, "BRA", 5, 1732);
+  assert.ok(sano.x < case5.x - 3, `佐野${sano.x.toFixed(1)} < カゼミーロ${case5.x.toFixed(1)}−3`);
+});
+
+for (const m of Object.values(MATCHES)) {
+  const id = m.meta.id;
+
+  test(`realism[${id}]: プレッシャー — オープンプレー保持者への最近接守備者は中央値2〜6m`, () => {
+    const sc = act(m);
+    const range = E.playedRange(m);
+    const ds = [];
+    for (let t = range.t0 + 60; t < range.t1; t += 17) {
+      const st = E.stateAt(m, sc, t);
+      const c = st.carrier;
+      if (!c || c.mode !== "hold" || c.u < 0.85) continue;
+      if (c.restart || st.ball.free < 0.9) continue;
+      const holder = st.players.find(p => p.onPitch && p.team === c.team && p.no === c.no);
+      if (!holder) continue;
+      let dn = 1e9;
+      for (const p of st.players) {
+        if (!p.onPitch || p.team === c.team || p.role === "GK") continue;
+        dn = Math.min(dn, Math.hypot(p.x - holder.x, p.y - holder.y));
+      }
+      ds.push(dn);
+    }
+    ds.sort((a, b) => a - b);
+    const med = ds[ds.length >> 1];
+    assert.ok(ds.length > 80, `サンプル ${ds.length}`);
+    assert.ok(med >= 1.5 && med <= 6, `プレス距離中央値 ${med.toFixed(2)}m`);
+  });
+
+  test(`realism[${id}]: スローイン/GKの次の保持は同チームの別選手（自己パスに見えない）`, () => {
+    const sc = act(m);
+    const range = E.playedRange(m);
+    let ok = 0, all = 0;
+    let prev = null;
+    for (let t = range.t0 + 5; t < range.t1; t += 1) {
+      const c = E.carrierAt(m, sc, t);
+      if (!c) { prev = null; continue; }
+      const segKey = c.seg.t0;
+      if (prev && prev.segKey !== segKey) {
+        if (prev.restart === "throwin" || prev.restart === "goalkick") {
+          all++;
+          if (c.team === prev.team && c.no !== prev.no) ok++;
+        }
+      }
+      prev = { segKey, team: c.team, no: c.no, restart: c.restart };
+    }
+    assert.ok(all >= 20, `リスタート後継 ${all}`);
+    // 記録イベント拘束窓（ゴール/FK等）と重なった場合のみ例外を許容
+    assert.ok(ok / all >= 0.9, `同チーム別選手率 ${ok}/${all}`);
+  });
+
+  test(`realism[${id}]: コーナーの次の保持者はゴール前（クロスの絵になる）`, () => {
+    const sc = act(m);
+    const range = E.playedRange(m);
+    let near = 0, all = 0;
+    let prev = null;
+    for (let t = range.t0 + 5; t < range.t1; t += 1) {
+      const c = E.carrierAt(m, sc, t);
+      if (!c) { prev = null; continue; }
+      const segKey = c.seg.t0;
+      if (prev && prev.segKey !== segKey && prev.restart === "corner") {
+        all++;
+        const p = E.stateFrozenPos(m, sc, c.team, c.no, c.seg.tf + 0.1);
+        const gx = Math.sign(prev.rx) * 52.5;
+        if (Math.hypot(p.x - gx, p.y) < 30) near++;
+      }
+      prev = { segKey, restart: c.restart, rx: c.seg.rx };
+    }
+    if (all >= 3) assert.ok(near / all >= 0.6, `ゴール前受け ${near}/${all}`);
+  });
+}

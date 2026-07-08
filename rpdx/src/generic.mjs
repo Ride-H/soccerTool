@@ -108,7 +108,7 @@
     // ---- 得点の決定論合成 ----
     const events = [{ t: 0, type: "kickoff", team: kA, label: "キックオフ" },
       { t: H2, type: "halftime", label: "前半終了" }, { t: H2, type: "kickoff", team: kB, label: "後半開始" }];
-    const ballAnchors = [{ t: 0, x: 0, y: 0, hold: 2 }, { t: H2, x: 0, y: 0, hold: 2 }];
+    const ballAnchors = [{ t: 0, x: 0, y: 0, hold: 6 }, { t: H2, x: 0, y: 0, hold: 6 }];
     const possessionKP = [[0, bias * 0.3]];
     const dir = { [kA]: { h1: +1, h2: -1 }, [kB]: { h1: -1, h2: +1 } };
 
@@ -141,7 +141,7 @@
         ballAnchors.push({ t: t - 9, x: d * 22, y: gy * 4 });
         ballAnchors.push({ t: t - 1.2, x: d * 40, y: gy * 2.2 });
         ballAnchors.push({ t: t, x: d * 52.2, y: gy, hold: 4 });
-        ballAnchors.push({ t: Math.min(t + 55, time.h2.end - 5), x: 0, y: 0, hold: 2 });
+        ballAnchors.push({ t: Math.min(t + 55, time.h2.end - 5), x: 0, y: 0, hold: 6 });
         possessionKP.push([t - 60, (g.team === kA ? +1 : -1) * 0.55 + bias * 0.2]);
         possessionKP.push([t, (g.team === kA ? +1 : -1) * 0.95]);
         possessionKP.push([t + 90, bias * 0.3]);

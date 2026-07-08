@@ -7,3 +7,12 @@ npm-debug.log*
 .vscode/
 .idea/
 *.swp
+
+# 内部チケット原本（公開しない・GitHub Issuesで管理）
+issue/
+RPD-X issues.md
+
+# 参照用画面録画（開発コピーのみ・絶対に公開しない）
+samples/
+*.mov
+*.mp4

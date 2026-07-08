@@ -31,7 +31,7 @@
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span></div>
+<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
 <div id="viewbar" class="panel">
@@ -45,7 +45,10 @@
   <button class="btn tog on" id="togZones">ゾーン</button>
   <button class="btn tog on" id="togTrail">軌跡</button>
   <button class="btn tog on" id="togLabel">番号</button>
+  <button class="btn tog on" id="togSpeed">速度</button>
+  <button class="btn tog on" id="togPsy">PSY</button>
   <span class="vsep"></span>
+  <select id="matchSel" class="sel" title="試合を切替"></select>
   <button class="btn" id="btnInfo">試合情報</button>
   <button class="btn" id="btnModel">モデル</button>
   <button class="btn" id="btnCustom">カスタム</button>
@@ -118,6 +121,19 @@
       <button class="btn on" id="gk20">20人 — チャンス創出</button>
       <button class="btn" id="gk22">22人 — 得点期待</button>
     </div>
+    <div class="gk-toggle" style="margin-top:8px" title="空間支配核: 既定は速度属性（モデル推定）で半径が変わる。幾何のみ=全員一律7.0m（推定属性への依存を排除）">
+      <button class="btn on" id="corePace">支配核 — pace反映</button>
+      <button class="btn" id="coreGeom">幾何のみ（等能力）</button>
+    </div>
+    <div id="seqInfo" class="hint"></div>
+  </section>
+  <section class="panel">
+    <h3>PSY 心理生理レイヤー <span class="eyebrow">HEURISTIC · 非予測</span></h3>
+    <div id="psyMomo"></div>
+    <canvas id="psySpark" width="292" height="54"></canvas>
+    <div id="psyTeams"></div>
+    <div id="psyDD" class="hint" style="margin-top:8px"></div>
+    <div class="hint" id="psyHint"></div>
   </section>
   <section class="panel">
     <h3>ゾーニング視点 <span class="eyebrow">PERSPECTIVE</span></h3>
@@ -146,6 +162,15 @@
     <div class="stat"><div class="k">FATIGUE 推定疲労</div><div class="v" id="inspFat">—</div></div>
     <div class="stat"><div class="k">STATUS</div><div class="v" id="inspStat" style="font-size:12px">—</div></div>
   </div>
+  <div class="stats psy" title="PSYレイヤー（決定論ヒューリスティック推定・非予測）">
+    <div class="stat"><div class="k">FOCUS 集中力</div><div class="v" id="inspCn">—</div></div>
+    <div class="stat"><div class="k">AROUSAL 覚醒</div><div class="v" id="inspAr">—</div></div>
+    <div class="stat"><div class="k">M-FATIGUE 精神疲労</div><div class="v" id="inspMf">—</div></div>
+    <div class="stat"><div class="k">HRV プロキシ</div><div class="v" id="inspHrv">—</div></div>
+    <div class="stat" title="di Prampero メタボリックパワー（モデル推定・W/kg）"><div class="k">METAB 代謝平均</div><div class="v" id="inspMet">—</div></div>
+    <div class="stat" title="25.2km/h以上のスプリント回数と高強度走行距離（モデル推定）"><div class="k">SPRINT / HSR</div><div class="v" id="inspSpr">—</div></div>
+  </div>
+  <div class="eyebrow" style="margin-top:8px">能力値 — モデル推定</div>
   <div class="attrs" id="inspAttrs"></div>
 </div>
 
@@ -165,7 +190,7 @@
 <div id="tlTip"></div>
 <div id="toasts"></div>
 <div id="keyhelp" class="panel">
-  Space 再生/停止 · ←→ ±15s · 1-5 カメラ · H 危険場 · Z ゾーン · T 軌跡 · L 番号 · G 20/22 · ? このヘルプ<br>
+  Space 再生/停止 · ←→ ±15s · 1-5 カメラ · H 危険場 · Z ゾーン · T 軌跡 · L 番号 · V 速度 · P PSY · G 20/22 · ? このヘルプ<br>
   自由飛行: WASD 移動 · QE 上下 · Shift 加速 · ドラッグ 視点 · ホイール 速度
 </div>
 
