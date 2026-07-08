@@ -16,3 +16,6 @@ RPD-X issues.md
 samples/
 *.mov
 *.mp4
+
+# 開発自動化ツールキット（内部限定・非公開）
+agents/
