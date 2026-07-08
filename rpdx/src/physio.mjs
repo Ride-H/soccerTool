@@ -37,13 +37,14 @@
     if (cache.has(key)) return cache.get(key);
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr) return null;
-    let vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0, eJ = 0;
     let inSprint = false;
     for (let t = pr.from + 1; t <= pr.to; t += step) {
       const v = E.speedKmh(match, scenario, team, no, t) / 3.6;
       const a = n === 0 ? 0 : (v - vPrev) / step;
       const P = PHYS.ecCost(a / 9.81) * v;
       sumP += P; peakP = Math.max(peakP, P);
+      eJ += P * step;                            // ∫P dt [J/kg] — セッション代謝負荷
       if (v >= PHYS.HSR_MS) hsr += v * step;
       if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
       else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
@@ -52,6 +53,7 @@
     }
     const out = {
       avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV,
+      loadKJ: eJ / 1000,                         // 代謝負荷 [kJ/kg]（HR不要の負荷代替・TRIMPの代役）
       mins: (pr.to - pr.from) / 60, n,
     };
     cache.set(key, out);
@@ -66,7 +68,7 @@
     if (cache.has(key)) { cb(cache.get(key)); return; }
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr) { cb(null); return; }
-    let t = pr.from + 1, vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0;
+    let t = pr.from + 1, vPrev = 0, sumP = 0, peakP = 0, hsr = 0, sprints = 0, peakV = 0, n = 0, eJ = 0;
     let inSprint = false;
     const chunk = () => {
       const t1 = Math.min(t + 240, pr.to);
@@ -75,6 +77,7 @@
         const a = n === 0 ? 0 : (v - vPrev) / step;
         const P = PHYS.ecCost(a / 9.81) * v;
         sumP += P; peakP = Math.max(peakP, P);
+        eJ += P * step;
         if (v >= PHYS.HSR_MS) hsr += v * step;
         if (!inSprint && v >= PHYS.SPRINT_MS) { inSprint = true; sprints++; }
         else if (inSprint && v < PHYS.SPRINT_MS - 0.8) inSprint = false;
@@ -82,7 +85,7 @@
         vPrev = v; n++;
       }
       if (t <= pr.to) { setTimeout(chunk, 0); return; }
-      const out = { avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV, mins: (pr.to - pr.from) / 60, n };
+      const out = { avgP: n ? sumP / n : 0, peakP, hsr, sprints, peakV, loadKJ: eJ / 1000, mins: (pr.to - pr.from) / 60, n };
       cache.set(key, out);
       cb(out);
     };

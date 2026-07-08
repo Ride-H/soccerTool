@@ -27,6 +27,37 @@
     };
   };
 
+  // 空中戦（コーナー/クロスの競り合い）— 決定論。クロス到達直後の窓で、
+  // ボール周辺の最高 aer の攻撃側 vs 守備側を競らせ、aer で勝者を決める（同値は攻撃側）。
+  // 位置・イベント・危険度は不変（描画のジャンプ/ヘッド演出が消費する読み取り専用層）。
+  // 返値: { winner, loser, x, y, u(1→0), attackerWon } / なければ null
+  DUEL.aerialAt = (state) => {
+    const c = state.carrier;
+    if (!c || c.restart !== "corner") return null;
+    const crossT = (c.tf || 0) + (c.rdelay || 0);   // 静止が明けてクロスが入る時刻
+    const dt = (state.t ?? 0) - crossT;
+    if (dt < -0.2 || dt > 0.9) return null;          // 配球窓（コーナー区間の末尾に収まる）
+    // 競り合い点はコーナー弧のボールではなく「ゴール前の箱」（クロスの落下点）
+    const b = state.ball;
+    const gx = Math.sign(b.x || 1) * 52.5;
+    const cx = gx - Math.sign(gx) * 7, cy = 0;       // ゴール前 ~7m 中央
+    let atk = null, aA = -1, def = null, aD = -1;
+    for (const p of state.players) {
+      if (!p.onPitch || p.role === "GK") continue;
+      if (Math.hypot(p.x - cx, p.y - cy) > 16) continue;
+      const aer = (p.attrs && p.attrs.aer) || 60;
+      if (p.team === c.team) { if (aer > aA || (aer === aA && (!atk || p.no < atk.no))) { aA = aer; atk = p; } }
+      else { if (aer > aD || (aer === aD && (!def || p.no < def.no))) { aD = aer; def = p; } }
+    }
+    if (!atk || !def) return null;
+    const attackerWon = aA >= aD;                    // 同値は攻撃側（決定論）
+    const w = attackerWon ? atk : def, l = attackerWon ? def : atk;
+    return {
+      winner: { team: w.team, no: w.no }, loser: { team: l.team, no: l.no },
+      x: (atk.x + def.x) / 2, y: (atk.y + def.y) / 2, u: 1 - Math.max(0, dt) / 0.9, attackerWon,
+    };
+  };
+
   // シールド判定（保持者が最近接プレッサーから体を入れるべきか）— 描画用幾何
   DUEL.shieldAt = (state) => {
     const c = state.carrier;
