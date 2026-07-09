@@ -2365,15 +2365,25 @@ window.addEventListener("error", (e) => {
       { amp: amp * 0.55, period: 39 }, { amp: amp * 0.42, period: 13 },
       { amp: amp * 0.5, period: 5.3 }, { amp: amp * 0.28, period: 3.0 }]);
 
-    // 4) GK 特別則: ゴールライン近傍で平滑ボール角を追従
+    // 4) GK 守備幾何則（#31）: 角度圧縮 + スイーパー飛び出し。
+    //    ボール→ゴールの二等分線上に立ち（角を狭める）、至近/自陣深部ほど前へ出る。
+    //    純関数（ballS のみ依存）で speedKmh/軌跡と完全整合・帯域制限で速度上限を保つ。
     if (role === "GK") {
       const gx = -dir * HALF_W;                              // 自ゴール
-      const push = clamp(0.5 - g0 * 0.5);                    // 攻勢時は少し前へ
-      x = gx + dir * (2.5 + 9 * (1 - push) * clamp(1 - Math.abs(ballS.x - gx) / 105));
-      x = gx + dir * clamp(Math.abs(x - gx), 1.5, 14);
-      x += dir * Math.abs(N.fbm1(ps + 301, t, [{ amp: 3.2, period: 15 }, { amp: 1.7, period: 5.0 }]));
-      y = clamp(ballS.y * 0.28, -8, 8)
-        + N.fbm1(ps, t, [{ amp: 1.2, period: 23 }, { amp: 2.8, period: 7.5 }, { amp: 1.3, period: 3.3 }]);
+      const bx = ballS.x, by = ballS.y;
+      const dGoal = Math.hypot(gx - bx, by) || 1;            // ボール〜自ゴール距離
+      const prog = dir * bx + HALF_W;                        // 0=自ゴール … 105=敵ゴール
+      const closeness = clamp(1 - dGoal / 62);               // 至近ほど前へ（角度圧縮）
+      // スイーパー: ボールが自陣深く近い＝ハイライン背後想定 → さらに飛び出す
+      const sweep = N.smooth(clamp((30 - prog) / 22)) * N.smooth(clamp((55 - dGoal) / 30));
+      let depth = 1.8 + 7.5 * closeness + 7 * sweep;         // ライン際1.8m 〜 最大 ~16m
+      depth = Math.min(depth, Math.max(0.6, dGoal - 1.2));  // ボールを追い越さない（ネット内でも負にしない）
+      const ux = (bx - gx) / dGoal, uy = by / dGoal;         // ゴール→ボールの単位ベクトル
+      x = gx + ux * depth;                                   // 二等分線上（角を狭める）
+      y = uy * depth;
+      x += dir * 0.8 * Math.abs(N.fbm1(ps + 301, t, [{ amp: 1.3, period: 15 }, { amp: 0.6, period: 5.0 }]));
+      y += N.fbm1(ps, t, [{ amp: 0.5, period: 11 }, { amp: 0.4, period: 4.5 }]);
+      y = clamp(y, -8, 8);
     }
 
     // 5) イベント・アンカー（得点再現など — ガウス窓・シナリオ実効）
@@ -2481,10 +2491,15 @@ window.addEventListener("error", (e) => {
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
     const ball = ctx.ball;
 
-    // GK: 実ボールの左右へ微調整（帯域内）
+    // GK: 実ボール角へ微補正（#31・base の角度圧縮を実ボールで研ぐ・帯域内）
+    // ※深度は base（平滑ボール基準）に委ねる。シュートは GK を置き去りにし得るため
+    //   実ボールへの深度クランプはしない（速度上限を破らないための設計）。
     if (slot.role === "GK" && ball) {
-      const ty = clamp(ball.y * 0.28, -8, 8);
-      y = lerp(y, ty, 0.5);
+      const gx = -ctx.dir * HALF_W;
+      const dG = Math.hypot(gx - ball.x, ball.y) || 1;
+      const depth = Math.hypot(gx - x, y);                  // 現在の飛び出し量
+      const ty = clamp((ball.y / dG) * depth, -8, 8);       // 実ボール二等分線の横位置
+      y = lerp(y, ty, 0.45);
     }
 
     // プレッシング: 相手保持者への寄せ（階層化 — 最近接は強く速く、2番手はカバー）
