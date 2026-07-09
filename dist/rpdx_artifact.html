@@ -2180,6 +2180,28 @@ window.addEventListener("error", (e) => {
     return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: 0.11 + zArc };
   };
 
+  /* ---- ボール物理（#46・決定論・閉形式・スクラブ完全一致） ----
+     反発バウンド: 飛球は接地で反発係数 e により高さを失いながら跳ねる。
+     正規化時刻 u∈[0,1] を幾何級数のホップ（各ホップは放物線）に分割して高さを与える。
+     マグヌス曲がり: 速い飛球に飛行方向直交の弓なりオフセット（横ズレ = カーブ）。
+     いずれもアンカー端点（x,y の目標）は保存し、区間内の見えを豊かにする。 */
+  const BALL_PHYS = { REST: 0.52, MAX_BOW: 1.4, BOW_K: 0.012, HOPS: 3, LOFT_H: 2.2 };
+  const bounceHeight = (u, h, e, hops) => {
+    let acc = 0;
+    for (let k = 0; k < hops; k++) {
+      const d = (k === hops - 1) ? (1 - acc) : (1 - e) * Math.pow(e, k);   // 最終ホップが残りを吸収
+      if (u <= acc + d || k === hops - 1) {
+        const tau = d > 1e-9 ? clamp((u - acc) / d) : 0;
+        const hk = h * Math.pow(e, 2 * k);                                 // 反発でピーク高が e² 減衰
+        return 0.11 + 4 * hk * tau * (1 - tau);                            // 放物線（τ=0.5 で頂点）
+      }
+      acc += d;
+    }
+    return 0.11;
+  };
+  E.ballBounceHeight = bounceHeight;   // テスト・検証用（純関数）
+  E.BALL_PHYS = BALL_PHYS;
+
   // 後方互換: E.ballAt(match, t) / E.ballAt(match, scenario, t)
   // 返値の free ∈ [0,1]: 1=チェーン駆動（保持者の足元）/ 0=アンカー駆動（得点再現等）。
   // stateAt はこれを使い、ホールド中のボールを描画済み保持者位置へ吸着させる。
@@ -2225,8 +2247,8 @@ window.addEventListener("error", (e) => {
         segSpeed = 0; segLen = 0;
       }
     }
-    // 高さ: 速い区間は放物線アーク（クロス/シュート）、通常は転がり
-    let z;
+    // 高さ + マグヌス曲がり: 速い飛球はバウンド放物線 + 横カーブ、通常は転がり
+    let z, ox = 0, oy = 0;
     if (zChain != null) z = zChain;
     else if (segLen > 14 && segSpeed > 7) {
       let lo = 0, hi = n - 1;
@@ -2234,11 +2256,17 @@ window.addEventListener("error", (e) => {
       const a2 = track[lo], b2 = track[hi];
       const u = clamp((t - a2.t) / ((b2.t - a2.t) || 1));
       const h = Math.min(3.2, segLen * (segSpeed > 16 ? 0.03 : 0.12));
-      z = 0.11 + Math.sin(Math.PI * u) * h;
+      const hops = h > BALL_PHYS.LOFT_H ? 1 : BALL_PHYS.HOPS;   // ロフト=単アーク / 低い弾道=バウンド
+      z = bounceHeight(u, h, BALL_PHYS.REST, hops);
+      // マグヌス: 飛行方向直交の弓なり（回転符号はセグメント決定・端点は不変）
+      const dx = (b2.x - a2.x) / segLen, dy = (b2.y - a2.y) / segLen;
+      const spin = N.hash2(N.seedOf(match.meta.id + "spin"), lo) < 0.5 ? -1 : 1;
+      const bow = spin * Math.min(BALL_PHYS.MAX_BOW, segLen * BALL_PHYS.BOW_K) * Math.sin(Math.PI * u);
+      ox = -dy * bow; oy = dx * bow;
     } else {
       z = 0.11 + 0.05 * Math.abs(N.vnoise1(9917, t, 1.7));
     }
-    return { ...pos, z, free };
+    return { x: pos.x + ox, y: pos.y + oy, z, free };
   };
 
   /* --------------------- 再開（キックオフ）と祝祭の窓 --------------------- */
