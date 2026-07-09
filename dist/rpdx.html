@@ -1759,6 +1759,93 @@ window.addEventListener("error", (e) => {
     return basePlayerPos(match, scenario, team, no, slot, t, bctx);
   };
 
+  /* ============ 協調ラインコントロール & オフサイド（#27・純関数・ガード付き） ============
+     lineComputing ガード: ライン計算中は basePlayerPos のライン同期項を無効化して
+     再帰を避ける（chainBuilding と同型）。lineCache は 0.25s バケットでキャッシュ。 */
+  let lineComputing = false;
+  const lineCache = new Map();
+  const LINE_ROLES = { CB: 1, FB: 1, WB: 1 };
+  const LINE_SYNC = 0.34;                  // 最終ラインを合意 x へ引き寄せる重み（同期昇降）
+
+  // 自チーム最終ラインの合意 x（同期前の生 base x の平均）
+  E.defensiveLineAt = (match, scenario, team, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|L|" + team + "|" + t;
+    const hit = lineCache.get(key); if (hit) return hit;
+    const half = E.halfOf(match, t);
+    const dir = match.dir[team][half === 1 ? "h1" : "h2"];
+    lineComputing = true;
+    let sum = 0, nn = 0;
+    try {
+      const roster = E.rosterAt(match, scenario, team, t);
+      const shape = F.SHAPES[roster.shape];
+      for (const slot of shape) {
+        if (!LINE_ROLES[slot.role]) continue;
+        const no = roster.assign[slot.id]; if (no == null) continue;
+        sum += basePosOf(match, scenario, team, no, slot, t).x; nn++;
+      }
+    } finally { lineComputing = false; }
+    const out = { lineX: nn ? sum / nn : -dir * 30, dir, count: nn };
+    if (lineCache.size > 6000) lineCache.clear();
+    lineCache.set(key, out);
+    return out;
+  };
+
+  // attackingTeam の攻撃者が越えるとオフサイドになる境界の「深さ」(= dir·x)。
+  // 慣習: 相手の後方から2人目の守備者（GK含む近似）とボールの、より手前(浅い)側。
+  E.offsideLineAt = (match, scenario, attackingTeam, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const opp = E.oppOf(match, attackingTeam);
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|O|" + attackingTeam + "|" + t;
+    const hit = lineCache.get(key); if (hit) return hit;
+    const half = E.halfOf(match, t);
+    const dir = match.dir[attackingTeam][half === 1 ? "h1" : "h2"];   // 攻撃方向（深さ=dir·x）
+    lineComputing = true;
+    const depths = [];
+    try {
+      const roster = E.rosterAt(match, scenario, opp, t);
+      const shape = F.SHAPES[roster.shape];
+      for (const slot of shape) {
+        const no = roster.assign[slot.id]; if (no == null) continue;
+        depths.push(dir * basePosOf(match, scenario, opp, no, slot, t).x);
+      }
+    } finally { lineComputing = false; }
+    depths.sort((a, b) => b - a);                    // 深い(自ゴール側)順
+    const secondLast = depths.length >= 2 ? depths[1] : (depths[0] ?? dir * 52.5);
+    const ballDepth = dir * E.ballSlowAt(match, t).x;
+    // オフサイド境界: 「ボールと2nd-lastの両方より前」＝ 深い方（max）を越えるとオフサイド
+    const out = { offsideDepth: Math.max(secondLast, ballDepth), dir };
+    if (lineCache.size > 6000) lineCache.clear();
+    lineCache.set(key, out);
+    return out;
+  };
+
+  // 攻撃者 (team) がオフサイド位置か（読み取り専用の判定・可視化/ラインブレイクに使用）
+  E.isOffsidePos = (match, scenario, team, x, t) => {
+    const o = E.offsideLineAt(match, scenario, team, t);
+    return o.dir * x > o.offsideDepth + 0.3;         // 境界より深ければオフサイド（0.3m許容）
+  };
+
+  // 現時刻にオフサイド位置にいる team の攻撃者（背番号配列・読み取り専用）
+  // ＝相手の最終ラインを破って背後に抜けた選手。可視化・ラインブレイク検出に。
+  E.offsideAttackersAt = (match, scenario, team, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const o = E.offsideLineAt(match, scenario, team, t);
+    const roster = E.rosterAt(match, scenario, team, t);
+    const shape = F.SHAPES[roster.shape];
+    const out = [];
+    lineComputing = true;
+    try {
+      for (const slot of shape) {
+        if (slot.role === "GK") continue;
+        const no = roster.assign[slot.id]; if (no == null) continue;
+        const p = basePosOf(match, scenario, team, no, slot, t);
+        if (o.dir * p.x > o.offsideDepth + 0.3) out.push(no);
+      }
+    } finally { lineComputing = false; }
+    return out;
+  };
+
   const buildChain = (match, scenario) => {
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (chainCache.has(key)) return chainCache.get(key);
@@ -2355,6 +2442,13 @@ window.addEventListener("error", (e) => {
       }
     }
 
+    // 2.6) 協調ラインコントロール（#27）: 最終ライン(CB/FB/WB)を合意 x へ同期させ、
+    // 「1枚のラインとして」上下動させる。lineComputing 中は無効（再帰回避）。
+    if (!lineComputing && LINE_ROLES[role]) {
+      const line = E.defensiveLineAt(match, scenario, team, t);
+      x = lerp(x, line.lineX, LINE_SYNC);
+    }
+
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
     const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * E.fatigueOf(match, scenario, team, no, t));
     const ps = N.seedOf(match.meta.id + team + no);
@@ -2761,7 +2855,7 @@ window.addEventListener("error", (e) => {
   E.clearCaches = () => {
     distCache.clear(); chainCache.clear(); trackCache.clear();
     restartCache.clear(); celeCache.clear(); panchorCache.clear(); pnetCache.clear();
-    rankCache.clear();
+    rankCache.clear(); lineCache.clear();
     stateMemo = null;
   };
 })();
