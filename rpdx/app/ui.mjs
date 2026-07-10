@@ -1466,7 +1466,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       $("#possBv").textContent = 100 - pa;
       // 現在の保持者（リスタート中は種別を明示）
       const cr = state.carrier;
-      const RESTART_JA = { throwin: "スローイン", corner: "コーナーキック", goalkick: "ゴールキック" };
+      const RESTART_JA = { throwin: "スローイン", corner: "コーナーキック", goalkick: "ゴールキック", kickoff: "キックオフ" };
       if (cr && cr.restart && App.t <= cr.tf + cr.rdelay + 0.5) {
         const p = App.match.teams[cr.team].squad.find(q => q.no === cr.no);
         $("#carrierChip").textContent = `${RESTART_JA[cr.restart]} — ${App.match.teams[cr.team].name} ${cr.no} ${p?.label ?? ""}`;
