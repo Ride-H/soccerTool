@@ -2443,6 +2443,30 @@ window.addEventListener("error", (e) => {
     return clamp((mins / 95) * (1.45 - (sta / 100) * 0.75));
   };
 
+  /* ---- ラン保護窓（#30）: 記録イベント近傍でオフボールランを止める（縁4sスムーズ） ---- */
+  const protectCache = new Map();
+  const runProtectAt = (match, scenario, t) => {
+    const key = match.meta.id + "|" + E.scenarioKey(scenario);
+    let wins = protectCache.get(key);
+    if (!wins) {
+      wins = [];
+      for (const ev of E.eventsOf(match, scenario)) {
+        if (ev.type === "goal") wins.push({ a: ev.t - 32, b: ev.t + 3 });
+        else if (ev.type === "shot" || ev.type === "save") wins.push({ a: ev.t - 16, b: ev.t + 2 });
+      }
+      if (protectCache.size > 40) protectCache.clear();
+      protectCache.set(key, wins);
+    }
+    let g = 0;
+    for (const w of wins) {
+      if (t < w.a - 4 || t > w.b + 4) continue;
+      const inn = (t >= w.a && t <= w.b) ? 1
+        : t < w.a ? N.smooth((t - (w.a - 4)) / 4) : N.smooth(((w.b + 4) - t) / 4);
+      if (inn > g) g = inn;
+    }
+    return g;
+  };
+
   /* 基礎位置（純関数・ボール実位置に非依存 — チェーン生成の土台） */
   const basePlayerPos = (match, scenario, team, no, slot, t, bctx) => {
     const { half, dir, P, ballS } = bctx;   // half はFK/セットピース処理で使用
@@ -2478,6 +2502,40 @@ window.addEventListener("error", (e) => {
     if (!lineComputing && LINE_ROLES[role]) {
       const line = E.defensiveLineAt(match, scenario, team, t);
       x = lerp(x, line.lineX, LINE_SYNC);
+    }
+
+    // 2.7) 意図的オフボールラン（#30）— すべて連続ゲート（速度上限を破らない）
+    // 記録イベント（ゴール/ショット/セーブ）窓は保護: 較正済みの再現局面を乱さない
+    // (a) オーバーラップ: 攻勢×ボールが自分のサイド×前進局面で、FB/WB がボールを
+    //     追い越して幅を取る（後方からの追い越しラン）
+    // (b) 裏抜け: ST/W/AM が相手最終ライン（オフサイド境界）の手前 0.8m まで depth を
+    //     取る。周期ノイズで「繰り返しのラン」（張り付きではなく出入り）
+    if (!lineComputing && !chainBuilding) {
+      // chainBuilding 中は無効: ランは「表示上の走り」であり、保持列の選定
+      //（=較正済みの世界）を変えてはならない
+      const gAtk = N.smooth(clamp(g0 * 2.2)) * (1 - runProtectAt(match, scenario, t));
+      const progBall = (dir * ballS.x + HALF_W) / 105;             // ボール前進度 0..1
+      if (gAtk > 0.02 && (role === "FB" || role === "WB")) {
+        const sameFlank = N.smooth(clamp((ballS.y * Math.sign(y || 1)) / 16));
+        const wOv = gAtk * sameFlank * N.smooth(clamp((progBall - 0.5) / 0.14));
+        if (wOv > 0.02) {
+          x += dir * 5 * wOv;                                      // ボールの先へ
+          y += Math.sign(y || 1) * 2 * wOv;                        // タッチライン側へ幅
+        }
+      }
+      if (gAtk > 0.02 && (role === "ST" || role === "W" || role === "AM")) {
+        const roleW = role === "ST" ? 1 : role === "W" ? 0.8 : 0.5;
+        const pulse = 0.5 + 0.5 * N.vnoise1(N.seedOf(team + no + "run"), t, 23);  // 繰り返しのラン
+        const wRib = gAtk * roleW * Math.max(0, pulse)
+          * N.smooth(clamp((progBall - 0.42) / 0.16));
+        if (wRib > 0.02) {
+          const off = E.offsideLineAt(match, scenario, team, t);
+          // 境界の手前まで（ただしGK域=ゴール前8mへは走り込まない・引き距離は8mまで）
+          const targetDepth = Math.min(off.offsideDepth - 0.8, HALF_W - 8);
+          const gap = clamp(targetDepth - dir * x, 0, 8);
+          x += dir * gap * 0.4 * wRib;
+        }
+      }
     }
 
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
