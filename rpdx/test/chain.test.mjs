@@ -47,8 +47,9 @@ for (const m of Object.values(MATCHES)) {
         gkAll++;
         const p = m.teams[c.team].squad.find(q => q.no === c.no);
         if (p && p.pos === "GK") gkOk++;
-      } else if (c.restart === "throwin" && t >= c.seg.tf && t <= c.seg.tf + c.seg.rdelay) {
-        // 静止（ピン留め）中のみ判定 — 再開後はプレーに戻る
+      } else if (c.restart === "throwin" && t >= c.seg.tf + c.seg.rdelay * 0.55 && t <= c.seg.tf + c.seg.rdelay) {
+        // 静止（ピン留め）の後半のみ判定 — #50 で運搬が有限速度になり、
+        // 窓前半はまだボールがライン際へ移動中のことがある
         const b = E.ballAt(m, scenario, t);
         if (b.free < 0.9) continue;                      // 実試合アンカー窓は対象外
         thAll++;
@@ -91,3 +92,33 @@ for (const m of Object.values(MATCHES)) {
     assert.ok(near / checked > 0.75, `近接奪取率 ${near}/${checked}`);
   });
 }
+
+/* ================= #51 ゴール後キックオフ（センター静止・失点側再開） ================= */
+
+test("#51 kickoff: 全ゴール後、ボールはセンター静止 → 失点側が保持し味方へ蹴り出す", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m);
+    const keys = E.teamKeys(m);
+    const goals = m.events.filter(e => e.type === "goal");
+    const kos = m.ballAnchors.filter(a => a.x === 0 && a.y === 0 && (a.hold || 0) >= 4).map(a => a.t);
+    let checked = 0;
+    for (const g of goals) {
+      const rt = kos.find(r => r > g.t && r <= g.t + 130);
+      if (rt == null) continue;
+      checked++;
+      const concede = keys.find(k => k !== g.team);
+      // 窓中盤: ボールは中央静止・保持は失点側・リスタート種別 kickoff
+      for (const t of [rt + 1.5, rt + 3, rt + 4.5]) {
+        const st = E.stateAt(m, sc, t);
+        assert.ok(Math.hypot(st.ball.x, st.ball.y) < 1.0,
+          `${m.meta.id} rt=${rt} t=${t}: ball(${st.ball.x.toFixed(1)},${st.ball.y.toFixed(1)}) not center`);
+        assert.equal(st.carrier.team, concede, `${m.meta.id} rt=${rt} t=${t}: 保持=${st.carrier.team}`);
+        assert.equal(st.carrier.restart, "kickoff", `${m.meta.id} rt=${rt} t=${t}: restart種別`);
+      }
+      // 蹴り出し後の最初の保持者も失点側（味方へ渡す）
+      const after = E.stateAt(m, sc, rt + 9);
+      assert.equal(after.carrier.team, concede, `${m.meta.id} rt=${rt}: 蹴り出し先`);
+    }
+    assert.ok(checked >= 2, `${m.meta.id} 検証ゴール数 ${checked}`);
+  }
+});

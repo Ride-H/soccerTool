@@ -208,3 +208,132 @@ for (const m of Object.values(MATCHES)) {
     if (all >= 3) assert.ok(near / all >= 0.6, `ゴール前受け ${near}/${all}`);
   });
 }
+
+/* ================= #28 相互分離（社会力の斥力・重なり解消） ================= */
+
+test("#28 separation: ランダムな重なりが解消（保持者ペア・祝祭除外で最小距離≥0.25m）", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    const goals = m.events.filter(e => e.type === "goal").map(e => e.t);
+    // 交代直後45sはフェーズブレンド（新旧スロットのlerp混合）— 分離の視野外なので除外
+    const subTs = [];
+    for (const team of E.teamKeys(m)) for (const sub of (sc.subs && sc.subs[team]) || []) subTs.push(sub.t);
+    let n05 = 0, minD = 99, n = 0;
+    for (let t = range.t0 + 30; t < range.t1; t += 7) {
+      if (goals.some(g => t >= g && t <= g + 45)) continue;
+      if (subTs.some(st2 => t >= st2 && t <= st2 + 46)) continue;
+      const st = E.stateAt(m, sc, t);
+      const ps = st.players.filter(p => p.onPitch && !p.entering);
+      const cKey = st.carrier && st.carrier.mode === "hold" ? st.carrier.team + ":" + st.carrier.no : null;
+      for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+        const a = ps[i], b = ps[j];
+        if (cKey && (a.team + ":" + a.no === cKey || b.team + ":" + b.no === cKey)) continue;
+        // GKペアは除外: GKは実ボール微調整（後段）が分離の視野外 + ゴール前混雑は正当な近接
+        if (a.role === "GK" || b.role === "GK") continue;
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        n++; if (d < 0.5) n05++; if (d < minD) minD = d;
+      }
+    }
+    assert.ok(n > 100000, `サンプル ${n}`);
+    assert.ok(minD >= 0.25, `${m.meta.id} 最小ペア距離 ${minD.toFixed(2)}m（導入前は~0.02m）`);
+    assert.ok(n05 <= 12, `${m.meta.id} d<0.5m ペア ${n05}（導入前は29）`);
+  }
+});
+
+test("#28 separation: 決定論・変位上限0.8m・遠いペアには作用しない", () => {
+  const m = MATCH, sc = E.actualScenario(m);
+  for (const t of [700, 2500, 4600]) {
+    const a = E.stateAt(m, sc, t).players.map(p => [p.no, p.team, p.x, p.y]);
+    E.clearCaches();
+    const b = E.stateAt(m, sc, t).players.map(p => [p.no, p.team, p.x, p.y]);
+    assert.deepEqual(a, b, `決定論 @${t}`);
+  }
+});
+
+/* ================= #30 意図的オフボールラン（オーバーラップ / 裏抜け） ================= */
+
+test("#30 runs: 攻勢×ボールサイドで FB/WB が押し上がる（オーバーラップの非対称性）", () => {
+  let onDepth = 0, onN = 0, offDepth = 0, offN = 0;
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    for (let t = range.t0 + 60; t < range.t1; t += 9) {
+      const st = E.stateAt(m, sc, t);
+      const bs = E.ballSlowAt(m, t);
+      for (const team of E.teamKeys(m)) {
+        const dir = m.dir[team][st.half === 1 ? "h1" : "h2"];
+        const P = E.possessionAt(m, t) * E.attackSign(m, team);
+        const prog = (dir * bs.x + 52.5) / 105;
+        if (P < 0.15 || prog < 0.62) continue;            // 攻勢×前進局面のみ
+        const fbs = st.players.filter(p => p.onPitch && p.team === team && (p.role === "FB" || p.role === "WB"));
+        for (const p of fbs) {
+          const sameSide = (p.y * bs.y) > 0 && Math.abs(bs.y) > 8;
+          const depth = dir * p.x;
+          if (sameSide) { onDepth += depth; onN++; } else { offDepth += depth; offN++; }
+        }
+      }
+    }
+  }
+  assert.ok(onN > 30 && offN > 30, `サンプル on=${onN} off=${offN}`);
+  assert.ok(onDepth / onN > offDepth / offN + 1.0,
+    `ボールサイドFB深度 ${(onDepth / onN).toFixed(1)}m > 逆サイド ${(offDepth / offN).toFixed(1)}m +1m`);
+});
+
+test("#30 runs: 攻勢時に前線がオフサイド境界へ近づく（裏抜けの脅威）・境界は破らない", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    const gapAtk = [], gapDef = [];
+    for (let t = range.t0 + 60; t < range.t1; t += 9) {
+      const st = E.stateAt(m, sc, t);
+      const bs = E.ballSlowAt(m, t);
+      for (const team of E.teamKeys(m)) {
+        const dir = m.dir[team][st.half === 1 ? "h1" : "h2"];
+        const P = E.possessionAt(m, t) * E.attackSign(m, team);
+        const prog = (dir * bs.x + 52.5) / 105;
+        const off = E.offsideLineAt(m, sc, team, t);
+        const fwds = st.players.filter(p => p.onPitch && p.team === team && ["ST", "W"].includes(p.role));
+        if (!fwds.length) continue;
+        const maxDepth = Math.max(...fwds.map(p => dir * p.x));
+        const gap = off.offsideDepth - maxDepth;          // 小さいほど境界に近い
+        if (P > 0.15 && prog > 0.6) gapAtk.push(gap);
+        else if (P < -0.15) gapDef.push(gap);
+      }
+    }
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    assert.ok(gapAtk.length > 20 && gapDef.length > 20, `${m.meta.id} サンプル atk=${gapAtk.length} def=${gapDef.length}`);
+    assert.ok(mean(gapAtk) < mean(gapDef),
+      `${m.meta.id} 攻勢時ギャップ ${mean(gapAtk).toFixed(1)}m < 守勢時 ${mean(gapDef).toFixed(1)}m`);
+  }
+});
+
+/* ================= #44 スタミナ→行動フィードバック ================= */
+
+test("#44 fatigue: フル出場選手の平均速度が終盤に低下（8〜45%・全チーム）", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    for (const team of E.teamKeys(m)) {
+      const full = [];
+      for (const p of m.teams[team].squad) {
+        const pr = E.presenceOf(m, sc, team, p.no);
+        if (pr && pr.from <= range.t0 + 1 && pr.to >= range.t1 - 1 && p.pos !== "GK") full.push(p.no);
+      }
+      assert.ok(full.length >= 3, `${m.meta.id} ${team} フル出場 ${full.length}人`);
+      let e = 0, eN = 0, l = 0, lN = 0;
+      for (const no of full) {
+        for (let t = range.t0 + 120; t < range.t0 + 1000; t += 20) { e += E.speedKmh(m, sc, team, no, t); eN++; }
+        for (let t = range.t1 - 1000; t < range.t1 - 30; t += 20) { l += E.speedKmh(m, sc, team, no, t); lN++; }
+      }
+      const decline = 1 - (l / lN) / (e / eN);
+      assert.ok(decline > 0.08 && decline < 0.45,
+        `${m.meta.id} ${team} 終盤速度低下率 ${(decline * 100).toFixed(1)}%（疲労→行動FB）`);
+    }
+  }
+});
+
+test("#44 fatigue: 疲労は presence 起点 — 途中出場選手は入場直後フレッシュ（低疲労）", () => {
+  const m = MATCH, sc = E.actualScenario(m);
+  // 66' マルティネッリ(BRA22) 投入: 入場5分後の疲労 < フル出場カゼミーロ(BRA5)の同時刻疲労
+  const t = m.time.h2.start + (66 - 45) * 60 + 300;
+  const fSub = E.fatigueOf(m, sc, "BRA", 22, t);
+  const fFull = E.fatigueOf(m, sc, "BRA", 8, t);   // B.ギマランイス（フル出場）
+  assert.ok(fSub < fFull * 0.45, `sub ${fSub.toFixed(3)} << full ${fFull.toFixed(3)}`);
+});
