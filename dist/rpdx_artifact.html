@@ -2651,6 +2651,12 @@ window.addEventListener("error", (e) => {
       }
     }
 
+    // 相互分離（#28）: ランダムな重なりを解消する斥力変位（基礎位置から算出済み）
+    if (ctx.sep) {
+      const sp = ctx.sep.get(team + ":" + no);
+      if (sp) { x += sp.dx; y += sp.dy; }
+    }
+
     x = clamp(x, -HALF_W + 0.4, HALF_W - 0.4);
     y = clamp(y, -HALF_H + 0.4, HALF_H - 0.4);
     return { x, y };
@@ -2684,6 +2690,52 @@ window.addEventListener("error", (e) => {
     return m;
   };
 
+  /* ---------------- 相互分離（#28・社会力の斥力項・純関数+memo） ---------------- */
+  // 全選手の「基礎位置」から対毎の斥力変位を決定論算出し、playerPos が加算する。
+  // 意図的な近接（プレス密着0.9m・タックル収束・祝祭）は基礎位置の後段で作られる
+  // ため影響せず、ランダムな重なり（選手同士のすり抜け）だけを解消する。
+  // stateAt / stateFrozenPos の両方で同一値を使うこと（f(t) の一意性）。
+  const sepCache = new Map();
+  const SEP_R = 1.5, SEP_K = 0.5, SEP_MAX = 0.8;
+  const separationAt = (match, scenario, t) => {
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + t;
+    const hit = sepCache.get(key);
+    if (hit !== undefined) return hit;
+    const pts = [];
+    for (const team of E.teamKeys(match)) {
+      const roster = E.rosterAt(match, scenario, team, t);
+      const shape = F.SHAPES[roster.shape];
+      for (const slot of shape) {
+        const no = roster.assign[slot.id];
+        if (no == null) continue;
+        const p = basePosOf(match, scenario, team, no, slot, t);
+        pts.push({ k: team + ":" + no, x: p.x, y: p.y });
+      }
+    }
+    const disp = new Map();
+    const add = (k, dx, dy) => {
+      const d = disp.get(k) || { dx: 0, dy: 0 };
+      d.dx += dx; d.dy += dy; disp.set(k, d);
+    };
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i], b = pts[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy);
+      if (d >= SEP_R) continue;
+      if (d < 1e-6) { dx = 1; dy = 0; }                    // 完全一致は決定論の固定軸
+      else { dx /= d; dy /= d; }
+      const f = SEP_K * (SEP_R - d);                       // 接触ゼロ・境界C0
+      add(a.k, -dx * f, -dy * f); add(b.k, dx * f, dy * f);
+    }
+    for (const d of disp.values()) {                       // 多体圧縮でも変位を有界に
+      const m2 = Math.hypot(d.dx, d.dy);
+      if (m2 > SEP_MAX) { d.dx *= SEP_MAX / m2; d.dy *= SEP_MAX / m2; }
+    }
+    if (sepCache.size > 6000) sepCache.clear();
+    sepCache.set(key, disp);
+    return disp;
+  };
+
   /* ------------------------------ 状態合成 ------------------------------ */
   // 単一スロットmemo: 同一フレーム内の重複呼び出し（描画・PSY・ピック等）を1回に
   let stateMemo = null;
@@ -2704,13 +2756,14 @@ window.addEventListener("error", (e) => {
       carrierPos = basePosOf(match, scenario, carrier.team, carrier.no, carrier.seg.slot, t);
     }
     const pressRank = pressRankAt(match, scenario, t, carrier, carrierPos);
+    const sep = separationAt(match, scenario, t);
     const players = [];
 
     for (const team of E.teamKeys(match)) {
       const dir = match.dir[team][half === 1 ? "h1" : "h2"];
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
-      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, t };
+      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, t };
       // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
@@ -2840,7 +2893,8 @@ window.addEventListener("error", (e) => {
       half, dir, P: E.possessionAt(match, tt),
       ballS: E.ballSlowAt(match, tt), ball: E.ballAt(match, scenario, tt),
       carrier, carrierPos,
-      pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos), t: tt,
+      pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos),
+      sep: separationAt(match, scenario, tt), t: tt,
     };
     return playerPos(match, scenario, team, no, slot, tt, ctx);
   };
@@ -2885,7 +2939,7 @@ window.addEventListener("error", (e) => {
   E.clearCaches = () => {
     distCache.clear(); chainCache.clear(); trackCache.clear();
     restartCache.clear(); celeCache.clear(); panchorCache.clear(); pnetCache.clear();
-    rankCache.clear(); lineCache.clear();
+    rankCache.clear(); lineCache.clear(); sepCache.clear();
     stateMemo = null;
   };
 })();
