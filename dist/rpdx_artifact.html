@@ -1867,6 +1867,18 @@ window.addEventListener("error", (e) => {
     // データ駆動の保持台本（最優先）: パスカット等の実況ストーリーをパックが指定できる
     // 形式: match.chainForce = [{t0, t1, team, no?}] — no 指定でその選手が持ち続ける
     if (match.chainForce) for (const w of match.chainForce) forcedWins.push({ ...w });
+    // ゴール後キックオフ窓（#51）は shot/save 等の記録窓より先に積む（forcedWinAt は
+    // 先勝ちのため、後置すると終盤の shot 窓に失点側再開が奪われる）
+    for (const ev of E.eventsOf(match, scenario)) {
+      if (ev.type !== "goal") continue;
+      let rt = null;
+      for (const r of restartWindows(match, scenario)) if (r > ev.t && r <= ev.t + 130) { rt = r; break; }
+      if (rt == null) continue;
+      const concede = ev.team === plus ? minus : plus;
+      forcedWins.push({ t0: rt - 1, t1: rt + 6, team: concede, kickoff: true });
+      cuts.push(rt - 1); cuts.push(rt + 6);
+    }
+    cuts.sort((a, b) => a - b);
     for (const ev of E.eventsOf(match, scenario)) {
       if (ev.type === "goal") forcedWins.push({ t0: ev.t - 24, t1: ev.t + 1, team: ev.team });
       else if (ev.type === "shot") forcedWins.push({ t0: ev.t - 12, t1: ev.t + 1, team: ev.team });
@@ -1879,15 +1891,6 @@ window.addEventListener("error", (e) => {
         forcedWins.push({ t0: ev.t + 0.5, t1: ev.t + 16, team: opp });
       }
     }
-    // ゴール後のキックオフは失点側が中央から再開（帰陣完了の台形窓とセット）
-    for (const ev of E.eventsOf(match, scenario)) {
-      if (ev.type !== "goal") continue;
-      let rt = null;
-      for (const r of restartWindows(match, scenario)) if (r > ev.t && r <= ev.t + 130) { rt = r; break; }
-      if (rt == null) continue;
-      const concede = ev.team === plus ? minus : plus;
-      forcedWins.push({ t0: rt - 1, t1: rt + 6, team: concede });
-    }
     const forcedWinAt = (tt) => {
       for (const w of forcedWins) if (tt >= w.t0 && tt < w.t1) return w;   // 半開区間（境界の重複回避）
       return null;
@@ -1896,7 +1899,11 @@ window.addEventListener("error", (e) => {
     // （祝祭引力と加算されて速度上限を破るのを構成的に防ぐ）
     const goalTs = [];
     for (const ev of E.eventsOf(match, scenario)) if (ev.type === "goal") goalTs.push(ev.t);
-    const inCalm = (tt) => goalTs.some(g => tt >= g && tt <= g + 45);
+    // 祝祭45s + キックオフ窓±2s は接触/ランダム再開を抑制（#51 — 窓境界の
+    // ターンオーバーにタックルアンカーが乗ると速度上限を破る）
+    const koWins = forcedWins.filter(w => w.kickoff);
+    const inCalm = (tt) => goalTs.some(g => tt >= g && tt <= g + 45)
+      || koWins.some(w => tt >= w.t0 - 1 && tt <= w.t1 + 2);
     let t = range.t0 + 2;   // キックオフ・アンカー後から
     let idx = 0;
     let prev = null;        // {team,no,slot,pos}
@@ -1946,6 +1953,11 @@ window.addEventListener("error", (e) => {
           };
         }
         isTurnover = false;   // リスタートは接触奪取ではない
+      }
+      // ---- ゴール後キックオフ（#51）: 失点側が中央から再開・ボールはセンターにピン ----
+      if (!restart && forced && forced.kickoff) {
+        restart = { type: "kickoff", x: 0, y: 0, delay: Math.max(1.2, forced.t1 - t - 1.2) };
+        isTurnover = false;
       }
 
       // ---- 保持者選定 ----
@@ -2019,7 +2031,8 @@ window.addEventListener("error", (e) => {
       // 次セグメントの拘束: スロー/GKは同チームの別選手へ、コーナーはゴール前へクロス
       forceTeam = null; forceRef = null;
       if (restart) {
-        if (restart.type === "throwin" || restart.type === "goalkick") forceTeam = best.team;
+        if (restart.type === "throwin" || restart.type === "goalkick" || restart.type === "kickoff")
+          forceTeam = best.team;   // キックオフの蹴り出しは味方へ
         if (restart.type === "corner") {
           forceRef = { x: Math.sign(restart.x) * 44, y: restart.y >= 0 ? 3 : -3 };
         }
@@ -2247,37 +2260,42 @@ window.addEventListener("error", (e) => {
     // フライト所要時間の下限（#50）: 窓が短くても距離/速度上限より速く飛ばない。
     // 未到達ならホールド/ピン窓へ連続に持ち越す（C0 — 瞬間移動を根絶）。
     // リスタートは「運搬」なので遅め(12m/s)、通常パスは強いパス上限(24m/s)。
-    let travelT = 0;
-    if (s.from) {
-      const fromSeg = { team: s.from.team, no: s.from.no, slot: s.from.slot };
-      const a0 = holderPos(fromSeg, s.t0);
-      const b0 = s.restart ? { x: s.rx, y: s.ry } : holderPos(s, s.t0);
-      const vcap = s.restart ? 12 : 24;
-      travelT = Math.max(s.tf - s.t0, Math.hypot(b0.x - a0.x, b0.y - a0.y) / vcap, 0.001);
-    }
-    const inTransit = s.from && (t - s.t0) < travelT;
-    if (!inTransit) {
-      // 到達済み: リスタートはピン静止 → 保持者の足元へスムーズ復帰。
-      // 解放ブレンドはセグメント終端までに必ず完了させる（#50 — 次セグメントは
-      // 保持者の足元から発進するため、未完了だと瞬間移動になる）
-      if (s.restart && t >= s.tf) {
-        const relT = Math.max(0.25, Math.min(1.2, (s.t1 ?? Infinity) - (s.tf + s.rdelay)));
-        const uOut = N.smooth(clamp((t - (s.tf + s.rdelay)) / relT));
-        if (uOut < 1) {
-          const p = holderPos(s, t);
-          return { x: lerp(s.rx, p.x, uOut), y: lerp(s.ry, p.y, uOut), z: 0.11 };
-        }
+    // 発進点 = 前セグメントの「実ボール位置」（1段だけ再帰）— 前フライトがカットで
+    // 分断されても、次フライトは実位置から発進する（全境界でC0）。
+    const posOf = (seg, tt, depth) => {
+      let travelT = 0, src = null;
+      if (seg.from) {
+        const prevSeg = depth < 1 ? segAt(chain, seg.t0 - 0.01) : null;
+        src = (prevSeg && prevSeg !== seg)
+          ? posOf(prevSeg, seg.t0, depth + 1)
+          : holderPos({ team: seg.from.team, no: seg.from.no, slot: seg.from.slot }, seg.t0);
+        const b0 = seg.restart ? { x: seg.rx, y: seg.ry } : holderPos(seg, seg.t0);
+        const vcap = seg.restart ? 12 : 24;
+        travelT = Math.max(seg.tf - seg.t0, Math.hypot(b0.x - src.x, b0.y - src.y) / vcap, 0.001);
       }
-      const p = holderPos(s, t);
-      return { x: p.x, y: p.y, z: 0.11 + 0.05 * Math.abs(N.vnoise1(9917, t, 1.7)) };
-    }
-    // フライト: 送り手位置(t) → 受け手位置(t) の移動目標補間（リスタートは地点へ）
-    const u = N.smooth(clamp((t - s.t0) / travelT));
-    const a = holderPos({ team: s.from.team, no: s.from.no, slot: s.from.slot }, t);
-    const b = (s.restart && t <= s.tf + s.rdelay) ? { x: s.rx, y: s.ry } : holderPos(s, t);
-    const dist = Math.hypot(b.x - a.x, b.y - a.y);
-    const zArc = dist > 17 ? Math.sin(Math.PI * u) * Math.min(2.4, dist * 0.07) : Math.sin(Math.PI * u) * 0.25;
-    return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: 0.11 + zArc };
+      const inTransit = seg.from && (tt - seg.t0) < travelT;
+      if (!inTransit) {
+        // 到達済み: リスタートはピン静止 → 保持者の足元へスムーズ復帰。
+        // 解放ブレンドはセグメント終端までに必ず完了させる（#50）
+        if (seg.restart && tt >= seg.tf) {
+          const relT = Math.max(0.25, Math.min(1.2, (seg.t1 ?? Infinity) - (seg.tf + seg.rdelay)));
+          const uOut = N.smooth(clamp((tt - (seg.tf + seg.rdelay)) / relT));
+          if (uOut < 1) {
+            const p = holderPos(seg, tt);
+            return { x: lerp(seg.rx, p.x, uOut), y: lerp(seg.ry, p.y, uOut), z: 0.11 };
+          }
+        }
+        const p = holderPos(seg, tt);
+        return { x: p.x, y: p.y, z: 0.11 + 0.05 * Math.abs(N.vnoise1(9917, tt, 1.7)) };
+      }
+      // フライト: 発進点(固定) → 受け手位置(tt) / リスタートは地点へ
+      const u = N.smooth(clamp((tt - seg.t0) / travelT));
+      const b = (seg.restart && tt <= seg.tf + seg.rdelay) ? { x: seg.rx, y: seg.ry } : holderPos(seg, tt);
+      const dist = Math.hypot(b.x - src.x, b.y - src.y);
+      const zArc = dist > 17 ? Math.sin(Math.PI * u) * Math.min(2.4, dist * 0.07) : Math.sin(Math.PI * u) * 0.25;
+      return { x: lerp(src.x, b.x, u), y: lerp(src.y, b.y, u), z: 0.11 + zArc };
+    };
+    return posOf(s, t, 0);
   };
 
   /* ---- ボール物理（#46・決定論・閉形式・スクラブ完全一致） ----
@@ -2614,7 +2632,12 @@ window.addEventListener("error", (e) => {
       if (rank === 0) { wBase = 0.52; sig = 7.5; }        // ファーストプレッサー: 密着
       else if (rank === 1) { wBase = 0.32; sig = 9; }     // セカンド: カバーシャドウ
       const gate = Math.exp(-(d * d) / (2 * sig * sig));
-      const uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
+      let uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
+      // キックオフ（#51）: ピン中は相手に寄せない（競技規則: 相手はセンターサークル外）。
+      // 蹴り出し後に通常ランプで再開 → 窓境界の目標ジャンプによる速度スパイクも消える
+      if (c.seg && c.seg.restart === "kickoff") {
+        uPress = Math.min(uPress, N.smooth(clamp((ctx.t - (c.seg.tf + c.seg.rdelay)) / 2.2)));
+      }
       const w = wBase * gate * uPress;
       if (w > 0.003) {
         // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m）
@@ -7651,7 +7674,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       $("#possBv").textContent = 100 - pa;
       // 現在の保持者（リスタート中は種別を明示）
       const cr = state.carrier;
-      const RESTART_JA = { throwin: "スローイン", corner: "コーナーキック", goalkick: "ゴールキック" };
+      const RESTART_JA = { throwin: "スローイン", corner: "コーナーキック", goalkick: "ゴールキック", kickoff: "キックオフ" };
       if (cr && cr.restart && App.t <= cr.tf + cr.rdelay + 0.5) {
         const p = App.match.teams[cr.team].squad.find(q => q.no === cr.no);
         $("#carrierChip").textContent = `${RESTART_JA[cr.restart]} — ${App.match.teams[cr.team].name} ${cr.no} ${p?.label ?? ""}`;
