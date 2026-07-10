@@ -2478,8 +2478,13 @@ window.addEventListener("error", (e) => {
     // 1) フォーメーション・スロット（攻守モーフ + 配置微調整）
     let { x, y } = slotWorld(slot, g, dir, tw);
 
-    // 2) ブロック連動（平滑ボールへスライド — 守備ブロックの本質）
-    const cw = F.chaseWeight[role] ?? 0.3;
+    // スタミナ→行動フィードバック（#44）: 疲労は走行頻度だけでなく
+    // 「ブロック追従・集団サージ・プレス・ラン」の強度を落とす（終盤の質的変化）。
+    // 交代のフレッシュな脚は fatigueOf が presence 起点なので自然に回復する。
+    const fat = E.fatigueOf(match, scenario, team, no, t);
+
+    // 2) ブロック連動（平滑ボールへスライド — 守備ブロックの本質・疲労で緩む=ライン間延び）
+    const cw = (F.chaseWeight[role] ?? 0.3) * (1 - 0.22 * fat);
     x += (ballS.x - x * 0.2) * cw * 0.55;
     y += (ballS.y - y * 0.25) * cw * 0.75;
 
@@ -2492,7 +2497,7 @@ window.addEventListener("error", (e) => {
       if (Math.abs(myTrend) > 0.004) {
         const S_ATK = { GK: 0.05, CB: 0.35, FB: 0.6, WB: 0.75, DM: 0.7, CM: 0.85, AM: 1.0, W: 1.0, ST: 1.0 };
         const S_DEF = { GK: 0.05, CB: 0.9, FB: 1.0, WB: 1.0, DM: 1.0, CM: 0.95, AM: 0.8, W: 0.8, ST: 0.55 };
-        const scale = myTrend > 0 ? (S_ATK[role] ?? 0.7) : (S_DEF[role] ?? 0.8);
+        const scale = (myTrend > 0 ? (S_ATK[role] ?? 0.7) : (S_DEF[role] ?? 0.8)) * (1 - 0.3 * fat);
         x += dir * clamp(180 * myTrend, -7, 7) * scale;
       }
     }
@@ -2513,7 +2518,7 @@ window.addEventListener("error", (e) => {
     if (!lineComputing && !chainBuilding) {
       // chainBuilding 中は無効: ランは「表示上の走り」であり、保持列の選定
       //（=較正済みの世界）を変えてはならない
-      const gAtk = N.smooth(clamp(g0 * 2.2)) * (1 - runProtectAt(match, scenario, t));
+      const gAtk = N.smooth(clamp(g0 * 2.2)) * (1 - runProtectAt(match, scenario, t)) * (1 - 0.4 * fat);
       const progBall = (dir * ballS.x + HALF_W) / 105;             // ボール前進度 0..1
       if (gAtk > 0.02 && (role === "FB" || role === "WB")) {
         const sameFlank = N.smooth(clamp((ballS.y * Math.sign(y || 1)) / 16));
@@ -2539,7 +2544,7 @@ window.addEventListener("error", (e) => {
     }
 
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
-    const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * E.fatigueOf(match, scenario, team, no, t));
+    const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * fat);
     const ps = N.seedOf(match.meta.id + team + no);
     x += N.fbm1(ps, t, [
       { amp: amp * 0.5, period: 42 }, { amp: amp * 0.42, period: 14 },
@@ -2699,6 +2704,9 @@ window.addEventListener("error", (e) => {
       else if (rank === 1) { wBase = 0.32 + 0.12 * trig; sig = 9 + 6 * trig; }  // 2nd: カバー（トリガで遠くから連動）
       else if (rank === 2) { wBase = 0.22 + 0.16 * trig; sig = 10 + 5 * trig; } // 3rd: トリガで連動
       const gate = Math.exp(-(d * d) / (2 * sig * sig));
+      // 疲労でプレス強度が落ちる（#44・終盤は寄せ切れない）
+      const fatP = E.fatigueOf(match, scenario, team, no, ctx.t);
+      wBase *= (1 - 0.35 * fatP);
       let uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
       // キックオフ（#51）: ピン中は相手に寄せない（競技規則: 相手はセンターサークル外）。
       // 蹴り出し後に通常ランプで再開 → 窓境界の目標ジャンプによる速度スパイクも消える
