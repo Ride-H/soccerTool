@@ -2633,10 +2633,13 @@ window.addEventListener("error", (e) => {
     if (c && c.mode === "hold" && c.team !== team && slot.role !== "GK" && ctx.carrierPos) {
       const cp = ctx.carrierPos;
       const d = Math.hypot(cp.x - x, cp.y - y);
-      const rank = ctx.pressRank ? ctx.pressRank.get(no) : undefined;
+      const rank = ctx.pressRank ? ctx.pressRank.ranks.get(no) : undefined;
+      // トリガ（#29）: 相手のビルドアップで自チームのプレスが点灯（連続 level）
+      const trig = ctx.trigger && ctx.trigger.team === team ? ctx.trigger.level : 0;
       let wBase = 0.22, sig = 10;
-      if (rank === 0) { wBase = 0.52; sig = 7.5; }        // ファーストプレッサー: 密着
-      else if (rank === 1) { wBase = 0.32; sig = 9; }     // セカンド: カバーシャドウ
+      if (rank === 0) { wBase = 0.52 + 0.14 * trig; sig = 7.5 + 3 * trig; }    // 1st: 密着（トリガで増圧）
+      else if (rank === 1) { wBase = 0.32 + 0.12 * trig; sig = 9 + 6 * trig; }  // 2nd: カバー（トリガで遠くから連動）
+      else if (rank === 2) { wBase = 0.22 + 0.16 * trig; sig = 10 + 5 * trig; } // 3rd: トリガで連動
       const gate = Math.exp(-(d * d) / (2 * sig * sig));
       let uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
       // キックオフ（#51）: ピン中は相手に寄せない（競技規則: 相手はセンターサークル外）。
@@ -2650,8 +2653,16 @@ window.addEventListener("error", (e) => {
         const near = rank === 0 ? 0.9 : 1.6;
         const gx = -ctx.dir * HALF_W;
         const gl = Math.hypot(gx - cp.x, 0 - cp.y) || 1;
-        const px = cp.x + ((gx - cp.x) / gl) * near;
-        const py = cp.y + ((0 - cp.y) / gl) * near;
+        let px = cp.x + ((gx - cp.x) / gl) * near;
+        let py = cp.y + ((0 - cp.y) / gl) * near;
+        // カバーシャドウ（#29）: トリガ中の2ndは保持者→支援重心のレーン上へ
+        //（パスコースを消す）。trig 連続 → 目標も連続
+        if (rank === 1 && ctx.pressRank.shadow) {
+          const sh = ctx.pressRank.shadow;
+          const uSh = Math.min(1, trig * 1.5);
+          px = lerp(px, lerp(cp.x, sh.x, 0.4), uSh);
+          py = lerp(py, lerp(cp.y, sh.y, 0.4), uSh);
+        }
         x = lerp(x, px, w);
         y = lerp(y, py, w);
       }
@@ -2691,9 +2702,43 @@ window.addEventListener("error", (e) => {
     ds.sort((a, b) => a.d - b.d || a.no - b.no);
     const m = new Map();
     ds.forEach((e, i) => m.set(e.no, i));
+    // カバーシャドウの遮断対象（#29）: 保持者の支援味方の「連続な重心」
+    // （最寄り1人だと支援者の入替で目標が跳ぶ → exp(-d/6) 重み付き重心で連続化）
+    let shadow = null;
+    {
+      const rosterOwn = E.rosterAt(match, scenario, carrier.team, t);
+      const shapeOwn = F.SHAPES[rosterOwn.shape];
+      let sx = 0, sy = 0, sw = 0;
+      for (const slot of shapeOwn) {
+        if (slot.role === "GK") continue;
+        const no2 = rosterOwn.assign[slot.id];
+        if (no2 == null || no2 === carrier.no) continue;
+        const p = basePosOf(match, scenario, carrier.team, no2, slot, t);
+        const w = Math.exp(-Math.hypot(p.x - carrierPos.x, p.y - carrierPos.y) / 6);
+        sx += p.x * w; sy += p.y * w; sw += w;
+      }
+      if (sw > 1e-9) shadow = { x: sx / sw, y: sy / sw };
+    }
+    const out = { ranks: m, shadow };
     if (rankCache.size > 8000) rankCache.clear();
-    rankCache.set(key, m);
-    return m;
+    rankCache.set(key, out);
+    return out;
+  };
+
+  /* ---------------- プレッシング・トリガ（#29・読み取り可・純関数） ---------------- */
+  // 保持チームが自陣1/3でビルドアップしている局面で、相手の協調プレスが点灯する。
+  // level は ballSlow に連続 → プレス強化も連続（速度上限を破らない）。
+  E.pressTriggerAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const c = E.carrierAt(match, scenario, t);
+    if (!c || c.mode !== "hold" || (c.seg && c.seg.restart)) return null;
+    const half = E.halfOf(match, t);
+    const dirH = match.dir[c.team][half === 1 ? "h1" : "h2"];
+    const bs = E.ballSlowAt(match, t);
+    const prog = dirH * bs.x + HALF_W;                 // 保持チームの前進度 0..105
+    const level = N.smooth(clamp((42 - prog) / 18));   // 自陣~40%で点灯・連続
+    if (level <= 0.02) return null;
+    return { team: E.oppOf(match, c.team), level };
   };
 
   /* ---------------- 相互分離（#28・社会力の斥力項・純関数+memo） ---------------- */
@@ -2763,13 +2808,14 @@ window.addEventListener("error", (e) => {
     }
     const pressRank = pressRankAt(match, scenario, t, carrier, carrierPos);
     const sep = separationAt(match, scenario, t);
+    const trigger = E.pressTriggerAt(match, scenario, t);
     const players = [];
 
     for (const team of E.teamKeys(match)) {
       const dir = match.dir[team][half === 1 ? "h1" : "h2"];
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
-      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, t };
+      const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
       // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
@@ -2900,7 +2946,8 @@ window.addEventListener("error", (e) => {
       ballS: E.ballSlowAt(match, tt), ball: E.ballAt(match, scenario, tt),
       carrier, carrierPos,
       pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos),
-      sep: separationAt(match, scenario, tt), t: tt,
+      sep: separationAt(match, scenario, tt),
+      trigger: E.pressTriggerAt(match, scenario, tt), t: tt,
     };
     return playerPos(match, scenario, team, no, slot, tt, ctx);
   };

@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 166テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 169テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -139,8 +139,10 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
   **ボールはセンタースポットに静止し失点側が保持して味方へ蹴り出す**・ピン中は相手が寄せない）
 - **集団サージ**: ポゼッション基調波の微分で、カウンター時は全体が一斉撤退／攻勢転換時は
   全体が押し上がる（役割別スケール・速度上限内）
-- **階層プレッシング**: 最近接プレッサーは0.9mまで密着、2番手がカバー（オープンプレー保持者への
-  最近接守備者は中央値2〜6mをテストで固定）
+- **階層プレッシング & トリガ**（#29）: 最近接プレッサーは0.9mまで密着、2番手がカバー（オープン
+  プレー保持者への最近接守備者は中央値2〜6mをテストで固定）。相手が自陣~40%でビルドアップすると
+  **協調プレスが点灯**（連続level・`pressTriggerAt`）— 1st増圧・2ndは**カバーシャドウ**（保持者→
+  支援重心のパスレーン上）・3rdも連動
 - **相互分離**（#28）: 社会力モデルの斥力項をエンジン座標に導入 — 選手同士のランダムな重なり
   （すり抜け）を解消（最小ペア距離~0.3m保証・プレス密着や接触収束など意図的な近接は保存）
 - **協調ラインコントロール & オフサイド**（#27）: 最終ライン（CB/FB/WB）を合意 x へ同期させ
@@ -210,8 +212,8 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   166テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
-             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline）
+rpdx/test/   169テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline / pressing）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
 ```
