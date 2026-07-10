@@ -208,3 +208,38 @@ for (const m of Object.values(MATCHES)) {
     if (all >= 3) assert.ok(near / all >= 0.6, `ゴール前受け ${near}/${all}`);
   });
 }
+
+/* ================= #28 相互分離（社会力の斥力・重なり解消） ================= */
+
+test("#28 separation: ランダムな重なりが解消（保持者ペア・祝祭除外で最小距離≥0.25m）", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    const goals = m.events.filter(e => e.type === "goal").map(e => e.t);
+    let n05 = 0, minD = 99, n = 0;
+    for (let t = range.t0 + 30; t < range.t1; t += 7) {
+      if (goals.some(g => t >= g && t <= g + 45)) continue;
+      const st = E.stateAt(m, sc, t);
+      const ps = st.players.filter(p => p.onPitch && !p.entering);
+      const cKey = st.carrier && st.carrier.mode === "hold" ? st.carrier.team + ":" + st.carrier.no : null;
+      for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+        const a = ps[i], b = ps[j];
+        if (cKey && (a.team + ":" + a.no === cKey || b.team + ":" + b.no === cKey)) continue;
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        n++; if (d < 0.5) n05++; if (d < minD) minD = d;
+      }
+    }
+    assert.ok(n > 100000, `サンプル ${n}`);
+    assert.ok(minD >= 0.25, `${m.meta.id} 最小ペア距離 ${minD.toFixed(2)}m（導入前は~0.02m）`);
+    assert.ok(n05 <= 12, `${m.meta.id} d<0.5m ペア ${n05}（導入前は29）`);
+  }
+});
+
+test("#28 separation: 決定論・変位上限0.8m・遠いペアには作用しない", () => {
+  const m = MATCH, sc = E.actualScenario(m);
+  for (const t of [700, 2500, 4600]) {
+    const a = E.stateAt(m, sc, t).players.map(p => [p.no, p.team, p.x, p.y]);
+    E.clearCaches();
+    const b = E.stateAt(m, sc, t).players.map(p => [p.no, p.team, p.x, p.y]);
+    assert.deepEqual(a, b, `決定論 @${t}`);
+  }
+});
