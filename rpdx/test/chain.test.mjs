@@ -47,8 +47,9 @@ for (const m of Object.values(MATCHES)) {
         gkAll++;
         const p = m.teams[c.team].squad.find(q => q.no === c.no);
         if (p && p.pos === "GK") gkOk++;
-      } else if (c.restart === "throwin" && t >= c.seg.tf && t <= c.seg.tf + c.seg.rdelay) {
-        // 静止（ピン留め）中のみ判定 — 再開後はプレーに戻る
+      } else if (c.restart === "throwin" && t >= c.seg.tf + c.seg.rdelay * 0.55 && t <= c.seg.tf + c.seg.rdelay) {
+        // 静止（ピン留め）の後半のみ判定 — #50 で運搬が有限速度になり、
+        // 窓前半はまだボールがライン際へ移動中のことがある
         const b = E.ballAt(m, scenario, t);
         if (b.free < 0.9) continue;                      // 実試合アンカー窓は対象外
         thAll++;
