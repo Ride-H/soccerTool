@@ -2244,12 +2244,25 @@ window.addEventListener("error", (e) => {
         y: p.y + 0.7 * N.vnoise1(seed + 31 + seg.no * 7, tt, 3.1),
       };
     };
-    // リスタート静止: ボールは再開地点（スローイン=ライン上/コーナー=アーク）に置かれ、
-    // 再開後は保持者の足元へ1.2秒でスムーズに戻る（テレポートさせない）
-    const pinned = s.restart && t <= s.tf + s.rdelay;
-    if (t >= s.tf || !s.from) {
+    // フライト所要時間の下限（#50）: 窓が短くても距離/速度上限より速く飛ばない。
+    // 未到達ならホールド/ピン窓へ連続に持ち越す（C0 — 瞬間移動を根絶）。
+    // リスタートは「運搬」なので遅め(12m/s)、通常パスは強いパス上限(24m/s)。
+    let travelT = 0;
+    if (s.from) {
+      const fromSeg = { team: s.from.team, no: s.from.no, slot: s.from.slot };
+      const a0 = holderPos(fromSeg, s.t0);
+      const b0 = s.restart ? { x: s.rx, y: s.ry } : holderPos(s, s.t0);
+      const vcap = s.restart ? 12 : 24;
+      travelT = Math.max(s.tf - s.t0, Math.hypot(b0.x - a0.x, b0.y - a0.y) / vcap, 0.001);
+    }
+    const inTransit = s.from && (t - s.t0) < travelT;
+    if (!inTransit) {
+      // 到達済み: リスタートはピン静止 → 保持者の足元へスムーズ復帰。
+      // 解放ブレンドはセグメント終端までに必ず完了させる（#50 — 次セグメントは
+      // 保持者の足元から発進するため、未完了だと瞬間移動になる）
       if (s.restart && t >= s.tf) {
-        const uOut = N.smooth(clamp((t - (s.tf + s.rdelay)) / 1.2));
+        const relT = Math.max(0.25, Math.min(1.2, (s.t1 ?? Infinity) - (s.tf + s.rdelay)));
+        const uOut = N.smooth(clamp((t - (s.tf + s.rdelay)) / relT));
         if (uOut < 1) {
           const p = holderPos(s, t);
           return { x: lerp(s.rx, p.x, uOut), y: lerp(s.ry, p.y, uOut), z: 0.11 };
@@ -2259,9 +2272,9 @@ window.addEventListener("error", (e) => {
       return { x: p.x, y: p.y, z: 0.11 + 0.05 * Math.abs(N.vnoise1(9917, t, 1.7)) };
     }
     // フライト: 送り手位置(t) → 受け手位置(t) の移動目標補間（リスタートは地点へ）
-    const u = N.smooth(clamp((t - s.t0) / Math.max(0.001, s.tf - s.t0)));
+    const u = N.smooth(clamp((t - s.t0) / travelT));
     const a = holderPos({ team: s.from.team, no: s.from.no, slot: s.from.slot }, t);
-    const b = pinned ? { x: s.rx, y: s.ry } : holderPos(s, t);
+    const b = (s.restart && t <= s.tf + s.rdelay) ? { x: s.rx, y: s.ry } : holderPos(s, t);
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
     const zArc = dist > 17 ? Math.sin(Math.PI * u) * Math.min(2.4, dist * 0.07) : Math.sin(Math.PI * u) * 0.25;
     return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: 0.11 + zArc };
