@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 173テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 175テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -145,6 +145,9 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
   プレー保持者への最近接守備者は中央値2〜6mをテストで固定）。相手が自陣~40%でビルドアップすると
   **協調プレスが点灯**（連続level・`pressTriggerAt`）— 1st増圧・2ndは**カバーシャドウ**（保持者→
   支援重心のパスレーン上）・3rdも連動
+- **スタミナ→行動フィードバック**（#44）: 疲労（在場時間×スタミナ属性・交代でリセット）が
+  ブロック追従・集団サージ・プレス強度・オフボールランを減衰 — フル出場選手は終盤に平均速度が
+  約25%低下し（テスト固定）、フレッシュな交代選手との質的差が出る
 - **意図的オフボールラン**（#30）: 攻勢×前進局面で FB/WB が**オーバーラップ**（ボールサイドを
   追い越して幅を取る）、ST/W/AM が**裏抜け**（オフサイド境界の手前まで・周期パルスで出入り）。
   記録イベント窓では停止（較正済み再現局面を保護）・チェーン選定にも不干渉（表示上の走り）
@@ -217,7 +220,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   173テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   175テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline / pressing）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
