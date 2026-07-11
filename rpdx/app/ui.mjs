@@ -213,6 +213,29 @@ self.onmessage = (e) => {
   /* ------------------------------ 起動 ------------------------------ */
   // URLパラメータ: ?t=秒 &cam=broadcast|tactical|goal|pitch|fly &play=0|1 &speed=n
   const urlq = new URLSearchParams(location.search);
+
+  /* ------ 国際化 i18n v1（#42・静的クロームのみ・?lang=en で英語）------
+     動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
+  const I18N = {
+    en: {
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
+      "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
+      "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
+      "算定モジュール": "Modules", "ゾーニング視点": "Zoning View", "脅威寄与 TOP": "Top Threats", "危険度": "Index",
+    },
+  };
+  const LANG = urlq.get("lang") === "en" ? "en" : "ja";
+  const t = (ja) => (LANG !== "ja" && I18N[LANG] && I18N[LANG][ja]) || ja;
+  const applyI18n = () => {
+    if (LANG === "ja") return;
+    document.documentElement.lang = LANG;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  };
+
   let renderer, tlCtx;
   const boot = () => {
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
@@ -224,6 +247,7 @@ self.onmessage = (e) => {
     window.addEventListener("resize", fit);
     fit();
     buildStatic();
+    applyI18n();
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
@@ -262,7 +286,7 @@ self.onmessage = (e) => {
       setTimeout(() => {
         $("#loading").style.display = "none";
         App.playing = urlq.get("play") !== "0";
-        $("#btnPlay").textContent = App.playing ? "❚❚ 停止" : "▶ 再生";
+        $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
     // 事前計算の進捗をローディングにも反映
@@ -1210,7 +1234,7 @@ self.onmessage = (e) => {
   buildSpeed();
   const setPlaying = (p) => {
     App.playing = p;
-    $("#btnPlay").textContent = p ? "❚❚ 停止" : "▶ 再生";
+    $("#btnPlay").textContent = p ? "❚❚ " + t("停止") : "▶ " + t("再生");
   };
   $("#btnPlay").onclick = () => setPlaying(!App.playing);
   const evTimes = () => E.eventsOf(App.match, activeScenario())
