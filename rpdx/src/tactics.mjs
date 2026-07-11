@@ -74,6 +74,92 @@
     return out;
   };
 
+  /* ---------------- 実効フォーメーション & 形メトリクス（Issue #33 v1） ----------------
+     宣言陣形ではなく「いま実際にどう並んでいるか」を中立に測る読み取りレイヤ。
+     width/depth/凸包面積(compactness)/重心/実効ライン構成/ライン間距離/Voronoi占有。 */
+
+  // 凸包（Andrew monotone chain・依存ゼロ）→ 面積 [m²]
+  const hullArea = (pts) => {
+    if (pts.length < 3) return 0;
+    const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const half = (arr) => {
+      const h = [];
+      for (const q of arr) {
+        while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+        h.push(q);
+      }
+      return h;
+    };
+    const hull = [...half(p).slice(0, -1), ...half(p.reverse()).slice(0, -1)];
+    let a = 0;
+    for (let i = 0; i < hull.length; i++) {
+      const q = hull[i], r = hull[(i + 1) % hull.length];
+      a += q.x * r.y - r.x * q.y;
+    }
+    return Math.abs(a) / 2;
+  };
+
+  // 実効ライン推定: 深さ順に並べ、最大2ギャップで3ラインへ分割（決定論）
+  const effLines = (depths) => {
+    const d = [...depths].sort((a, b) => a - b);
+    const gaps = [];
+    for (let i = 1; i < d.length; i++) gaps.push({ i, g: d[i] - d[i - 1] });
+    gaps.sort((a, b) => b.g - a.g || a.i - b.i);
+    const cuts = gaps.slice(0, 2).map(x => x.i).sort((a, b) => a - b);
+    const lines = [];
+    let prev = 0;
+    for (const c of [...cuts, d.length]) { lines.push(c - prev); prev = c; }
+    return lines;   // 守備側から [DF, MF, FW]
+  };
+
+  // 形メトリクス（1チーム・1時刻）
+  T.shapeMetrics = (match, scenario, team, t) => {
+    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
+    const half = st.half;
+    const dir = match.dir[team][half === 1 ? "h1" : "h2"];
+    const out = st.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    const depths = out.map(p => dir * p.x);
+    const ys = out.map(p => p.y);
+    const width = Math.max(...ys) - Math.min(...ys);
+    const depth = Math.max(...depths) - Math.min(...depths);
+    const lines = effLines(depths);
+    // ライン間距離: ライン重心間の平均ギャップ
+    const sorted = [...depths].sort((a, b) => a - b);
+    let idx = 0; const centers = [];
+    for (const n of lines) { centers.push(sorted.slice(idx, idx + n).reduce((a, b) => a + b, 0) / n); idx += n; }
+    const lineGap = centers.length > 1
+      ? (centers[centers.length - 1] - centers[0]) / (centers.length - 1) : 0;
+    return {
+      width, depth,
+      area: hullArea(out.map(p => ({ x: p.x, y: p.y }))),     // compactness（小=圧縮）
+      centroid: {
+        x: out.reduce((a, p) => a + p.x, 0) / out.length,
+        y: out.reduce((a, p) => a + p.y, 0) / out.length,
+      },
+      lines, effShape: lines.join("-"), lineGap,
+    };
+  };
+
+  // Voronoi占有（近似: 4m格子の最近接選手で塗り分け・GK除く・中立の空間占有%）
+  T.voronoiShare = (match, scenario, t) => {
+    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
+    const ps = st.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
+    const count = {}; let total = 0;
+    for (const k of E.teamKeys(match)) count[k] = 0;
+    for (let x = -50; x <= 50; x += 4) for (let y = -32; y <= 32; y += 4) {
+      let best = null, bd = 1e9;
+      for (const p of ps) {
+        const d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      count[best.team]++; total++;
+    }
+    const share = {};
+    for (const k of E.teamKeys(match)) share[k] = count[k] / total;
+    return share;
+  };
+
   // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]
   T.phaseStrip = (match, scenario, n = 240) => {
     scenario = scenario || E.actualScenario(match);

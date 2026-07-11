@@ -1315,6 +1315,20 @@ self.onmessage = (e) => {
         return `<table class="stat-table" style="font-size:11px">${head}${body}</table>
         <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。飽和=前半の情報フロー圧IFL(t)×体制の生成率÷処理能力の平均（#60）。</div>`;
       })()}
+      <h4>実効フォーメーション & 形（モデル推定・現在時刻のスナップショット）</h4>
+      ${(() => {
+        const T2 = globalThis.RPDX.tactics, sc = E.actualScenario(m), t = App.t;
+        const vor = T2.voronoiShare(m, sc, t);
+        const row = (k) => {
+          const s = T2.shapeMetrics(m, sc, k, t);
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>` +
+            `<td>${s.effShape}</td><td>${s.width.toFixed(0)}</td><td>${s.depth.toFixed(0)}</td>` +
+            `<td>${Math.round(s.area)}</td><td>${s.lineGap.toFixed(1)}</td><td>${Math.round(vor[k] * 100)}%</td></tr>`;
+        };
+        const head = `<tr><td class="k"></td><td>実効ライン</td><td>幅m</td><td>縦m</td><td>凸包m²</td><td>ライン間m</td><td>占有</td></tr>`;
+        return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
+      })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
