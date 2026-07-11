@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 175テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 177テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -167,6 +167,9 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
 - **交代規則は不可侵レイヤ**: 5人・3窓（HT非カウント）・再入場禁止・GK同士・常時GK1人 —
   手動もAI提案（TacticalSubAdvisor）も布陣エディタも必ずバリデータを通過
 - **決定論シナリオ** → 同じ交代・布陣プランは何度実行しても同じ結果（無限に再実行可能）
+- **ゴールデンマスター回帰**（#35）: 世界状態（座標・ボール・保持者・結果再構成）のハッシュを
+  スナップショットに固定し、意図しない挙動変化を CI で検出。意図的な変更は
+  `UPDATE_GOLDEN=1 node --test rpdx/test/golden.test.mjs` で更新し PR 差分としてレビュー
 
 ## 交代・布陣が「試合結果」を変える（What-if Outcome）
 
@@ -220,7 +223,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   175テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   177テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline / pressing）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）

@@ -1,0 +1,29 @@
+{
+ "version": 1,
+ "entries": {
+  "wc2026-r32-bra-jpn|actual": {
+   "pos": "0dc37073",
+   "ball": "3ef921a5",
+   "carrier": "cb2d4f2b",
+   "score": "JPN:1,BRA:2"
+  },
+  "wc2026-r32-bra-jpn|whatif-cancel-last-sub": {
+   "pos": "be4ad94d",
+   "ball": "2eae5870",
+   "carrier": "8c096380",
+   "score": "JPN:1,BRA:2"
+  },
+  "wc2026-r16-arg-egy|actual": {
+   "pos": "b2011754",
+   "ball": "47d242da",
+   "carrier": "ceca6e5a",
+   "score": "ARG:3,EGY:2"
+  },
+  "wc2026-r16-arg-egy|whatif-cancel-last-sub": {
+   "pos": "2764e622",
+   "ball": "da200c1c",
+   "carrier": "6ea305e8",
+   "score": "ARG:4,EGY:2"
+  }
+ }
+}
