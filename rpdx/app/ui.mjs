@@ -1220,15 +1220,19 @@
       ${(() => {
         const O = globalThis.RPDX.opponent;
         const declared = teamOrder().map(k => [k, O.setupOf(m, k)]).filter(([, s]) => s);
-        const row = (label, p) => `<tr><td class="k">${label}</td>` +
-          `<td>収集${p.budget.collect.toFixed(1)}分 / 会議${p.budget.meeting.toFixed(1)}分 / <b>共有${p.budget.share.toFixed(1)}分</b></td>` +
+        const row = (label, p, setup) => {
+          const sat = O.htSaturation(m, E.actualScenario(m), setup);   // #60: 前半の処理飽和
+          return `<tr><td class="k">${label}</td>` +
+          `<td>収集${p.budget.collect.toFixed(1)}分 / 会議${p.budget.meeting.toFixed(1)}分 / <b>共有 実質${sat.shareEff.toFixed(1)}分</b></td>` +
+          `<td title="前半の情報フロー圧/処理能力">${Math.round(sat.meanSat * 100)}%</td>` +
           ["delay", "sway", "sysDep", "overall"].map(x => `<td title="${p.labels[x]}">${O.stars(p.scores[x])}</td>`).join("") + "</tr>";
-        const head = `<tr><td class="k"></td><td>HT15分の配分</td><td>遅延</td><td>ブレ</td><td>依存</td><td><b>総合</b></td></tr>`;
+        };
+        const head = `<tr><td class="k"></td><td>HT15分の配分</td><td>飽和</td><td>遅延</td><td>ブレ</td><td>依存</td><td><b>総合</b></td></tr>`;
         const body = declared.length
-          ? declared.map(([k, s]) => row(m.teams[k].name + "（宣言値）", O.profile(s))).join("")
-          : Object.values(O.ARCHETYPES).map(a2 => row(a2.label, O.profile(a2))).join("");
+          ? declared.map(([k, s]) => row(m.teams[k].name + "（宣言値）", O.profile(s), s)).join("")
+          : Object.values(O.ARCHETYPES).map(a2 => row(a2.label, O.profile(a2), a2)).join("");
         return `<table class="stat-table" style="font-size:11px">${head}${body}</table>
-        <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。</div>`;
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。飽和=前半の情報フロー圧IFL(t)×体制の生成率÷処理能力の平均（#60）。</div>`;
       })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>

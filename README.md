@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 216テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 219テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -129,7 +129,10 @@ API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
 3類型アーキタイプ（人海戦術型/AI・テック特化型/現場主義型）のHT時間配分（収集/会議/共有）と
 4軸スコア（情報遅延・意思決定ブレ・システム依存・**HT修正力の脆弱性**）を試合情報パネルに表示。
 **実在の連盟・チームへの断定ではなく**、宣言された仮定のモデル評価（パック未宣言なら実チームに帰属しない）。
-API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf`
+さらに**リアルタイム意思決定負荷**（#60）: 試合の情報フロー圧 IFL(t)（イベント密度×危険度変動×
+局面切替）と体制の処理能力から**前半の処理飽和度**・HT持ち込み情報量（backlog）・実質共有時間を算出
+（人海戦術型が最も飽和 — テスト固定）。選手側の**認知キャパ**（HT変更点数>3で過負荷）も判定。
+API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive`
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -246,7 +249,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   216テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   219テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
