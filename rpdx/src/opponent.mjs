@@ -73,4 +73,95 @@
 
   // 星表示ユーティリティ（UI用）
   OPP.stars = (v) => "★".repeat(Math.round(v)) + "☆".repeat(5 - Math.round(v));
+
+  /* ---------------- リアルタイム意思決定負荷（Issue #60 v1） ----------------
+     試合中にベンチの分析体制へかかる「情報フロー圧 IFL(t)」と、その体制の処理能力に
+     対する飽和度を決定論算出する。IFL は試合そのものの性質（イベント密度・危険度の
+     変動・局面切替の頻度）、処理能力は体制パラメータの関数。
+     大人数体制は「自ら生成する情報も多い」ため、同じ試合でも飽和しやすい。 */
+
+  const iflCache = new Map();
+  OPP.clearCaches = () => iflCache.clear();
+
+  // 試合固有の情報フロー圧（体制非依存の素点・0..~3）: 60秒窓
+  OPP.iflAt = (match, scenario, t) => {
+    const E = R.engine, T = R.tactics, D = R.danger;
+    scenario = scenario || E.actualScenario(match);
+    const key = match.meta.id + "|" + E.scenarioKey(scenario);
+    let base = iflCache.get(key);
+    if (!base) {
+      // 8秒格子で全編を前計算（危険度曲線は既存キャッシュを再利用）
+      const pts = D.curve(match, scenario, { step: 8, includeGK: false });
+      const keys = E.teamKeys(match);
+      const events = E.eventsOf(match, scenario).filter(e => e.type !== "kickoff");
+      const ts = [], vals = [];
+      let prevPhase = null;
+      for (let i = 0; i < pts.length; i++) {
+        const tt = pts[i].t;
+        // (1) イベント密度: ±60秒内の記録イベント数
+        const evd = events.reduce((a, e) => a + (Math.abs(e.t - tt) < 60 ? 1 : 0), 0);
+        // (2) 危険度の変動: 直近60秒の両チーム危険度の振れ幅（クリップ対象の多さ）
+        let hi = 0, lo = 100;
+        for (let j = Math.max(0, i - 7); j <= i; j++) {
+          for (const k of keys) { hi = Math.max(hi, pts[j].v[k]); lo = Math.min(lo, pts[j].v[k]); }
+        }
+        // (3) 局面切替: フェーズが直前サンプルから変わったか（切替率の proxy）
+        const ph = T.phaseAt(match, scenario, tt).phase;
+        const sw = prevPhase && ph !== prevPhase ? 1 : 0;
+        prevPhase = ph;
+        ts.push(tt);
+        vals.push(clamp(evd / 3, 0, 1) * 0.4 + clamp((hi - lo) / 55, 0, 1) * 0.4 + sw * 0.2);
+      }
+      base = { ts, vals };
+      if (iflCache.size > 12) iflCache.clear();
+      iflCache.set(key, base);
+    }
+    // 最近傍サンプル（8s格子・決定論）
+    let lo = 0, hi = base.ts.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (base.ts[mid] <= t) lo = mid; else hi = mid; }
+    return base.vals[Math.abs(base.ts[lo] - t) <= Math.abs(base.ts[hi] - t) ? lo : hi];
+  };
+
+  // 体制の処理能力: 段数がボトルネック・ツールで緩和（人数では増えない — 合意が律速）
+  OPP.capacityOf = (setup) => {
+    const s = { staff: 20, stages: 3, toolShare: 0.5, ...setup };
+    return clamp((2.2 - 0.25 * s.stages) * (1 + 0.5 * s.toolShare), 0.3, 3);
+  };
+  // 体制の情報生成率: 大人数ほど自らクリップ/レポートを量産する
+  OPP.genRateOf = (setup) => {
+    const s = { staff: 20, ...setup };
+    return 0.6 + 0.4 * Math.log(1 + s.staff / 8);
+  };
+
+  // 前半の飽和サマリ: {meanSat, backlog, shareEff} — HTへ持ち込む未処理情報量と
+  // 実質共有時間（予算の share から backlog ペナルティを引く）
+  OPP.htSaturation = (match, scenario, setup) => {
+    const E = R.engine;
+    scenario = scenario || E.actualScenario(match);
+    const gen = OPP.genRateOf(setup), cap = OPP.capacityOf(setup);
+    const htEnd = match.time.h1.end;
+    let sat = 0, over = 0, n = 0;
+    for (let t = 30; t < htEnd; t += 16) {
+      const load = OPP.iflAt(match, scenario, t) * gen;
+      sat += load / cap;
+      over += Math.max(0, load - cap) * 16;   // 未処理の積分 [情報量·秒]
+      n++;
+    }
+    const budget = OPP.htBudget(setup);
+    const backlog = over / 60;                 // 分相当
+    const shareEff = clamp(budget.share - backlog * 0.8, 0.5, budget.share);
+    return { meanSat: sat / n, backlog, shareEff, share: budget.share };
+  };
+
+  // 選手認知キャパ: HTで伝わる変更点数（交代+布陣切替）が上限3を超えると過負荷
+  OPP.htCognitive = (match, scenario, team) => {
+    const E = R.engine;
+    scenario = scenario || E.actualScenario(match);
+    const htEnd = match.time.h1.end, h2 = match.time.h2.start;
+    let changes = 0;
+    for (const sub of (scenario.subs[team] || [])) if (sub.t >= htEnd - 60 && sub.t <= h2 + 90) changes++;
+    const phases = E.phasesOf ? E.phasesOf(match, scenario, team) : [];
+    for (const ph of phases) if (Math.abs(ph.from - h2) < 90 && ph.from > 0) changes++;
+    return { changes, capacity: 3, overload: Math.max(0, changes - 3) };
+  };
 })();

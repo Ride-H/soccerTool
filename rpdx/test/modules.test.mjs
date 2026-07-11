@@ -286,3 +286,56 @@ test("#59 opponent: パック未宣言では実チームに何も帰属しない
   assert.equal(s.staff, 30);
   assert.equal(s.toolShare, O.ARCHETYPES.tech.toolShare);
 });
+
+/* ================= #60 リアルタイム意思決定負荷 ================= */
+
+test("#60 ifl: 情報フロー圧はイベント近傍で上がる・有界・決定論", () => {
+  const O = RPDX.opponent;
+  for (const m of Object.values(MATCHES)) {
+    const range = E.playedRange(m);
+    const goals = m.events.filter(e => e.type === "goal").map(e => e.t);
+    let gSum = 0, gN = 0, qSum = 0, qN = 0;
+    for (let t = 60; t < range.t1; t += 16) {
+      const v = O.iflAt(m, null, t);
+      assert.ok(v >= 0 && v <= 1.2, `IFL域 ${v}`);
+      if (goals.some(g => Math.abs(t - g) < 50)) { gSum += v; gN++; }
+      else if (goals.every(g => Math.abs(t - g) > 180)) { qSum += v; qN++; }
+    }
+    assert.ok(gSum / gN > qSum / qN + 0.05,
+      `${m.meta.id} ゴール近傍IFL ${(gSum / gN).toFixed(3)} > 静穏 ${(qSum / qN).toFixed(3)}`);
+    assert.equal(O.iflAt(m, null, 1234), O.iflAt(m, null, 1234), "決定論");
+  }
+});
+
+test("#60 saturation: 人海戦術型が最も飽和・極端体制ではHT持ち込み(backlog)が発生", () => {
+  const O = RPDX.opponent;
+  const m = MATCH;
+  const sat = (setup) => O.htSaturation(m, null, setup);
+  const s = Object.fromEntries(Object.entries(O.ARCHETYPES).map(([k, a]) => [k, sat(a)]));
+  assert.ok(s.mass.meanSat > s.tech.meanSat && s.mass.meanSat > s.field.meanSat,
+    `mass最飽和 ${s.mass.meanSat.toFixed(2)} vs tech ${s.tech.meanSat.toFixed(2)} / field ${s.field.meanSat.toFixed(2)}`);
+  // 極端体制（超大人数×多段）は処理が溢れ、HT実質共有時間が削られる
+  const extreme = sat({ staff: 140, stages: 6, toolShare: 0.3, fieldShare: 0.4 });
+  assert.ok(extreme.backlog > 0, `extreme backlog ${extreme.backlog.toFixed(2)}分`);
+  assert.ok(extreme.shareEff < extreme.share, "実質共有 < 予算共有");
+  // 飽和は人数に単調
+  assert.ok(sat({ staff: 100, stages: 3 }).meanSat > sat({ staff: 8, stages: 3 }).meanSat, "staff単調");
+});
+
+test("#60 cognitive: HT変更点数の計上と過負荷判定（actualはキャパ内）", () => {
+  const O = RPDX.opponent;
+  const c = O.htCognitive(MATCH, null, "BRA");
+  assert.ok(c.changes >= 1, `BRA HT変更 ${c.changes}（46'交代など）`);
+  assert.equal(c.capacity, 3);
+  assert.equal(c.overload, Math.max(0, c.changes - 3));
+  // 交代を盛った what-if では過負荷が検出される
+  const sc = structuredClone(E.actualScenario(MATCH));
+  delete sc.actual; sc.id = "cog-test";
+  const h2 = MATCH.time.h2.start;
+  sc.subs.JPN = [
+    { t: h2 + 10, out: 13, in: 8 }, { t: h2 + 20, out: 11, in: 25 },
+    { t: h2 + 30, out: 14, in: 17 }, { t: h2 + 40, out: 15, in: 6 },
+  ];
+  const c2 = O.htCognitive(MATCH, sc, "JPN");
+  assert.ok(c2.changes >= 4 && c2.overload >= 1, `過負荷検出 ${JSON.stringify(c2)}`);
+});
