@@ -8,7 +8,7 @@ const dataPacks = readdirSync(dir).filter((f) => /^data_match.*\.mjs$/.test(f)).
 export const SRC_ORDER = [
   "noise.mjs", "formations.mjs", ...dataPacks,
   "engine.mjs", "danger.mjs", "subs.mjs", "sim.mjs", "psy.mjs",
-  "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "layers.mjs", "generic.mjs",
+  "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "policy.mjs", "layers.mjs", "generic.mjs",
 ];
 for (const f of SRC_ORDER) {
   (0, eval)(readFileSync(join(dir, f), "utf8"));
