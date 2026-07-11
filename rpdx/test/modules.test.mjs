@@ -443,3 +443,37 @@ test("#61 htmod: scenarioKey が opponentHt を区別（キャッシュ衝突な
   assert.notEqual(E.scenarioKey(a), E.scenarioKey(b), "キャッシュキーは区別");
   assert.equal(E.scenarioHash(a), E.scenarioHash(b), "世界シード（チェーン）は同一");
 });
+
+/* ================= #62 カウンタープラン ================= */
+
+test("#62 plans: 4種の定石が生成され全て規則検証を通過・決定論", () => {
+  const O = RPDX.opponent;
+  const plans = O.counterPlans(MATCH, "JPN");
+  assert.ok(plans.length >= 4, `プラン数 ${plans.length}`);
+  const ids = plans.map(p => p.id);
+  for (const want of ["two-stage", "pre-ht", "mismatch", "atypical"]) assert.ok(ids.includes(want), want);
+  for (const p of plans) {
+    assert.ok(p.validation.ok, `${p.id}: ${JSON.stringify(p.validation.errors)}`);
+    assert.ok(p.exploits && p.desc, "弱点タイプと説明");
+    // 生成シナリオはエンジン安全（11人×2）
+    const st = E.stateAt(MATCH, p.scenario, 3000);
+    for (const team of E.teamKeys(MATCH))
+      assert.equal(st.players.filter(q => q.onPitch && q.team === team).length, 11, `${p.id} ${team}`);
+  }
+  assert.deepEqual(plans.map(p => p.id), O.counterPlans(MATCH, "JPN").map(p => p.id), "決定論");
+});
+
+test("#62 evaluate: 各プランの効果が数値化され、少なくとも1つは相手の情報環境を有意に動かす", () => {
+  const O = RPDX.opponent;
+  const plans = O.counterPlans(MATCH, "JPN");
+  const rows = O.evaluatePlans(MATCH, plans, O.ARCHETYPES.mass);
+  assert.equal(rows.length, plans.length);
+  for (const r of rows) {
+    assert.ok(Number.isFinite(r.dMeanSat) && Number.isFinite(r.dBacklog) && Number.isFinite(r.dShareEff), r.id);
+    assert.ok(/JPN \d - BRA \d/.test(r.score), `score形式 ${r.score}`);
+    assert.equal(r.baseScore, "JPN 1 - BRA 2", "基準=記録スコア");
+  }
+  assert.ok(rows.some(r => Math.abs(r.dMeanSat) > 0.003),
+    `効果が計測可能: ${rows.map(r => r.dMeanSat).join(",")}`);
+  assert.deepEqual(rows, O.evaluatePlans(MATCH, plans, O.ARCHETYPES.mass), "決定論");
+});

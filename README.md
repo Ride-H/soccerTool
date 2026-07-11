@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 225テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 230テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -136,7 +136,11 @@ API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
 その相手のHT近傍の布陣修正が体制脆弱性に応じて**遅延（総合スコア+backlogで0〜10分）・鈍化**
 （浸透45〜135秒）する — 「意思決定の弱い相手」への後半プランを結果再構成つきで比較可能。
 既定OFF＝現行挙動と完全一致（ゴールデンマスターで保証）・世界シード（保持チェーン）は不変。
-API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive`・`E.htCorrectionOf`
+**カウンタープラン提案**（#62）: 弱点タイプ→戦術テンプレ（二段可変=集計リセット / HT直前可変=編集時間の剥奪 /
+前線入替=ミスマッチ / 非定型立ち上がり=自動分類外し）を**実行可能な what-if シナリオ**として決定論生成し、
+相手の情報環境への影響（Δ飽和・Δbacklog・Δ実質共有）と自軍の結果再構成を actual 比で数値比較
+（`counterPlans / evaluatePlans` — 断定ではなくモデル上の比較）。
+API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive / counterPlans / evaluatePlans`・`E.htCorrectionOf`
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -266,7 +270,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   225テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   230テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）
