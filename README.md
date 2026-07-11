@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 212テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 216テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -121,6 +121,15 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
 タイムライン上端の**フェーズ帯**で試合の構造が一目で分かり、チーム別のフェーズ配分・
 被プレス時間も集計（劣勢側=ビルドアップ/トランジション比が高い、が両試合で成立 — テスト固定）。
 API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
+
+## 相手分析体制の脆弱性プロファイラ（#59・opponent v1）
+
+「リアルタイム解析→ベンチ→選手」という**相手のフィードバック体制そのもの**の脆弱性
+（HT15分の意思決定）を、体制パラメータ（人数・伝達段数・ツール/属人依存）から決定論評価。
+3類型アーキタイプ（人海戦術型/AI・テック特化型/現場主義型）のHT時間配分（収集/会議/共有）と
+4軸スコア（情報遅延・意思決定ブレ・システム依存・**HT修正力の脆弱性**）を試合情報パネルに表示。
+**実在の連盟・チームへの断定ではなく**、宣言された仮定のモデル評価（パック未宣言なら実チームに帰属しない）。
+API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf`
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -235,9 +244,9 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
 ```
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
-             psy / duel / physio / filter / uq / tactics / generic
+             psy / duel / physio / filter / uq / tactics / opponent / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   212テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   216テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
