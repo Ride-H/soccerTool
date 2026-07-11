@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 239テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ）
+node --test rpdx/test/*.test.mjs    # 241テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -154,6 +154,15 @@ API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSatura
 tactics / opponent / scenlib）を `register / list / get` で一元管理する読み取り専用レジストリ。
 各レイヤの api 関数参照・依存トポロジ（deps）を宣言し、契約テストで readonly（compute 前後で世界状態が不変）を担保する。
 UI 自動配線と依存トポロジ順の実行は将来スコープ。
+
+## アクセシビリティ & 国際化（#42・v1・部分対応）
+
+- **a11y**: アイコン/短縮ボタン・メインcanvas（`role="img"`）・各モーダル（`role="dialog"`）に
+  `aria-label` を付与。構造安定 OK/警告のステータス帯は `role="status" aria-live="polite"` で読み上げ。
+  キーボード操作時のみ現れる高コントラストの可視フォーカス（`:focus-visible` 2px ブルー）。
+- **i18n**: `?lang=en` で静的クローム（約30語のボタン/パネル見出し）を英語化（`data-i18n` 属性 + 辞書）。
+  **動的な解析文言（フェーズ名・リスタート種別・危険度説明など）は日本語のまま=部分対応**。
+  残: 全文言の辞書化・スクリーンリーダーの動的読み上げ・WCAG コントラスト監査。
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -296,7 +305,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / layers / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   239テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   241テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）

@@ -39,7 +39,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button, select, input, textarea { font-family: inherit; color: inherit; }
-:focus-visible { outline: 1.5px solid var(--gold); outline-offset: 2px; }
+/* #42 a11y: キーボード操作時のみ現れる高コントラストの可視フォーカス */
+:focus-visible { outline: 2px solid #7fb2ff; outline-offset: 2px; border-radius: 3px; }
+:focus:not(:focus-visible) { outline: none; }
 ::selection { background: rgba(200,169,110,.3); }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: var(--mono); }
@@ -439,7 +441,7 @@ body.showkeys #keyhelp { display: block; }
 
 </style>
 
-<canvas id="gl"></canvas>
+<canvas id="gl" role="img" aria-label="3D 戦術ピッチ — 選手・ボール・危険度場の可視化（3D tactical pitch: players, ball and danger field）"></canvas>
 
 <div id="loading">
   <div class="logo">RPD<span class="x">–X</span></div>
@@ -461,91 +463,91 @@ body.showkeys #keyhelp { display: block; }
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
+<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
-<div id="viewbar" class="panel">
-  <button class="btn cam on" data-cam="broadcast">放送</button>
-  <button class="btn cam" data-cam="tactical">俯瞰</button>
-  <button class="btn cam" data-cam="goal">ゴール裏</button>
-  <button class="btn cam" data-cam="pitch">追従</button>
-  <button class="btn cam" data-cam="fly">自由飛行</button>
+<div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
+  <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
+  <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
+  <button class="btn cam" data-cam="goal" data-i18n="ゴール裏" aria-label="ゴール裏カメラ（goal-line camera）">ゴール裏</button>
+  <button class="btn cam" data-cam="pitch" data-i18n="追従" aria-label="選手追従カメラ（follow camera）">追従</button>
+  <button class="btn cam" data-cam="fly" data-i18n="自由飛行" aria-label="自由飛行カメラ（free-fly camera）">自由飛行</button>
   <span class="vsep"></span>
-  <button class="btn tog on" id="togField">危険場 <b id="fieldModeLbl">粒子</b></button>
-  <button class="btn tog on" id="togZones">ゾーン</button>
-  <button class="btn tog on" id="togTrail">軌跡</button>
-  <button class="btn tog on" id="togLabel">番号</button>
-  <button class="btn tog on" id="togSpeed">速度</button>
-  <button class="btn tog on" id="togPsy">PSY</button>
+  <button class="btn tog on" id="togField" aria-label="危険度場の表示切替（toggle danger field）"><span data-i18n="危険場">危険場</span> <b id="fieldModeLbl">粒子</b></button>
+  <button class="btn tog on" id="togZones" data-i18n="ゾーン" aria-label="ゾーン表示切替（toggle zones）">ゾーン</button>
+  <button class="btn tog on" id="togTrail" data-i18n="軌跡" aria-label="軌跡表示切替（toggle trails）">軌跡</button>
+  <button class="btn tog on" id="togLabel" data-i18n="番号" aria-label="背番号表示切替（toggle numbers）">番号</button>
+  <button class="btn tog on" id="togSpeed" data-i18n="速度" aria-label="速度表示切替（toggle speed）">速度</button>
+  <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
   <span class="vsep"></span>
-  <select id="matchSel" class="sel" title="試合を切替"></select>
-  <button class="btn" id="btnInfo">試合情報</button>
-  <button class="btn" id="btnModel">モデル</button>
-  <button class="btn" id="btnCustom">カスタム</button>
+  <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
+  <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
+  <button class="btn" id="btnModel" data-i18n="モデル" aria-label="モデル解説を開く（open model explainer）">モデル</button>
+  <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
 
 <!-- 左ドック: 選手・配置・交代・結果 -->
-<button class="dock-toggle" id="toggleL">≡</button>
+<button class="dock-toggle" id="toggleL" aria-label="左パネルの開閉（toggle left panel）">≡</button>
 <div class="dock" id="dockL">
   <section class="panel">
-    <h3>選手 <span class="eyebrow">SQUADS</span></h3>
-    <div class="roster-tabs" id="rosterTabs"></div>
+    <h3><span data-i18n="選手">選手</span> <span class="eyebrow">SQUADS</span></h3>
+    <div class="roster-tabs" id="rosterTabs" role="tablist" aria-label="チーム選択（select team）"></div>
     <div class="plist" id="plist"></div>
   </section>
   <section class="panel" id="outcomePanel" style="display:none">
-    <h3>シナリオ結果 <span class="eyebrow">OUTCOME</span></h3>
+    <h3><span data-i18n="シナリオ結果">シナリオ結果</span> <span class="eyebrow">OUTCOME</span></h3>
     <div id="outcomeBody"></div>
   </section>
   <section class="panel" id="formationEditor">
-    <h3>配置 <span class="eyebrow">FORMATION</span></h3>
+    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span></h3>
     <div class="row">
-      <select id="fmShape" class="sel"></select>
-      <span class="eyebrow">分</span>
-      <input type="number" id="fmMin" min="0" max="105" value="0" class="num numin">
-      <button class="btn primary" id="fmApply">陣形を適用</button>
+      <select id="fmShape" class="sel" aria-label="フォーメーションを選択（select formation）"></select>
+      <span class="eyebrow" data-i18n="分">分</span>
+      <input type="number" id="fmMin" min="0" max="105" value="0" class="num numin" aria-label="適用する分（minute to apply）">
+      <button class="btn primary" id="fmApply" data-i18n="陣形を適用">陣形を適用</button>
     </div>
-    <canvas id="fmPitch" width="292" height="234"></canvas>
+    <canvas id="fmPitch" width="292" height="234" role="img" aria-label="配置エディタ（formation editor pitch）"></canvas>
     <div class="hint" id="fmHint">選手をドラッグ = 配置の微調整 · クリック2回 = 入替 · 選択中にベンチ選手クリック = 先発差替</div>
     <div id="fmPhases"></div>
     <div class="row">
-      <button class="btn" id="fmClearTweaks">微調整を解除</button>
+      <button class="btn" id="fmClearTweaks" data-i18n="微調整を解除">微調整を解除</button>
       <button class="btn" id="fmReset">このチームの布陣を実試合に戻す</button>
     </div>
   </section>
   <section class="panel" id="subBuilder">
-    <h3>交代 <span class="eyebrow">WHAT-IF</span></h3>
+    <h3><span data-i18n="交代">交代</span> <span class="eyebrow">WHAT-IF</span></h3>
     <div class="scenario-chips" id="scenarioChips"></div>
     <div class="row">
       <div class="slot out" id="slotOut">OUT — ピッチ上の選手をクリック</div>
       <div class="slot in" id="slotIn">IN — ベンチの選手をクリック</div>
     </div>
     <div class="row">
-      <span class="eyebrow">分</span>
-      <input type="number" id="subMin" min="1" max="105" value="60" class="num numin">
-      <button class="btn" id="subNow">現在</button>
-      <button class="btn primary" id="subApply">交代を追加</button>
-      <button class="btn" id="subClear">クリア</button>
+      <span class="eyebrow" data-i18n="分">分</span>
+      <input type="number" id="subMin" min="1" max="105" value="60" class="num numin" aria-label="交代の分（substitution minute）">
+      <button class="btn" id="subNow" data-i18n="現在">現在</button>
+      <button class="btn primary" id="subApply" data-i18n="交代を追加">交代を追加</button>
+      <button class="btn" id="subClear" data-i18n="クリア">クリア</button>
     </div>
     <div id="subErrors"></div>
     <div id="subList"></div>
     <div class="row" style="margin-top:9px">
       <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>
-      <button class="btn danger" id="btnReset">実試合に戻す</button>
+      <button class="btn danger" id="btnReset" data-i18n="実試合に戻す">実試合に戻す</button>
     </div>
     <div id="suggestions"></div>
   </section>
 </div>
 
 <!-- 右ドック: D²-Field -->
-<button class="dock-toggle" id="toggleR">◫</button>
+<button class="dock-toggle" id="toggleR" aria-label="右パネルの開閉（toggle right panel）">◫</button>
 <div class="dock" id="dockR">
   <section class="panel">
-    <h3>D²-Field v2 危険度 <span class="eyebrow">KIKEN INDEX</span></h3>
+    <h3>D²-Field v2 <span data-i18n="危険度">危険度</span> <span class="eyebrow">KIKEN INDEX</span></h3>
     <div id="kikenTiles"></div>
     <div class="legend-line" id="fieldLegend"></div>
   </section>
   <section class="panel">
-    <h3>算定モジュール <span class="eyebrow">D × N × T</span></h3>
+    <h3><span data-i18n="算定モジュール">算定モジュール</span> <span class="eyebrow">D × N × T</span></h3>
     <div id="modBars"></div>
     <div class="gk-toggle" style="margin-top:10px">
       <button class="btn on" id="gk20">20人 — チャンス創出</button>
@@ -560,25 +562,25 @@ body.showkeys #keyhelp { display: block; }
   <section class="panel">
     <h3>PSY 心理生理レイヤー <span class="eyebrow">HEURISTIC · 非予測</span></h3>
     <div id="psyMomo"></div>
-    <canvas id="psySpark" width="292" height="54"></canvas>
+    <canvas id="psySpark" width="292" height="54" role="img" aria-label="モメンタム推移（momentum sparkline）"></canvas>
     <div id="psyTeams"></div>
     <div id="psyDD" class="hint" style="margin-top:8px"></div>
     <div class="hint" id="psyHint"></div>
   </section>
   <section class="panel">
-    <h3>ゾーニング視点 <span class="eyebrow">PERSPECTIVE</span></h3>
+    <h3><span data-i18n="ゾーニング視点">ゾーニング視点</span> <span class="eyebrow">PERSPECTIVE</span></h3>
     <div class="zone-toggle" id="zoneViewBtns"></div>
     <div class="hint">粒子は各選手の支配空間。白い継ぎ目が両軍ゾーンの境界線。選手を選択するとその選手の支配域が強調されます。</div>
   </section>
   <section class="panel">
-    <h3>脅威寄与 TOP <span class="eyebrow">CONTRIBUTORS</span></h3>
+    <h3><span data-i18n="脅威寄与 TOP">脅威寄与 TOP</span> <span class="eyebrow">CONTRIBUTORS</span></h3>
     <div id="contribList"></div>
   </section>
 </div>
 
 <!-- インスペクタ -->
-<div id="inspector" class="panel">
-  <button class="close" id="inspClose">✕</button>
+<div id="inspector" class="panel" role="dialog" aria-label="選手インスペクタ（player inspector）">
+  <button class="close" id="inspClose" aria-label="インスペクタを閉じる（close inspector）">✕</button>
   <div class="head">
     <div class="bignum" id="inspNum">10</div>
     <div>
@@ -607,15 +609,15 @@ body.showkeys #keyhelp { display: block; }
 <!-- タイムライン -->
 <div id="timelineWrap" class="panel">
   <div id="tlHead">
-    <button class="btn" id="btnPlay">▶ 再生</button>
-    <div class="speedgrp" id="speedGrp"></div>
-    <button class="btn" id="btnPrevEv">|◀ 前</button>
-    <button class="btn" id="btnNextEv">▶| 次</button>
+    <button class="btn" id="btnPlay" aria-label="再生 / 停止（play or pause）">▶ 再生</button>
+    <div class="speedgrp" id="speedGrp" role="group" aria-label="再生速度（playback speed）"></div>
+    <button class="btn" id="btnPrevEv" aria-label="前のイベントへ（previous event）">|◀ <span data-i18n="前">前</span></button>
+    <button class="btn" id="btnNextEv" aria-label="次のイベントへ（next event）">▶| <span data-i18n="次">次</span></button>
     <span class="eyebrow" id="curveStatus"></span>
     <span class="spacer"></span>
     <span class="legend-line" id="tlLegend"></span>
   </div>
-  <canvas id="tlCanvas"></canvas>
+  <canvas id="tlCanvas" role="img" aria-label="試合タイムライン — 危険度とフェーズ（match timeline: danger and phases）"></canvas>
 </div>
 <div id="tlTip"></div>
 <div id="toasts"></div>
@@ -626,28 +628,28 @@ body.showkeys #keyhelp { display: block; }
 
 <!-- モーダル: 試合情報 -->
 <div class="modal-back" id="modalInfo">
-  <div class="modal panel">
-    <div class="mhead">試合情報 — 検証済み実データ<button class="close" data-close="modalInfo">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="試合情報（match info）">
+    <div class="mhead">試合情報 — 検証済み実データ<button class="close" data-close="modalInfo" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody" id="infoBody"></div>
   </div>
 </div>
 <!-- モーダル: モデル -->
 <div class="modal-back" id="modalModel">
-  <div class="modal panel">
-    <div class="mhead">D²-Field v2 — 距離 × 人数 × 時間<button class="close" data-close="modalModel">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="モデル解説（model explainer）">
+    <div class="mhead">D²-Field v2 — 距離 × 人数 × 時間<button class="close" data-close="modalModel" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody" id="modelBody"></div>
   </div>
 </div>
 <!-- モーダル: カスタム試合 -->
 <div class="modal-back" id="modalCustom">
-  <div class="modal panel">
-    <div class="mhead">カスタム試合 — 選手情報だけで解析<button class="close" data-close="modalCustom">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="カスタム試合（custom match）">
+    <div class="mhead">カスタム試合 — 選手情報だけで解析<button class="close" data-close="modalCustom" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody">
       <p style="color:var(--muted);margin-bottom:8px">
         選手情報（背番号・氏名・ポジション、任意で能力値・XI・イベント）から決定論的に試合を生成します。
         過去データがなくてもフォーメーション・危険度・交代シミュレーションが完全動作します。
       </p>
-      <textarea class="jsonbox" id="customJson" spellcheck="false"></textarea>
+      <textarea class="jsonbox" id="customJson" spellcheck="false" aria-label="カスタム試合 JSON（custom match JSON）"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn primary" id="customLoad">この試合を読み込む</button>
         <button class="btn" id="customTemplate">テンプレートを再挿入</button>
@@ -7334,6 +7336,29 @@ self.onmessage = (e) => {
   /* ------------------------------ 起動 ------------------------------ */
   // URLパラメータ: ?t=秒 &cam=broadcast|tactical|goal|pitch|fly &play=0|1 &speed=n
   const urlq = new URLSearchParams(location.search);
+
+  /* ------ 国際化 i18n v1（#42・静的クロームのみ・?lang=en で英語）------
+     動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
+  const I18N = {
+    en: {
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
+      "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
+      "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
+      "算定モジュール": "Modules", "ゾーニング視点": "Zoning View", "脅威寄与 TOP": "Top Threats", "危険度": "Index",
+    },
+  };
+  const LANG = urlq.get("lang") === "en" ? "en" : "ja";
+  const t = (ja) => (LANG !== "ja" && I18N[LANG] && I18N[LANG][ja]) || ja;
+  const applyI18n = () => {
+    if (LANG === "ja") return;
+    document.documentElement.lang = LANG;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  };
+
   let renderer, tlCtx;
   const boot = () => {
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
@@ -7345,6 +7370,7 @@ self.onmessage = (e) => {
     window.addEventListener("resize", fit);
     fit();
     buildStatic();
+    applyI18n();
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
@@ -7383,7 +7409,7 @@ self.onmessage = (e) => {
       setTimeout(() => {
         $("#loading").style.display = "none";
         App.playing = urlq.get("play") !== "0";
-        $("#btnPlay").textContent = App.playing ? "❚❚ 停止" : "▶ 再生";
+        $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
     // 事前計算の進捗をローディングにも反映
@@ -8331,7 +8357,7 @@ self.onmessage = (e) => {
   buildSpeed();
   const setPlaying = (p) => {
     App.playing = p;
-    $("#btnPlay").textContent = p ? "❚❚ 停止" : "▶ 再生";
+    $("#btnPlay").textContent = p ? "❚❚ " + t("停止") : "▶ " + t("再生");
   };
   $("#btnPlay").onclick = () => setPlaying(!App.playing);
   const evTimes = () => E.eventsOf(App.match, activeScenario())
