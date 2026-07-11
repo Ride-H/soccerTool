@@ -153,6 +153,81 @@
     return { meanSat: sat / n, backlog, shareEff, share: budget.share };
   };
 
+  /* ---------------- カウンタープラン（Issue #62 v1） ----------------
+     相手体制の弱点タイプ → それをピッチ上で引き出す戦術テンプレ → 実行可能な
+     what-if シナリオへ決定論変換。効果は evaluatePlans で「モデル上の比較」として
+     数値化する（断定ではない）。生成物は既存のシナリオ規則検証を必ず通す。 */
+
+  const altShapesOf = (match, team) => {
+    const F = R.formations;
+    const cur = match.teams[team].phases[0].shape;
+    return Object.keys(F.SHAPES).filter(s => s !== cur).sort();
+  };
+
+  // 生成: [{id, label, desc, exploits, scenario, validation}]
+  OPP.counterPlans = (match, opponentTeam) => {
+    const E = R.engine, S = R.subs, F = R.formations;
+    const my = E.oppOf(match, opponentTeam);
+    const alts = altShapesOf(match, my);
+    const mk = (label) => S.createScenario(match, label, E.actualScenario(match));
+    const plans = [];
+    // 1) 二段可変（情報過多型の集計をリセットさせる）: 25' と 65' で別システムへ
+    if (alts.length >= 2) {
+      let r = S.withFormation(match, mk(`${my} 二段可変 25'/65'`), my, 25, alts[0]);
+      if (r.validation.ok) r = S.withFormation(match, r.scenario, my, 65, alts[1]);
+      plans.push({ id: "two-stage", label: "二段システム可変（25'→65'）",
+        desc: "前半と後半で全く別の可変システム — 相手の集計・クリップ分類を2度リセットさせる",
+        exploits: "delay", scenario: r.scenario, validation: r.validation });
+    }
+    // 2) HT直前圧縮（共通）: 43' に布陣変更 — 相手のHT準備時間を新情報で圧迫
+    if (alts.length >= 1) {
+      const r = S.withFormation(match, mk(`${my} 43'可変`), my, 43, alts[0]);
+      plans.push({ id: "pre-ht", label: "HT直前の可変（43'）",
+        desc: "前半終了間際に新情報を注入 — 相手アナリストのHT集計・編集時間を物理的に奪う",
+        exploits: "common", scenario: r.scenario, validation: r.validation });
+    }
+    // 3) ミスマッチ作出（現場主義の眼と直感を飽和させる）: 後半頭に前線スロットを入替
+    {
+      const shape = F.SHAPES[match.teams[my].phases[0].shape];
+      const atk = shape.filter(s => ["ST", "W", "AM", "FB", "WB"].includes(s.role)).map(s => s.id).sort();
+      if (atk.length >= 2) {
+        const r = S.withSlotSwap(match, mk(`${my} 前線入替`), my, match.time.h2.start + 1, atk[0], atk[1]);
+        plans.push({ id: "mismatch", label: "後半頭のミスマッチ作出（前線入替）",
+          desc: "想定外の対面を作る — 属人的な読みと少数の眼を飽和させる",
+          exploits: "sway", scenario: r.scenario, validation: r.validation });
+      }
+    }
+    // 4) 非定型キックオフ（テック依存の自動分類の信頼度を下げる）: 開始から非典型システム
+    if (alts.length >= 2) {
+      const r = S.withFormation(match, mk(`${my} 非定型`), my, 0, alts[alts.length - 1]);
+      plans.push({ id: "atypical", label: "非定型システムでの立ち上がり",
+        desc: "パターン外の配置で開始 — 自動分析のテンプレ適合を外し、データと現場感覚の乖離を突く",
+        exploits: "sysDep", scenario: r.scenario, validation: r.validation });
+    }
+    return plans.filter(p => p.validation && p.validation.ok);
+  };
+
+  // 評価: 各プランの「相手のHT情報環境への打撃」と「自軍の結果」を actual 比で数値化
+  OPP.evaluatePlans = (match, plans, setup) => {
+    const E = R.engine, SCN = R.scenlib;
+    const base = OPP.htSaturation(match, E.actualScenario(match), setup);
+    const batch = SCN.batch(match, [
+      { name: "actual", scenario: E.actualScenario(match) },
+      ...plans.map(p => ({ name: p.id, scenario: p.scenario })),
+    ]);
+    return plans.map((p, i) => {
+      const sat = OPP.htSaturation(match, p.scenario, setup);
+      return {
+        id: p.id, label: p.label, exploits: p.exploits,
+        dMeanSat: +(sat.meanSat - base.meanSat).toFixed(4),
+        dBacklog: +(sat.backlog - base.backlog).toFixed(3),
+        dShareEff: +(sat.shareEff - base.shareEff).toFixed(2),
+        score: batch[i + 1].score, added: batch[i + 1].added,
+        baseScore: batch[0].score,
+      };
+    });
+  };
+
   // 選手認知キャパ: HTで伝わる変更点数（交代+布陣切替）が上限3を超えると過負荷
   OPP.htCognitive = (match, scenario, team) => {
     const E = R.engine;
