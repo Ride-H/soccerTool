@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 207テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 212テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -113,6 +113,14 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
   タックル敗者は**よろけ**、至近プレッサーには**ボールシールド**（体を入れる）、
   **コーナーの空中戦は勝者/敗者がジャンプ＆ヘッド**（#22）、近接ペアはソフト分離
 - 広告ボード・国旗・タイトルは試合メタから**データ駆動生成**（試合切替に追従）
+
+## 戦術フェーズ自動分類（#32）
+
+各時刻の局面を **set-piece / transition / build-up / progression / finishing** に決定論分類
+（保持チーム・前進度・奪取直後・リスタートからの決定木 — ヒューリスティック明示・非予測）。
+タイムライン上端の**フェーズ帯**で試合の構造が一目で分かり、チーム別のフェーズ配分・
+被プレス時間も集計（劣勢側=ビルドアップ/トランジション比が高い、が両試合で成立 — テスト固定）。
+API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -227,9 +235,9 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
 ```
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
-             psy / duel / physio / filter / uq / generic
+             psy / duel / physio / filter / uq / tactics / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   207テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   212テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
