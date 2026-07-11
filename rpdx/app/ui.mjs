@@ -989,6 +989,26 @@
     g.fillStyle = "rgba(148,162,189,.9)";
     g.fillText("HT", htX + 3, 12);
 
+    // フェーズ帯（#32）: 上端3pxに局面を色分け（保持チーム色の濃淡・set-piece=白系）
+    if (globalThis.RPDX.tactics) {
+      const strip = globalThis.RPDX.tactics.phaseStrip(App.match, sc0, Math.min(300, W >> 1));
+      const PHC = {
+        "set-piece": "rgba(230,236,248,.75)", "transition": "rgba(255,160,64,.8)",
+        "build-up": "rgba(110,130,170,.55)", "progression": "rgba(120,170,255,.6)",
+        "finishing": "rgba(255,90,90,.8)",
+      };
+      const teamTint = (team) => team === App.match.possessionPlus ? 1 : 0.55;
+      const x0 = X(range.t0), x1 = X(range.t1);
+      const bw = (x1 - x0) / strip.length;
+      for (let i = 0; i < strip.length; i++) {
+        const s = strip[i];
+        g.globalAlpha = s.team ? teamTint(s.team) : 0.4;
+        g.fillStyle = PHC[s.phase] || "rgba(120,120,120,.4)";
+        g.fillRect(x0 + i * bw, 2, Math.ceil(bw), 3);
+      }
+      g.globalAlpha = 1;
+    }
+
     // 閾値ガイド
     for (const [v, lbl] of [[D.WARN_AT, "WARN 45"], [D.CRIT_AT, "CRIT 75"]]) {
       g.strokeStyle = "rgba(196,212,240,.2)"; g.setLineDash([4, 4]);
