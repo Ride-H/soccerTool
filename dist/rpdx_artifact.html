@@ -1618,9 +1618,41 @@ window.addEventListener("error", (e) => {
     }
     return h || 1;
   };
-  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる
-  E.scenarioKey = (scenario) =>
-    `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}`;
+  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる。
+  // opponentHt（#61 HT修正ハンディ）は「表示・ブレンドの変調」であり世界シード
+  //（scenarioHash→チェーン）には入れない。ただし位置・危険度が変わるため
+  // キャッシュ・キーには含めて衝突を防ぐ。
+  E.scenarioKey = (scenario) => {
+    const ht = scenario && scenario.opponentHt
+      ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
+      : "";
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+  };
+
+  // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
+  // 指定チームの「HT近傍のフェーズ切替」を、体制脆弱性に応じて遅延・鈍化させる。
+  // 飽和(backlog)は actual 世界の前半から算出（what-if 自身を参照しない — 再帰回避）。
+  const htCorrCache = new Map();
+  E.htCorrectionOf = (match, scenario, team) => {
+    const o = scenario && scenario.opponentHt;
+    if (!o || o.team !== team || !R.opponent) return null;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + team;
+    const hit = htCorrCache.get(key);
+    if (hit !== undefined) return hit;
+    const base = o.archetype && R.opponent.ARCHETYPES[o.archetype] ? R.opponent.ARCHETYPES[o.archetype] : {};
+    const setup = { ...base, ...o };
+    const prof = R.opponent.profile(setup);
+    const sat = R.opponent.htSaturation(match, E.actualScenario(match), setup);
+    const delayMin = clamp(((prof.scores.overall - 1) / 4) * 7 + sat.backlog * 1.5, 0, 10);
+    const out = {
+      delaySec: delayMin * 60,
+      blendSec: 45 * (1 + ((prof.scores.sway - 1) / 4) * 2),   // 45〜135s（浸透の鈍さ）
+      profile: prof,
+    };
+    if (htCorrCache.size > 64) htCorrCache.clear();
+    htCorrCache.set(key, out);
+    return out;
+  };
 
   // 布陣フェーズ（シナリオ上書き優先）
   E.phasesOf = (match, scenario, team) =>
@@ -2876,13 +2908,18 @@ window.addEventListener("error", (e) => {
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
-      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
+      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド。
+      // #61: opponentHt 指定チームのHT近傍切替は delay 秒ホールド後、blendSec かけて浸透
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
-      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < 45) {
+      const htMod = E.htCorrectionOf(match, scenario, team);
+      const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
+      const phDelay = htNear ? htMod.delaySec : 0;
+      const phDur = htNear ? htMod.blendSec : 45;
+      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur) {
         rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
         prevShape = F.SHAPES[rosterPrev.shape];
-        blendU = N.smooth(clamp(dtPhase / 45));
+        blendU = N.smooth(clamp((dtPhase - phDelay) / phDur));
       }
       // 現在ピッチ上の11人
       for (const slot of shape) {

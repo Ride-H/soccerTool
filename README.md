@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 222テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 225テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -132,7 +132,11 @@ API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
 さらに**リアルタイム意思決定負荷**（#60）: 試合の情報フロー圧 IFL(t)（イベント密度×危険度変動×
 局面切替）と体制の処理能力から**前半の処理飽和度**・HT持ち込み情報量（backlog）・実質共有時間を算出
 （人海戦術型が最も飽和 — テスト固定）。選手側の**認知キャパ**（HT変更点数>3で過負荷）も判定。
-API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive`
+**HT修正力シミュレーション**（#61）: シナリオに `opponentHt: {team, archetype}` を指定すると、
+その相手のHT近傍の布陣修正が体制脆弱性に応じて**遅延（総合スコア+backlogで0〜10分）・鈍化**
+（浸透45〜135秒）する — 「意思決定の弱い相手」への後半プランを結果再構成つきで比較可能。
+既定OFF＝現行挙動と完全一致（ゴールデンマスターで保証）・世界シード（保持チェーン）は不変。
+API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive`・`E.htCorrectionOf`
 
 ## 異分野輸入モジュール（v1.1）
 
@@ -262,7 +266,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   222テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   225テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）
