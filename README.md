@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 233テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 236テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -121,6 +121,12 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
 タイムライン上端の**フェーズ帯**で試合の構造が一目で分かり、チーム別のフェーズ配分・
 被プレス時間も集計（劣勢側=ビルドアップ/トランジション比が高い、が両試合で成立 — テスト固定）。
 API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
+
+**実効フォーメーション & 形メトリクス（#33）**: 宣言陣形ではなく「いま実際にどう並んでいるか」を中立に測定。
+凸包面積（コンパクトネス）・幅/縦・重心・実効ライン構成（深さギャップで3ライン分割）・ライン間距離・
+Voronoi占有率（4m格子近似）を各時刻で決定論算出。試合情報モーダルに現在時刻のスナップショット表を追加
+（守備側の日本は低ブロックで凸包 約827m²・ブラジルは攻撃時 約2146m²、というコンパクト差がモデル上で成立）。
+API: `RPDX.tactics.shapeMetrics / voronoiShare`（読み取り専用・位置と結果に不干渉）。
 
 ## 相手分析体制の脆弱性プロファイラ（#59・opponent v1）
 
@@ -283,7 +289,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   233テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   236テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）

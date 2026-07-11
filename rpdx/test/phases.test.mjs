@@ -68,3 +68,46 @@ test("#32 phases: phaseStrip がタイムライン描画用の完全な帯を返
   // 複数のフェーズが出現する（単色ではない）
   assert.ok(new Set(strip.map(s => s.phase)).size >= 4, "フェーズ多様性");
 });
+
+/* ================= #33 実効フォーメーション & 形メトリクス ================= */
+
+test("#33 shape: 値域・ライン合計10人・決定論", () => {
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), range = E.playedRange(m);
+    for (let t = range.t0 + 60; t < range.t1; t += 397) {
+      for (const team of E.teamKeys(m)) {
+        const s = T.shapeMetrics(m, sc, team, t);
+        assert.ok(s.width > 15 && s.width < 70, `width ${s.width}`);
+        assert.ok(s.depth > 10 && s.depth < 80, `depth ${s.depth}`);
+        assert.ok(s.area > 200 && s.area < 4500, `area ${s.area}`);
+        assert.equal(s.lines.reduce((a, b) => a + b, 0), 10, "アウトフィールド10人");
+        assert.ok(/^\d+-\d+(-\d+)?$/.test(s.effShape), s.effShape);
+        assert.deepEqual(s, T.shapeMetrics(m, sc, team, t), "決定論");
+      }
+    }
+  }
+});
+
+test("#33 shape: 物語整合 — 守備側は攻撃側よりコンパクト（面積小・ライン間狭い）", () => {
+  const m = MATCH, sc = E.actualScenario(m);
+  let ok = 0, n = 0;
+  for (const t of [1200, 2000, 3480, 4200, 5000]) {
+    const j = T.shapeMetrics(m, sc, "JPN", t), b = T.shapeMetrics(m, sc, "BRA", t);
+    n++;
+    if (j.area < b.area && j.lineGap < b.lineGap) ok++;
+  }
+  assert.ok(ok / n >= 0.8, `コンパクト率 ${ok}/${n}`);
+});
+
+test("#33 voronoi: 占有は合計100%・優勢側が過半・決定論", () => {
+  const m = MATCH, sc = E.actualScenario(m);
+  for (const t of [800, 3480, 5200]) {
+    const v = T.voronoiShare(m, sc, t);
+    const keys = E.teamKeys(m);
+    assert.ok(Math.abs(v[keys[0]] + v[keys[1]] - 1) < 1e-9, "合計100%");
+    assert.deepEqual(v, T.voronoiShare(m, sc, t), "決定論");
+  }
+  let sum = 0, n = 0;
+  for (let t = 300; t < 5000; t += 300) { sum += T.voronoiShare(m, sc, t).BRA; n++; }
+  assert.ok(sum / n > 0.5, `BRA平均占有 ${(100 * sum / n).toFixed(0)}%`);
+});
