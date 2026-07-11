@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 197テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 207テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -167,6 +167,9 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
 - **交代規則は不可侵レイヤ**: 5人・3窓（HT非カウント）・再入場禁止・GK同士・常時GK1人 —
   手動もAI提案（TacticalSubAdvisor）も布陣エディタも必ずバリデータを通過
 - **決定論シナリオ** → 同じ交代・布陣プランは何度実行しても同じ結果（無限に再実行可能）
+- **プロパティベース・ハーネス**（#36）: シード付き生成器で交代シナリオ空間（2^n部分集合）を
+  決定論サンプルし、どの世界でも成立すべき不変量（11人×2/GK各1・支配率合計100%・決定論・
+  速度上限・スクラブ順序非依存・結果再構成の健全性）を自動検証。反例はシード番号つきで完全再現可能
 - **専門知ルール・オラクル**（#37）: 競技規則・定性知識のルール束（常時11人×2/GK各1・ボール場内・
   チェーン駆動時の保持者密着・GKは自陣・各リスタートの規則位置・平均速度の現実域・支配率合計100%）を
   actual と what-if の両世界でサンプル検証 — 実測なしでも「サッカーとして破綻していない」ことを常時保証
@@ -226,8 +229,9 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   197テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
-             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline / pressing）
+rpdx/test/   207テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
+             pressing / golden / oracle / property）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
 ```
