@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 227テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 231テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -264,16 +264,22 @@ URLパラメータ: `?match=wc2026-r16-arg-egy&t=3510&cam=tactical&zone=JPN&fiel
 チーム強度からポゼッション・得点・危険度を決定論生成し、同じ3D/交代シム/D²-Fieldが動きます。
 API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
+## 性能（#40 ベンチ & 予算）
+
+`node rpdx/tools/bench.mjs` が代表操作（チェーン構築・再生ループ・危険度曲線・結果再構成・
+生理集計・走行距離）を決定論ワークロードで計測。CI は主要4操作に**性能予算**を課し
+（ローカル基準の6〜8倍・桁違いの退行のみ検出）、最適化の効果と退行を数値で管理します。
+
 ## 構成
 
 ```
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   227テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   231テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
-rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）
+rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
 ```
