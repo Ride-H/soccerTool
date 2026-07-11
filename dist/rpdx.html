@@ -664,20 +664,7 @@ body.showkeys #keyhelp { display: block; }
   </div>
 </div>
 
-<script>
-
-/* 実行時エラーの可視化（ヘッドレス検証用） */
-window.addEventListener("error", (e) => {
-  document.title = "RPDX-ERROR";
-  let d = document.getElementById("fatal");
-  if (!d) {
-    d = document.createElement("div");
-    d.id = "fatal";
-    d.style.cssText = "position:fixed;z-index:9999;left:8px;top:8px;right:8px;background:#3a0d10;color:#ffb4ac;font:11px monospace;padding:10px;border-radius:8px;white-space:pre-wrap";
-    document.body && document.body.appendChild(d);
-  }
-  d.textContent += (e.message || e.error) + " @ " + (e.filename || "") + ":" + e.lineno + "\n";
-});
+<script id="rpdx-core">
 
 /* ===== src/noise.mjs ===== */
 /* =========================================================================
@@ -5567,6 +5554,21 @@ window.addEventListener("error", (e) => {
   });
 })();
 
+</script>
+<script>
+
+/* 実行時エラーの可視化（ヘッドレス検証用） */
+window.addEventListener("error", (e) => {
+  document.title = "RPDX-ERROR";
+  let d = document.getElementById("fatal");
+  if (!d) {
+    d = document.createElement("div");
+    d.id = "fatal";
+    d.style.cssText = "position:fixed;z-index:9999;left:8px;top:8px;right:8px;background:#3a0d10;color:#ffb4ac;font:11px monospace;padding:10px;border-radius:8px;white-space:pre-wrap";
+    document.body && document.body.appendChild(d);
+  }
+  d.textContent += (e.message || e.error) + " @ " + (e.filename || "") + ":" + e.lineno + "\n";
+});
 
 /* ===== app/render3d.mjs ===== */
 /* =========================================================================
@@ -7067,16 +7069,89 @@ window.addEventListener("error", (e) => {
   const curveStore = new Map();
   const curveKeyOf = (sc, opts) =>
     `${App.match.meta.id}|${E.scenarioKey(sc)}|8|${opts.includeGK ? 1 : 0}`;
+
+  /* Web Worker オフロード（#38）: core script タグ（DOM非依存の計算層）のテキストから
+     Blob Worker を生成し、危険度曲線をメインスレッド外で計算する。
+     Worker 不可（CSP/file制限/エラー）時は従来のチャンク計算へ自動フォールバック。
+     シナリオは scenlib で直列化して渡す — 内容ベース hash なので同一世界・同一結果。 */
+  let dWorker = null, dwSeq = 0, dwFailed = false;
+  const dwCbs = new Map();
+  const workerCurve = (match, sc, opts, onDone) => {
+    if (dwFailed || typeof Worker === "undefined") return false;
+    try {
+      if (!dWorker) {
+        const core = document.getElementById("rpdx-core");
+        if (!core || !core.textContent.includes("R.danger")) return false;
+        const glue = `
+self.onmessage = (e) => {
+  const { id, matchId, scen, opts, geomOnly } = e.data;
+  try {
+    const R = globalThis.RPDX;
+    const m = R.data.MATCHES[matchId];
+    if (R.danger.isGeomOnly() !== !!geomOnly) R.danger.setGeomOnly(!!geomOnly);
+    const scenario = scen ? R.scenlib.parse(m, scen).scenario : R.engine.actualScenario(m);
+    if (e.data.withOutcome && scen) R.sim.attach(m, scenario);   // outcome込みの世界を決定論再構成
+    const pts = R.danger.curve(m, scenario, opts);
+    postMessage({ id, pts });
+  } catch (err) { postMessage({ id, error: String(err && err.message || err) }); }
+};`;
+        dWorker = new Worker(URL.createObjectURL(
+          new Blob([core.textContent + glue], { type: "text/javascript" })));
+        dWorker.onmessage = (e) => {
+          const cb = dwCbs.get(e.data.id);
+          dwCbs.delete(e.data.id);
+          if (e.data.error) { console.warn("worker curve error:", e.data.error); cb && cb(null); }
+          else cb && cb(e.data.pts);
+        };
+        dWorker.onerror = (e) => {
+          console.warn("curve worker failed — チャンク計算へフォールバック", e.message || "");
+          dwFailed = true;
+          for (const cb of dwCbs.values()) cb(null);
+          dwCbs.clear();
+          try { dWorker.terminate(); } catch {}
+          dWorker = null;
+        };
+      }
+      const id = ++dwSeq;
+      dwCbs.set(id, onDone);
+      dWorker.postMessage({
+        id, matchId: match.meta.id,
+        scen: sc.actual ? null : globalThis.RPDX.scenlib.serialize(sc),
+        withOutcome: !!sc.outcome,
+        opts: { step: opts.step || 8, includeGK: !!opts.includeGK },
+        geomOnly: D.isGeomOnly(),
+      });
+      return true;
+    } catch (e) {
+      console.warn("worker unavailable:", e && e.message);
+      dwFailed = true;
+      return false;
+    }
+  };
+
   const ensureCurveFor = (sc, opts, cb) => {
     const key = curveKeyOf(sc, opts);
     if (curveStore.has(key)) { cb && cb(); return; }
-    D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
+    const finish = (pts) => {
+      curveStore.set(key, pts);
+      $("#curveStatus").textContent = "";
+      cb && cb();
+    };
+    const fallback = () => D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
       (p) => { $("#curveStatus").textContent = `D²曲線 ${Math.round(p * 100)}%`; },
-      (pts) => {
-        curveStore.set(key, pts);
-        $("#curveStatus").textContent = "";
-        cb && cb();
-      });
+      finish);
+    $("#curveStatus").textContent = "D²曲線 計算中…";
+    // 無応答フォールバック: Worker が2.5秒応答しなければチャンク計算へ切替
+    //（ヘッドレス仮想時間や環境制限で Worker が進まないケースの保険。
+    //  二重完了は done ガードで抑止 — 結果は決定論なのでどちらでも同一値）
+    let done = false;
+    const once = (fn) => (arg) => { if (done) return; done = true; fn(arg); };
+    const finishOnce = once(finish);
+    const fallbackOnce = once(fallback);
+    const sent = workerCurve(App.match, sc, { step: 8, includeGK: opts.includeGK },
+      (pts) => { if (pts) finishOnce(pts); else fallbackOnce(); });
+    if (!sent) { fallbackOnce(); return; }
+    setTimeout(() => fallbackOnce(), 2500);
   };
   const actualCurve = () => curveStore.get(curveKeyOf(E.actualScenario(App.match), { includeGK: App.options.includeGK }));
   const activeCurve = () => curveStore.get(curveKeyOf(activeScenario(), { includeGK: App.options.includeGK }));
