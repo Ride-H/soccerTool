@@ -339,3 +339,48 @@ test("#60 cognitive: HT変更点数の計上と過負荷判定（actualはキャ
   const c2 = O.htCognitive(MATCH, sc, "JPN");
   assert.ok(c2.changes >= 4 && c2.overload >= 1, `過負荷検出 ${JSON.stringify(c2)}`);
 });
+
+/* ================= #34 シナリオ・ライブラリ & バッチ ================= */
+
+test("#34 scenlib: 直列化↔復元の往復一致・検証つき", () => {
+  const SCN = RPDX.scenlib, S = RPDX.subs;
+  const base = S.createScenario(MATCH, "往復テスト", E.actualScenario(MATCH));
+  base.subs.JPN = base.subs.JPN.slice(0, 3);
+  const str = SCN.serialize(base);
+  const { scenario, validation } = SCN.parse(MATCH, str);
+  assert.ok(validation.ok, JSON.stringify(validation.errors));
+  assert.equal(scenario.label, "往復テスト");
+  assert.deepEqual(
+    scenario.subs.JPN.map(s => [s.t, s.out, s.in]),
+    base.subs.JPN.map(s => [s.t, s.out, s.in]));
+  // 再直列化も一致（最小表現の安定性）
+  assert.equal(SCN.serialize(scenario), str.replace('"往復テスト"', '"往復テスト"'));
+});
+
+test("#34 scenlib: バッチ — actualは記録スコア・交代取消は結果再構成・決定論", () => {
+  const SCN = RPDX.scenlib, S = RPDX.subs, SIM = RPDX.sim;
+  const cancel = S.createScenario(MATCH, "BRA交代2取消", E.actualScenario(MATCH));
+  cancel.subs.BRA = cancel.subs.BRA.filter((_, i) => i !== 1);   // 66' マルティネッリ取消
+  const entries = [
+    { name: "actual", scenario: E.actualScenario(MATCH) },
+    { name: "cancel", scenario: cancel },
+  ];
+  const rows = SCN.batch(MATCH, entries);
+  assert.equal(rows[0].score, "JPN 1 - BRA 2", "actual=記録スコア");
+  const oc = SIM.outcome(MATCH, cancel);
+  assert.equal(rows[1].score, `JPN ${oc.score.JPN} - BRA ${oc.score.BRA}`, "what-if=結果再構成");
+  assert.deepEqual(rows, SCN.batch(MATCH, entries), "決定論");
+  for (const r of rows) {
+    assert.ok(r.dangerMean.BRA > r.dangerMean.JPN, "危険度平均の向き（BRA優勢）");
+    assert.ok(RPDX.tactics.PHASES.includes(r.topPhase.JPN));
+  }
+});
+
+test("#34 scenlib: 交代分スイープ格子 — 全変種が規則検証を通過し結果が動き得る", () => {
+  const SCN = RPDX.scenlib;
+  const grid = SCN.subMinuteGrid(MATCH, E.actualScenario(MATCH), "BRA", 1, [50, 60, 70, 80]);
+  assert.ok(grid.length >= 3, `格子 ${grid.length}変種`);
+  const rows = SCN.batch(MATCH, grid);
+  assert.equal(rows.length, grid.length);
+  for (const r of rows) assert.ok(/BRA \d/.test(r.score));
+});

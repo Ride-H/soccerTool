@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 219テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 222テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -197,6 +197,19 @@ API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSatura
   スナップショットに固定し、意図しない挙動変化を CI で検出。意図的な変更は
   `UPDATE_GOLDEN=1 node --test rpdx/test/golden.test.mjs` で更新し PR 差分としてレビュー
 
+## シナリオ・ライブラリ & バッチ・シミュレーション（#34）
+
+決定論の強みを運用へ: シナリオ（交代/布陣/微調整）を**最小表現で直列化**し、
+URL 深いリンク（`?scenario=<JSON>`）やファイルで共有・復元（規則検証つき）。
+**バッチ実行**で多数シナリオを一括評価（結果スコア・追加ゴール・危険度平均・首位フェーズ）:
+
+```bash
+node rpdx/tools/batch.mjs wc2026-r32-bra-jpn        # 交代取消の全変種を感度一覧（~5s）
+node rpdx/tools/batch.mjs <matchId> scenarios.json  # 自作シナリオ束の一括評価
+```
+
+交代分スイープ格子（`RPDX.scenlib.subMinuteGrid`）で「何分に代えるべきだったか」を面で比較できます。
+
 ## 交代・布陣が「試合結果」を変える（What-if Outcome）
 
 交代・フォーメーション・配置の変更は、勝敗そのものを決定論的に再構成します。
@@ -247,11 +260,12 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
 ```
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
-             psy / duel / physio / filter / uq / tactics / opponent / generic
+             psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   219テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   222テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
+rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
 ```

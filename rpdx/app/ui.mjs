@@ -161,6 +161,14 @@
       const [tm, no] = urlq.get("sel").split(":");
       if (App.match.teams[tm]) selectPlayer(tm, +no);
     }
+    if (urlq.has("scenario")) {
+      // #34: 直列化シナリオの深いリンク（scenlib 形式 JSON）— 検証NG時は無視
+      try {
+        const { scenario, validation } = globalThis.RPDX.scenlib.parse(App.match, decodeURIComponent(urlq.get("scenario")));
+        if (validation.ok) refreshScenario(scenario);
+        else console.warn("scenario param invalid:", validation.errors);
+      } catch (e) { console.warn("scenario param parse error", e); }
+    }
     if (urlq.get("demo") === "sim") {
       // 検証/デモ用: 66' 鎌田→久保 のwhat-ifシナリオを自動生成
       let sc = S.fromActual(App.match, "久保投入 66'");
