@@ -238,3 +238,51 @@ test("#43 fouls: 決定論（キャッシュ有無で同一）・エンジン出
   const s2 = JSON.stringify(E.stateAt(m, act(m), 1234).players.map(p => [p.no, p.x.toFixed(4)]));
   assert.equal(s1, s2, "エンジン出力不変");
 });
+
+/* ================= #59 相手分析体制の脆弱性プロファイラ ================= */
+
+test("#59 opponent: HT予算は15分に整合・スコアは1..5・決定論", () => {
+  const O = RPDX.opponent;
+  for (const a of Object.values(O.ARCHETYPES)) {
+    const p = O.profile(a);
+    const sum = p.budget.collect + p.budget.meeting + p.budget.share;
+    assert.ok(Math.abs(sum - 15) < 0.01 || p.budget.share === 1 || p.budget.share === 12,
+      `${a.label} 予算計 ${sum.toFixed(2)}`);
+    for (const k of ["delay", "sway", "sysDep", "overall"]) {
+      assert.ok(p.scores[k] >= 1 && p.scores[k] <= 5, `${a.label} ${k}=${p.scores[k]}`);
+    }
+    assert.deepEqual(p, O.profile(a), "決定論");
+  }
+});
+
+test("#59 opponent: 単調性 — 人数↑=遅延↑・段数↑=ブレ↑・ツール依存↑=システム依存↑", () => {
+  const O = RPDX.opponent;
+  const base = { staff: 20, stages: 3, toolShare: 0.5, fieldShare: 0.4 };
+  assert.ok(O.profile({ ...base, staff: 90 }).scores.delay > O.profile({ ...base, staff: 8 }).scores.delay, "staff→delay");
+  assert.ok(O.profile({ ...base, stages: 6 }).scores.sway > O.profile({ ...base, stages: 2 }).scores.sway, "stages→sway");
+  assert.ok(O.profile({ ...base, toolShare: 0.9 }).scores.sysDep > O.profile({ ...base, toolShare: 0.1 }).scores.sysDep, "tool→sysDep");
+  // 共有時間は人数・段数に単調減少
+  assert.ok(O.htBudget({ ...base, staff: 90, stages: 6 }).share < O.htBudget({ ...base, staff: 8, stages: 2 }).share, "share単調");
+});
+
+test("#59 opponent: アーキタイプの署名 — 人海=遅延最大・テック=依存最大・現場=総合最小", () => {
+  const O = RPDX.opponent;
+  const ps = Object.fromEntries(Object.entries(O.ARCHETYPES).map(([k, a]) => [k, O.profile(a)]));
+  assert.ok(ps.mass.scores.delay > ps.tech.scores.delay && ps.mass.scores.delay > ps.field.scores.delay, "mass=遅延最大");
+  assert.ok(ps.tech.scores.sysDep > ps.mass.scores.sysDep && ps.tech.scores.sysDep > ps.field.scores.sysDep, "tech=依存最大");
+  assert.ok(ps.field.scores.overall <= ps.mass.scores.overall && ps.field.scores.overall <= ps.tech.scores.overall, "field=総合最小");
+});
+
+test("#59 opponent: パック未宣言では実チームに何も帰属しない（setupOf=null）", () => {
+  const O = RPDX.opponent;
+  for (const m of Object.values(MATCHES)) {
+    for (const team of E.teamKeys(m)) {
+      assert.equal(O.setupOf(m, team), null, `${m.meta.id} ${team} は未宣言のはず`);
+    }
+  }
+  // 宣言時はアーキタイプ既定値とマージされる
+  const fake = { teams: { X: { analysisSetup: { archetype: "tech", staff: 30 } } } };
+  const s = O.setupOf(fake, "X");
+  assert.equal(s.staff, 30);
+  assert.equal(s.toolShare, O.ARCHETYPES.tech.toolShare);
+});

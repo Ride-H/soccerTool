@@ -1216,6 +1216,20 @@
           return `<div style="margin:4px 0 8px"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b>（推定パス${T.total}本）<br>${pairs}<br><span style="color:var(--muted);font-size:11px">次数中心性: ${cent}</span></div>`;
         }).join("");
       })()}
+      <h4>相手分析体制の脆弱性プロファイル（モデル仮定 — 実在体制への断定ではない）</h4>
+      ${(() => {
+        const O = globalThis.RPDX.opponent;
+        const declared = teamOrder().map(k => [k, O.setupOf(m, k)]).filter(([, s]) => s);
+        const row = (label, p) => `<tr><td class="k">${label}</td>` +
+          `<td>収集${p.budget.collect.toFixed(1)}分 / 会議${p.budget.meeting.toFixed(1)}分 / <b>共有${p.budget.share.toFixed(1)}分</b></td>` +
+          ["delay", "sway", "sysDep", "overall"].map(x => `<td title="${p.labels[x]}">${O.stars(p.scores[x])}</td>`).join("") + "</tr>";
+        const head = `<tr><td class="k"></td><td>HT15分の配分</td><td>遅延</td><td>ブレ</td><td>依存</td><td><b>総合</b></td></tr>`;
+        const body = declared.length
+          ? declared.map(([k, s]) => row(m.teams[k].name + "（宣言値）", O.profile(s))).join("")
+          : Object.values(O.ARCHETYPES).map(a2 => row(a2.label, O.profile(a2))).join("");
+        return `<table class="stat-table" style="font-size:11px">${head}${body}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。</div>`;
+      })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
