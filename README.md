@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 231テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 232テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -268,7 +268,10 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
 `node rpdx/tools/bench.mjs` が代表操作（チェーン構築・再生ループ・危険度曲線・結果再構成・
 生理集計・走行距離）を決定論ワークロードで計測。CI は主要4操作に**性能予算**を課し
-（ローカル基準の6〜8倍・桁違いの退行のみ検出）、最適化の効果と退行を数値で管理します。
+（並列実行の競合を見込んだ余裕設定・桁違いの退行のみ検出）、最適化の効果と退行を数値で管理します。
+**#39 高速化**: 基礎位置の per-t メモ（同一時刻の重複評価 ~38→~23回）＋相互分離の空間ハッシュ
+（加算順序保存）で、走行距離 −18%・生理集計 −32%・総計 −18% — **出力はビット同一**
+（ゴールデンマスターが保証・最適化中の値混入バグも2度検出した実績）。
 
 ## 構成
 
@@ -276,7 +279,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   231テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   232テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
