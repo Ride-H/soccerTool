@@ -8072,12 +8072,17 @@ self.onmessage = (e) => {
       if (App.pickOut && App.pickOut.team === team && App.pickOut.no === oldNo) App.pickOut.no = newNo;
       if (App.pickIn && App.pickIn.team === team && App.pickIn.no === oldNo) App.pickIn.no = newNo;
     }
-    // 背番号・ポジション（GKスワップ含む）はXI/識別に影響 → キャッシュを更新
+    // 背番号・ポジション（GKスワップ含む）・名前はXI/識別/属性に影響 → 全キャッシュを更新
     E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
     rosterEdit = null;
     buildStatic();
     drawEditor();
     updateSubSlots();
+    // 危険度カーブ・シナリオ結果は curveStore 由来 → クリア後に必ず再計算する（setCore と同じ正準パターン）
+    ensureCurveFor(E.actualScenario(App.match), { includeGK: false }, () => {
+      ensureCurveFor(E.actualScenario(App.match), { includeGK: App.options.includeGK }, () => {});
+      if (isSim()) computeOutcome(App.scenario); else renderOutcome();
+    });
     toast("ロスターを更新（未較正・端末内のみ）", GOLD);
   };
 
