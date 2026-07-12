@@ -241,7 +241,8 @@ self.onmessage = (e) => {
   const boot = () => {
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
     const mq = urlq.get("match");
-    if (mq && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
+    if (mq === "template" || mq === "__tpl__") App.match = getTemplateMatch();  // #92: 未較正テンプレ起点
+    else if (mq && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     renderer = R.render3d.create($("#gl"), App.match);
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
@@ -323,6 +324,9 @@ self.onmessage = (e) => {
     buildKikenTiles();
     buildPsyPanel();
     buildMatchSel();
+    // #92: 未較正（汎用推定）試合は明示。収録実試合（calibrated未設定）では非表示。
+    const cc = $("#calibChip");
+    if (cc) cc.style.display = App.match.meta.calibrated === false ? "" : "none";
     buildZoneViewBtns();
     buildInfoModal();
     buildModelModal();
@@ -900,18 +904,27 @@ self.onmessage = (e) => {
   };
 
   /* --------------------------- 試合スイッチャ --------------------------- */
+  // #92: テンプレ試合はレジストリに常時登録せず（収録2試合の golden/テスト不変）、
+  //   ここでオンデマンド生成してキャッシュする。自チーム運用の「未較正の起点」。
+  let templateMatchCache = null;
+  const getTemplateMatch = () => (templateMatchCache ??= G.templateMatch());
+  const TPL_ID = "__tpl__";
+
   const buildMatchSel = () => {
     const sel = $("#matchSel");
     const reg = R.data.MATCHES || { [App.match.meta.id]: App.match };
     const ids = Object.keys(reg);
-    sel.style.display = ids.length > 1 ? "" : "none";
-    sel.innerHTML = ids.map(id => {
+    const isTpl = App.match.meta.calibrated === false;
+    sel.style.display = "";
+    const opts = ids.map(id => {
       const m = reg[id];
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
-    }).join("");
+    });
+    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    sel.innerHTML = opts.join("");
     sel.onchange = () => {
-      const m = reg[sel.value];
+      const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
         toast(`試合を切替 — ${m.meta.competition} ${m.meta.stage}`, GOLD);
