@@ -236,6 +236,20 @@
         <button class="btn" id="customBack">日本×ブラジル戦に戻る</button>
       </div>
       <div id="customErr" style="color:var(--crit-t);margin-top:8px;font-size:11.5px"></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+      <p style="color:var(--muted);margin-bottom:8px;font-size:11.5px">
+        <b>現在のシナリオを JSON で往復</b>（交代・布陣・能力値/名前の上書き・編集フレームを 1 ファイルへ）。
+        取込はファイル選択・ドラッグ&ドロップ・<code>?data=</code> に対応。<b>すべて端末内で完結し、送信・サーバ蓄積はありません。</b>
+        取り込んだ JSON はシナリオ級の上書きとして反映され、収録試合そのもの（golden）は不変です。
+      </p>
+      <div id="bundleZone" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="bundleExport" aria-label="シナリオを JSON で書き出す（export scenario JSON）">シナリオを書き出す</button>
+        <label class="btn" for="bundleFile" style="cursor:pointer" aria-label="JSON を取り込む（import scenario JSON）">JSON を取り込む</label>
+        <input type="file" id="bundleFile" accept="application/json,.json" style="display:none">
+        <button class="btn" id="bundleStore" aria-label="この端末に保存（save to this device）">端末に保存</button>
+        <button class="btn" id="bundleRestore" aria-label="この端末から復元（restore from this device）">端末から復元</button>
+      </div>
+      <div id="bundleMsg" style="color:var(--muted);margin-top:8px;font-size:11.5px" aria-live="polite"></div>
     </div>
   </div>
 </div>
