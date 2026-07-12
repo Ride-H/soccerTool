@@ -239,6 +239,7 @@ self.onmessage = (e) => {
 
   let renderer, tlCtx;
   const boot = () => {
+    $("#appVer") && ($("#appVer").textContent = "v" + (R.VERSION || "?"));   // バージョン表示
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
     // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");
@@ -1497,7 +1498,8 @@ self.onmessage = (e) => {
       <h4>データ出典</h4>
       <div style="color:var(--muted);font-size:11.5px">${cal
         ? `背番号・XI・交代・警告・得点・スタッツは本試合の<b>公式記録</b>（FIFA Tactical Line-up / Match Report・Wikipedia・ESPN 照合）に基づく。選手座標・能力値は実スタッツと実況記述に整合するよう較正した決定論モデル。`
-        : `本試合は<b>モデル生成（未較正・実測非依存）</b>。すべての数値は選手情報のみから決定論生成した汎用推定で、<b>公式記録の出典はありません</b>。自チームの構成に合わせて能力値・名前・背番号・配置を編集し、JSON で往復共有できます。`}${m.meta.note ? " " + m.meta.note : ""}</div>`;
+        : `本試合は<b>モデル生成（未較正・実測非依存）</b>。すべての数値は選手情報のみから決定論生成した汎用推定で、<b>公式記録の出典はありません</b>。自チームの構成に合わせて能力値・名前・背番号・配置を編集し、JSON で往復共有できます。`}${m.meta.note ? " " + m.meta.note : ""}</div>
+      <div style="color:var(--faint);font-size:11px;margin-top:8px;font-family:var(--mono)">RPD-X v${R.VERSION || "?"}</div>`;
     $("#infoBody").querySelectorAll("[data-jump]").forEach(d => d.onclick = () => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
