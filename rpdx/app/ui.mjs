@@ -267,6 +267,14 @@ self.onmessage = (e) => {
         else console.warn("scenario param invalid:", validation.errors);
       } catch (e) { console.warn("scenario param parse error", e); }
     }
+    if (urlq.has("data")) {
+      // #91: 統合バンドル JSON の深いリンク（端末内のみ・検証NG時は無視）
+      try {
+        const r = globalThis.RPDX.scenlib.parseBundle(App.match, decodeURIComponent(urlq.get("data")));
+        if (!r.error && r.validation && r.validation.ok) { refreshScenario(r.scenario); if (r.frame) App.editFrame = r.frame; }
+        else console.warn("data param invalid:", r.error || (r.validation && r.validation.errors));
+      } catch (e) { console.warn("data param parse error", e); }
+    }
     if (urlq.get("demo") === "sim") {
       // 検証/デモ用: 66' 鎌田→久保 のwhat-ifシナリオを自動生成
       let sc = S.fromActual(App.match, "久保投入 66'");
@@ -1524,6 +1532,61 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#modalCustom").classList.remove("open");
     toast("日本×ブラジル戦（実データ）に戻しました", "#7FA6FF");
   };
+
+  /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
+  const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
+  const applyBundle = (text, src) => {
+    const r = R.scenlib.parseBundle(App.match, text);
+    if (r.error) { bMsg("⚠ " + r.error, true); return false; }
+    if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
+    refreshScenario(r.scenario);
+    if (r.frame) App.editFrame = r.frame;
+    $("#modalCustom").classList.remove("open");
+    toast("シナリオを取り込みました（端末内）" + (src ? "・" + src : ""), "#7FA6FF");
+    return true;
+  };
+  const readBundleFile = (file) => {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => applyBundle(rd.result, file.name);
+    rd.onerror = () => bMsg("⚠ ファイル読込に失敗", true);
+    rd.readAsText(file);
+  };
+  $("#bundleExport") && ($("#bundleExport").onclick = () => {
+    const sc = activeScenario();
+    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-scenario.json"; a.click();
+      bMsg("書き出し完了（" + json.length + "B）— 端末内のみ");
+    } catch (e) { bMsg("⚠ 書き出し失敗: " + (e && e.message), true); }
+  });
+  $("#bundleFile") && ($("#bundleFile").onchange = (e) => { readBundleFile(e.target.files && e.target.files[0]); e.target.value = ""; });
+  // ドラッグ&ドロップ（モーダル全体）
+  const cm = $("#modalCustom");
+  if (cm) {
+    cm.addEventListener("dragover", (e) => { e.preventDefault(); });
+    cm.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readBundleFile(f);
+    });
+  }
+  // localStorage（任意・端末内のみ・サーバ非経由）
+  const LS_KEY = "rpdx.scenario.v1";
+  $("#bundleStore") && ($("#bundleStore").onclick = () => {
+    try {
+      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null));
+      bMsg("この端末に保存しました（localStorage・送信なし）");
+    } catch (e) { bMsg("⚠ 端末保存に失敗: " + (e && e.message), true); }
+  });
+  $("#bundleRestore") && ($("#bundleRestore").onclick = () => {
+    let text = null;
+    try { text = localStorage.getItem(LS_KEY); } catch { /* ignore */ }
+    if (!text) { bMsg("⚠ 端末に保存されたシナリオがありません", true); return; }
+    applyBundle(text, "端末");
+  });
 
   const setMatch = (m) => {
     App.match = m;
