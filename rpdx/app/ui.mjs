@@ -1417,18 +1417,25 @@ self.onmessage = (e) => {
         return `<span class="chip" style="margin:2px 3px 2px 0">${p.no} ${p.ja}</span>`;
       }).join("");
     };
+    // #92c: 出典表示を較正状態・シナリオ状態に整合させる（未較正/what-if で実記録の断定を出さない）
+    const cal = m.meta.calibrated !== false;            // 収録実試合か（テンプレ/カスタムは false）
+    const sim = isSim();                                // what-if シナリオが有効か
+    const provNote = !cal
+      ? `<div class="chip est" style="margin:6px 0">この試合は<b>モデル生成（未較正・実測非依存）</b>。数値は決定論モデルの汎用推定で、公式記録の出典はありません。能力値・名前・背番号・配置は編集可（自チーム起点）。</div>`
+      : (sim ? `<div class="chip warn" style="margin:6px 0">現在 <b>what-if シナリオ</b>表示中 — 下記の記録・スコア・出典は<b>収録実試合</b>のもので、現在のシナリオ結果ではありません（シナリオ結果は右下「結果」パネル）。</div>` : "");
     $("#infoBody").innerHTML = `
       <h4>${m.meta.competition} ${m.meta.stage}</h4>
       <div style="color:var(--muted)">${m.meta.date} ${m.meta.kickoffLocal || ""} · ${m.meta.venue} · 観衆 ${m.meta.attendance.toLocaleString()}名 · 主審 ${m.meta.referee}</div>
-      <div style="font-size:21px;font-weight:300;margin:8px 0;letter-spacing:.04em">${m.teams[a].name} ${m.meta.score[a]} – ${m.meta.score[b]} ${m.teams[b].name}</div>
+      <div style="font-size:21px;font-weight:300;margin:8px 0;letter-spacing:.04em">${m.teams[a].name} ${m.meta.score[a]} – ${m.meta.score[b]} ${m.teams[b].name}${cal ? "" : ' <span class="chip est" style="vertical-align:middle">モデル生成</span>'}</div>
+      ${provNote}
       ${m.meta.motm ? `<div class="chip warn">MOM ${m.teams[m.meta.motm.team].squad.find(p => p.no === m.meta.motm.no).ja}</div>` : ""}
-      <h4>スタメン（FIFA公式記録）</h4>
+      <h4>スタメン${cal ? "（FIFA公式記録）" : "（モデル生成・未較正）"}</h4>
       <div><b style="color:${seriesColor(a, true)}">${m.teams[a].name}</b>（${m.teams[a].phases[0].shape} / ${m.teams[a].coach}）</div>
       <div style="margin:4px 0 8px">${xiRows(a)}</div>
       <div><b style="color:${seriesColor(b, true)}">${m.teams[b].name}</b>（${m.teams[b].phases[0].shape} / ${m.teams[b].coach}）</div>
       <div style="margin:4px 0 8px">${xiRows(b)}</div>
-      <h4>スタッツ（実測 — 各行に出典 / プロバイダにより差があり得ます）</h4>
-      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}${s.src ? `<div class="statsrc">出典: ${s.src}</div>` : ""}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
+      <h4>スタッツ${cal ? "（実測 — 各行に出典 / プロバイダにより差があり得ます）" : "（モデル推定・未較正 — 実測の出典はありません）"}</h4>
+      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}${cal && s.src ? `<div class="statsrc">出典: ${s.src}</div>` : ""}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
       <h4>パスネットワーク上位（モデル推定 — 保持チェーン由来・実パス記録ではない）</h4>
       ${(() => {
         const range = E.playedRange(m);
@@ -1477,8 +1484,9 @@ self.onmessage = (e) => {
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
       <h4>データ出典</h4>
-      <div style="color:var(--muted);font-size:11.5px">背番号・XI・交代・警告・得点・スタッツ: FIFA公式記録（Tactical Line-up / Match Report）・Wikipedia・ESPN照合（2026-07-03検証）。
-      選手座標・能力値は実スタッツ（支配率69/31, xG2.07/0.33）と実況記述に整合するよう較正した決定論モデル。${m.meta.note || ""}</div>`;
+      <div style="color:var(--muted);font-size:11.5px">${cal
+        ? `背番号・XI・交代・警告・得点・スタッツは本試合の<b>公式記録</b>（FIFA Tactical Line-up / Match Report・Wikipedia・ESPN 照合）に基づく。選手座標・能力値は実スタッツと実況記述に整合するよう較正した決定論モデル。`
+        : `本試合は<b>モデル生成（未較正・実測非依存）</b>。すべての数値は選手情報のみから決定論生成した汎用推定で、<b>公式記録の出典はありません</b>。自チームの構成に合わせて能力値・名前・背番号・配置を編集し、JSON で往復共有できます。`}${m.meta.note ? " " + m.meta.note : ""}</div>`;
     $("#infoBody").querySelectorAll("[data-jump]").forEach(d => d.onclick = () => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
@@ -1594,9 +1602,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
   };
   $("#customBack").onclick = () => {
-    setMatch(R.data.MATCH);
+    setMatch(getTemplateMatch());
     $("#modalCustom").classList.remove("open");
-    toast("日本×ブラジル戦（実データ）に戻しました", "#7FA6FF");
+    toast("既定のテンプレ（チームA×チームB）に戻しました", "#7FA6FF");
   };
 
   /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */

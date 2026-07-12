@@ -62,7 +62,7 @@ test("汎用試合: 能力値指定・XI指定・イベント持込みも可能"
   const cfg = G.template();
   cfg.home.squad[10].attrs = { pac: 95, sta: 90, def: 40, att: 92, tec: 93, aer: 60 };
   const m = G.createMatch(cfg);
-  const p = m.teams.RED.squad.find(q => q.no === 11);
+  const p = m.teams[cfg.home.code].squad.find(q => q.no === 11);
   assert.equal(p.attrs.pac, 95);
   assert.equal(p.attrs.att, 92);
 });
