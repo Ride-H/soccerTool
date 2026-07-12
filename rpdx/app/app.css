@@ -441,3 +441,13 @@ body.showkeys #keyhelp { display: block; }
 #editBar{display:none;gap:6px;align-items:center;margin-top:6px}
 #editBar.open{display:flex}
 #btnEdit.on{background:#7fb2ff;color:#0a0f1a}
+
+/* #89 追補: テキスト入力の視認性（既定白背景×継承白文字＝不可視の是正）。
+   数値入力は既存の .numin/.sel が整えているので対象外にして競合を避ける。 */
+input[type="text"], input[type="search"], textarea {
+  background: #0e1420; color: #e6ecf8;
+  border: 1px solid #2a3550; border-radius: 6px;
+  padding: 3px 6px; box-sizing: border-box;
+}
+input[type="text"]::placeholder, textarea::placeholder { color: #8a96ad; }
+input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-color: #7fb2ff; outline: none; }
