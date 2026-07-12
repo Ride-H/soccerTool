@@ -615,6 +615,7 @@
     const keys = new Set();
     let dragging = 0, lastX = 0, lastY = 0, moved = 0;
     canvas.addEventListener("pointerdown", (e) => {
+      if (api.editMode) return;        // #82: 編集モード中はカメラ操作を抑止（UI側がドラッグを持つ）
       dragging = e.button === 2 || e.shiftKey ? 2 : 1;
       lastX = e.clientX; lastY = e.clientY; moved = 0;
       canvas.setPointerCapture(e.pointerId);
@@ -1273,6 +1274,13 @@
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });
       drawMesh(mSphere);
+      // #82: 審判マーカー（編集用シーン要素・解析には非算入）
+      if (state.referees) for (const rf of state.referees) {
+        useLambert(M4.trs(rf.x, 0.55, -rf.y, 0.42, 1.1, 0.42), [0.15, 0.15, 0.16], { emiss: 0.05 });
+        drawMesh(mCapsule);
+        useLambert(M4.trs(rf.x, 1.35, -rf.y, 0.18, 0.18, 0.18), [0.9, 0.75, 0.15], { emiss: 0.2 });
+        drawMesh(mSphere);
+      }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
       gl.depthMask(false);
@@ -1357,6 +1365,28 @@
       }
       return { hit: best, moved };
     };
+
+    // #82: 画面座標 → 地面(y=0)との交点 → ピッチ座標 {x, y}（pick と同じ光線）
+    api.groundAt = (mx, my) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((mx - rect.left) / rect.width) * 2 - 1;
+      const y = -(((my - rect.top) / rect.height) * 2 - 1);
+      const asp = canvas.width / Math.max(1, canvas.height);
+      const f = 1 / Math.tan((cam.fov * Math.PI) / 360);
+      const dirCam = [x * asp / f, y / f, -1];
+      const d = [
+        view[0] * dirCam[0] + view[1] * dirCam[1] + view[2] * dirCam[2],
+        view[4] * dirCam[0] + view[5] * dirCam[1] + view[6] * dirCam[2],
+        view[8] * dirCam[0] + view[9] * dirCam[1] + view[10] * dirCam[2],
+      ];
+      const o = eyePos();
+      if (Math.abs(d[1]) < 1e-6) return null;
+      const tHit = -o[1] / d[1];
+      if (tHit <= 0) return null;
+      const wx = o[0] + d[0] * tHit, wz = o[2] + d[2] * tHit;
+      return { x: clamp(wx, -52.5, 52.5), y: clamp(-wz, -34, 34) };   // worldZ = -fieldY
+    };
+    api.editMode = false;
 
     api.setMatch = (m) => {
       match = m;

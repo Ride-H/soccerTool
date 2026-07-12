@@ -29,6 +29,7 @@
     },
     zoneView: "BOTH",
     selected: null, hover: null,
+    editFrame: null, editSel: null,
     rosterTab: null,
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
@@ -1500,6 +1501,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   /* ------------------------------ 3D操作 ------------------------------ */
   $("#gl").addEventListener("click", (e) => {
+    if (App.editFrame) return;   // #82: 編集中は選択でなく座標編集（下の pointer handlers）
     const st = E.stateAt(App.match, activeScenario(), App.t);
     const r = renderer.pick(e.clientX, e.clientY, st);
     if (r.moved > 6) return;
@@ -1512,6 +1514,70 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.setPreset(b.dataset.cam);
     };
   });
+
+  /* -------- #82: 停止フレームの手動編集（選手・ボール・審判の座標） -------- */
+  const setEditMode = (on) => {
+    if (on) {
+      setPlaying(false);
+      App.editFrame = E.editFrameAt(App.match, activeScenario(), App.t);
+      App.editSel = null;
+      renderer.editMode = true;
+      renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
+      document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+    } else {
+      App.editFrame = null; App.editSel = null;
+      renderer.editMode = false;
+    }
+    $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
+    $("#editBar") && $("#editBar").classList.toggle("open", on);
+  };
+  $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
+  $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
+  $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editSave") && ($("#editSave").onclick = () => {
+    if (!App.editFrame) return;
+    const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-frame.json"; a.click();
+    } catch (e) { console.warn("save failed", e); }
+    $("#curveStatus") && ($("#curveStatus").textContent = "フレーム保存 (" + json.length + "B)");
+  });
+
+  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→地面交点へ移動
+  const glcv = $("#gl");
+  const editNearest = (g) => {
+    if (!App.editFrame || !g) return null;
+    let best = null, bd = 3.5;
+    for (const p of App.editFrame.players) {
+      if (!p.onPitch) continue;
+      const d = Math.hypot(p.x - g.x, p.y - g.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const b = App.editFrame.ball;
+    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd) { bd = d; best = b; } }
+    for (const rf of App.editFrame.referees) {
+      const d = Math.hypot(rf.x - g.x, rf.y - g.y);
+      if (d < bd) { bd = d; best = rf; }
+    }
+    return best;
+  };
+  glcv.addEventListener("pointerdown", (e) => {
+    if (!App.editFrame) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    App.editSel = editNearest(g);
+    if (App.editSel) { try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+  });
+  glcv.addEventListener("pointermove", (e) => {
+    if (!App.editFrame || !App.editSel) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    if (!g) return;
+    App.editSel.x = g.x; App.editSel.y = g.y;
+    App.editFrame.edited = true;
+  });
+  glcv.addEventListener("pointerup", () => { App.editSel = null; });
+  if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
     const i = FIELD_MODES.findIndex(m => m[0] === App.options.fieldMode);
@@ -1600,7 +1666,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
 
     const sc = activeScenario();
-    const state = E.stateAt(App.match, sc, App.t);
+    const state = App.editFrame || E.stateAt(App.match, sc, App.t);
 
     // HUD 更新（8Hz）
     if (now - lastHUD > 125) {

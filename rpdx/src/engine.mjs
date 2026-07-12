@@ -1549,6 +1549,23 @@
     return st;
   };
 
+  // #82: 編集フレーム — stateAt を深いコピーした「編集可能な state」。
+  // 選手/ボールの x,y を書き換えても合成 f(t) やキャッシュを汚さない（golden安全）。
+  // referees[] を追加（解析には使わない・シーン要素）。fieldAt/描画がそのまま食える形。
+  E.editFrameAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const st = E.stateAt(match, scenario, t);
+    return {
+      t: st.t, half: st.half, clock: st.clock, score: { ...st.score },
+      possession: st.possession,
+      players: st.players.map(p => ({ ...p, attrs: p.attrs })),
+      ball: { ...st.ball },
+      referees: [],
+      carrier: null,
+      edited: false,
+    };
+  };
+
   // 特定選手の位置を直接評価（退場アニメ始点・軌跡・距離積分）
   E.stateFrozenPos = (match, scenario, team, no, t) => {
     scenario = scenario || E.actualScenario(match);

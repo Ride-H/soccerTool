@@ -71,6 +71,33 @@
     return rows;
   };
 
+  /* ---- 編集フレームの直列化（#82・座標スナップショットの保存/共有） ---- */
+  // 最小表現: 選手[team,no,x,y]・ボール[x,y]・審判[x,y]・時刻。JSON/フォルダ/URLで共有。
+  SCN.serializeFrame = (frame) => {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return JSON.stringify({
+      v: 1, t: r2(frame.t ?? 0),
+      p: frame.players.filter(p => p.onPitch).map(p => [p.team, p.no, r2(p.x), r2(p.y)]),
+      b: frame.ball ? [r2(frame.ball.x), r2(frame.ball.y)] : null,
+      r: (frame.referees || []).map(rf => [r2(rf.x), r2(rf.y)]),
+    });
+  };
+  SCN.parseFrame = (match, str, baseScenario) => {
+    const E = R.engine;
+    const o = typeof str === "string" ? JSON.parse(str) : str;
+    // baseFrame（editFrameAt）に上書き — 属性・役割は合成フレームから引き継ぐ
+    const base = E.editFrameAt(match, baseScenario || E.actualScenario(match), o.t || 0);
+    const byKey = new Map(base.players.map(p => [p.team + ":" + p.no, p]));
+    for (const [team, no, x, y] of (o.p || [])) {
+      const pl = byKey.get(team + ":" + no);
+      if (pl) { pl.x = x; pl.y = y; }
+    }
+    if (o.b && base.ball) { base.ball.x = o.b[0]; base.ball.y = o.b[1]; }
+    base.referees = (o.r || []).map(([x, y]) => ({ x, y }));
+    base.edited = true;
+    return base;
+  };
+
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
   SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
     const S = R.subs;

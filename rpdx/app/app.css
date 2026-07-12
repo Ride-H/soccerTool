@@ -436,3 +436,8 @@ body.showkeys #keyhelp { display: block; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* #82 配置編集バー */
+#editBar{display:none;gap:6px;align-items:center;margin-top:6px}
+#editBar.open{display:flex}
+#btnEdit.on{background:#7fb2ff;color:#0a0f1a}
