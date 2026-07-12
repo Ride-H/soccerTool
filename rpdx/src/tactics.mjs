@@ -114,11 +114,12 @@
   };
 
   // 形メトリクス（1チーム・1時刻）
-  T.shapeMetrics = (match, scenario, team, t) => {
-    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
-    const half = st.half;
+  // #85: 任意 state（合成 or 編集フレーム）から形メトリクスを計算する核。
+  T.shapeFromState = (match, state, team) => {
+    const half = state.half;
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
-    const out = st.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    const out = state.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    if (out.length < 2) return { width: 0, depth: 0, area: 0, centroid: { x: 0, y: 0 }, lines: [out.length], effShape: String(out.length), lineGap: 0 };
     const depths = out.map(p => dir * p.x);
     const ys = out.map(p => p.y);
     const width = Math.max(...ys) - Math.min(...ys);
@@ -140,11 +141,12 @@
       lines, effShape: lines.join("-"), lineGap,
     };
   };
+  T.shapeMetrics = (match, scenario, team, t) =>
+    T.shapeFromState(match, E.stateAt(match, scenario || E.actualScenario(match), t), team);
 
   // Voronoi占有（近似: 4m格子の最近接選手で塗り分け・GK除く・中立の空間占有%）
-  T.voronoiShare = (match, scenario, t) => {
-    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
-    const ps = st.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
+  T.voronoiFromState = (match, state) => {
+    const ps = state.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
     const count = {}; let total = 0;
     for (const k of E.teamKeys(match)) count[k] = 0;
     for (let x = -50; x <= 50; x += 4) for (let y = -32; y <= 32; y += 4) {
@@ -158,6 +160,101 @@
     const share = {};
     for (const k of E.teamKeys(match)) share[k] = count[k] / total;
     return share;
+  };
+  T.voronoiShare = (match, scenario, t) =>
+    T.voronoiFromState(match, E.stateAt(match, scenario || E.actualScenario(match), t));
+
+  /* ---------------- 方向的タクティカル解析（Issue #85 v1・読み取り専用） ----------------
+     編集/静止フレームから「その瞬間の位置・構造の帰結」を出す。テンポ/因果は断定しない
+     （1フレームは空間、TPA/TRV=時間依存は対象外）。出力=モデル上の位置系の指摘。 */
+
+  const HALF_H = 34;
+  // フレームからのオフサイド境界（攻撃 team が越える相手2nd-lastの深さ dir·x）
+  T.frameOffside = (match, state, attackingTeam) => {
+    const opp = E.oppOf(match, attackingTeam);
+    const half = state.half;
+    const dir = match.dir[attackingTeam][half === 1 ? "h1" : "h2"];
+    const depths = state.players
+      .filter(p => p.onPitch && p.team === opp).map(p => dir * p.x).sort((a, b) => b - a);
+    const secondLast = depths.length >= 2 ? depths[1] : (depths[0] ?? dir * 52.5);
+    const ballDepth = state.ball ? dir * state.ball.x : -1e9;
+    return { offsideDepth: Math.max(secondLast, ballDepth), dir };
+  };
+
+  // 局所数的優位（ボール周辺 R=16m の 攻(team) − 守 人数差）
+  const localNumbers = (state, team, cx, cy, R = 16) => {
+    let atk = 0, def = 0;
+    for (const p of state.players) {
+      if (!p.onPitch || p.role === "GK") continue;
+      if (Math.hypot(p.x - cx, p.y - cy) > R) continue;
+      if (p.team === team) atk++; else def++;
+    }
+    return { atk, def, diff: atk - def };
+  };
+
+  // フレーム総合解析。opts.team = 助言対象（既定=possessionPlus）
+  T.frameAnalysis = (match, state, opts = {}) => {
+    const D = R.danger;
+    const keys = E.teamKeys(match);
+    const team = opts.team || match.possessionPlus || keys[0];
+    const opp = E.oppOf(match, team);
+    const half = state.half;
+    const dir = match.dir[team][half === 1 ? "h1" : "h2"];
+    // 危険度場のホットスポット（fieldAt: >0 plus脅威 / <0 minus脅威）
+    const fld = D.fieldAt(match, state, { includeGK: !!opts.includeGK });
+    const NXF = 42, NYF = 28;
+    const cellXY = (idx) => {
+      const i = idx % NXF, j = (idx / NXF) | 0;
+      return { x: -52.5 + ((i + 0.5) / NXF) * 105, y: -HALF_H + ((j + 0.5) / NYF) * 68 };
+    };
+    let plusMax = 0, minusMax = 0, plusAt = null, minusAt = null;
+    for (let k = 0; k < fld.grid.length; k++) {
+      const v = fld.grid[k];
+      if (v > plusMax) { plusMax = v; plusAt = cellXY(k); }
+      if (-v > minusMax) { minusMax = -v; minusAt = cellXY(k); }
+    }
+    const plus = match.possessionPlus || keys[0];
+    const myThreat = team === plus ? plusMax : minusMax;      // 自軍が作る脅威
+    const oppThreat = team === plus ? minusMax : plusMax;     // 被脅威
+    const myAt = team === plus ? plusAt : minusAt;
+    const oppAt = team === plus ? minusAt : plusAt;
+
+    const shape = { [team]: T.shapeFromState(match, state, team), [opp]: T.shapeFromState(match, state, opp) };
+    const voronoi = T.voronoiFromState(match, state);
+    const offOwn = T.frameOffside(match, state, team);        // 自軍が越える相手ライン
+    const offOpp = T.frameOffside(match, state, opp);         // 相手が越える自軍ライン
+
+    // 方向的な指摘（決定論・severity降順）
+    const sugg = [];
+    const b = state.ball || { x: 0, y: 0 };
+    // (1) ボール周辺の数的状況
+    const near = localNumbers(state, team, b.x, b.y);
+    if (near.diff <= -2) sugg.push({ severity: 2 + (-near.diff), exploits: "overload-against",
+      text: `ボール周辺で ${-near.diff} 人の数的不利 — カバーを寄せて局所同数化` });
+    else if (near.diff >= 2 && dir * b.x > 10) sugg.push({ severity: 1.5 + near.diff, exploits: "overload-for",
+      text: `敵陣でボール周辺 ${near.diff} 人の数的優位 — 素早い展開で仕留める` });
+    // (2) 相手最終ラインが高い → 背後スペース（相手2nd-lastから相手ゴールまでの空間）
+    const spaceBehind = 52.5 - offOwn.offsideDepth;          // 大=ライン高い=背後が広い
+    if (spaceBehind > 32) sugg.push({ severity: 1 + (spaceBehind - 32) / 10, exploits: "space-behind",
+      text: `相手の最終ラインが高い（背後に約${spaceBehind.toFixed(0)}m）— 裏へのランで背後を突く` });
+    // (3) 被脅威が大 → その地点のカバー（fieldAt はセル脅威密度 ~0..1.5）
+    if (oppThreat > 0.35 && oppAt) sugg.push({ severity: oppThreat * 3, exploits: "cover-threat",
+      text: `被危険度が高い地点(${oppAt.x.toFixed(0)},${oppAt.y.toFixed(0)}) — 最短の守備者を寄せて遮断` });
+    // (4) 幅の不均衡: 自軍が狭く、ボールがサイド
+    if (shape[team].width < 34 && Math.abs(b.y) > 14) sugg.push({ severity: 0.8, exploits: "width",
+      text: `幅が狭くボールがサイド — 逆サイドの幅を取り相手を広げる` });
+
+    sugg.sort((a, b) => b.severity - a.severity);
+    if (!sugg.length) sugg.push({ severity: 0, exploits: "stable",
+      text: `構造は安定 — 明確な位置的弱点は検出されず（テンポ/因果は本解析の対象外）` });
+    return {
+      team, opp,
+      danger: { myThreat: +myThreat.toFixed(1), oppThreat: +oppThreat.toFixed(1), myAt, oppAt },
+      shape, voronoi,
+      offside: { own: offOwn, opp: offOpp },
+      nearBall: near,
+      suggestions: sugg.slice(0, 3),
+    };
   };
 
   // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]

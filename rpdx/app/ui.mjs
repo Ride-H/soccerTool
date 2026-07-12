@@ -1524,12 +1524,23 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.editMode = true;
       renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+      renderEditAnalysis();
     } else {
       App.editFrame = null; App.editSel = null;
       renderer.editMode = false;
     }
     $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
     $("#editBar") && $("#editBar").classList.toggle("open", on);
+  };
+  const renderEditAnalysis = () => {
+    const el = $("#editAnalysis");
+    if (!el || !App.editFrame) return;
+    try {
+      const a = globalThis.RPDX.tactics.frameAnalysis(App.match, App.editFrame,
+        { team: teamOrder()[1] || teamOrder()[0], includeGK: App.options.includeGK });
+      const tips = a.suggestions.map((s, i) => (i + 1) + ". " + s.text).join("　／　");
+      el.textContent = "方向的解析（モデル推定・位置系）: " + tips;
+    } catch (e) { el.textContent = "解析エラー"; console.warn(e); }
   };
   $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
   $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
@@ -1576,7 +1587,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     App.editSel.x = g.x; App.editSel.y = g.y;
     App.editFrame.edited = true;
   });
-  glcv.addEventListener("pointerup", () => { App.editSel = null; });
+  glcv.addEventListener("pointerup", () => { if (App.editSel) renderEditAnalysis(); App.editSel = null; });
   if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
