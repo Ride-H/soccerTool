@@ -29,6 +29,7 @@
     },
     zoneView: "BOTH",
     selected: null, hover: null,
+    editFrame: null, editSel: null,
     rosterTab: null,
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
@@ -968,9 +969,11 @@ self.onmessage = (e) => {
     $("#inspNum").textContent = p.no;
     $("#inspNum").style.background = isGK ? T.kit.gk : T.kit.shirt;
     $("#inspNum").style.color = isGK ? T.kit.gkNumber : T.kit.number;
-    $("#inspName").textContent = p.ja + (p.captain ? " ©" : "");
-    $("#inspSub").textContent = `${p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
-    const A = p.attrs;
+    const nmOv = E.nameOverrideOf(App.match, activeScenario(), team, no);
+    const dispJa = (nmOv && (nmOv.ja || nmOv.name)) || p.ja;
+    $("#inspName").textContent = dispJa + (p.captain ? " ©" : "") + (nmOv || E.attrsOf(App.match, activeScenario(), team, no) !== p.attrs ? "" : "");
+    $("#inspSub").textContent = `${(nmOv && nmOv.name) || p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
+    const A = E.attrsOf(App.match, activeScenario(), team, no);
     $("#inspAttrs").innerHTML = [["速度", A.pac], ["持久", A.sta], ["守備", A.def], ["攻撃", A.att], ["技術", A.tec], ["空中", A.aer]]
       .map(([k, v]) => `<div class="attr"><span>${k}</span><div class="track"><div class="fill" style="width:${v}%;background:${seriesColor(team)}"></div></div><span class="num">${v}</span></div>`).join("");
     $("#inspector").classList.add("open");
@@ -985,7 +988,50 @@ self.onmessage = (e) => {
       $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
     });
   };
-  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); buildRoster(); };
+  // #89: 能力値・名前の編集（シナリオ級上書き → 結果再計算）
+  const ATTR_KEYS = [["pac","速度"],["sta","持久"],["def","守備"],["att","攻撃"],["tec","技術"],["aer","空中"]];
+  const buildInspEdit = () => {
+    const sel = App.selected; if (!sel) return;
+    const A = E.attrsOf(App.match, activeScenario(), sel.team, sel.no);
+    const nm = E.nameOverrideOf(App.match, activeScenario(), sel.team, sel.no);
+    const p = App.match.teams[sel.team].squad.find(q => q.no === sel.no);
+    const rows = ATTR_KEYS.map(([k, lbl]) =>
+      `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
+       <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
+       <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    $("#inspEditForm").innerHTML =
+      `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
+      + rows
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
+         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+    $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
+      r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
+    $("#edApply").onclick = () => {
+      const sc = forkIfActual();
+      const ov = {};
+      $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r => ov[r.dataset.attr] = +r.value);
+      (sc.attrOverrides ??= {})[sel.team] ??= {}; sc.attrOverrides[sel.team][sel.no] = ov;
+      const newName = $("#edName").value.trim();
+      if (newName && newName !== p.ja) { (sc.nameOverrides ??= {})[sel.team] ??= {}; sc.nameOverrides[sel.team][sel.no] = { ja: newName, name: newName, label: newName }; }
+      refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+    $("#edReset").onclick = () => {
+      const sc = App.scenario;
+      if (sc && sc.attrOverrides && sc.attrOverrides[sel.team]) delete sc.attrOverrides[sel.team][sel.no];
+      if (sc && sc.nameOverrides && sc.nameOverrides[sel.team]) delete sc.nameOverrides[sel.team][sel.no];
+      if (sc) refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+  };
+  $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
+    const f = $("#inspEditForm");
+    if (f.style.display === "none") { buildInspEdit(); f.style.display = "block"; }
+    else f.style.display = "none";
+  });
+  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); $("#inspEditForm").style.display = "none"; buildRoster(); };
 
   let lastInspect = 0;
   const updateInspector = (force) => {
@@ -1500,6 +1546,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   /* ------------------------------ 3D操作 ------------------------------ */
   $("#gl").addEventListener("click", (e) => {
+    if (App.editFrame) return;   // #82: 編集中は選択でなく座標編集（下の pointer handlers）
     const st = E.stateAt(App.match, activeScenario(), App.t);
     const r = renderer.pick(e.clientX, e.clientY, st);
     if (r.moved > 6) return;
@@ -1512,6 +1559,91 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.setPreset(b.dataset.cam);
     };
   });
+
+  /* -------- #82: 停止フレームの手動編集（選手・ボール・審判の座標） -------- */
+  const setEditMode = (on) => {
+    if (on) {
+      setPlaying(false);
+      App.editFrame = E.editFrameAt(App.match, activeScenario(), App.t);
+      App.editSel = null;
+      renderer.editMode = true;
+      renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
+      document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+      renderEditAnalysis();
+    } else {
+      App.editFrame = null; App.editSel = null;
+      renderer.editMode = false;
+    }
+    $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
+    $("#editBar") && $("#editBar").classList.toggle("open", on);
+  };
+  const renderEditAnalysis = () => {
+    const el = $("#editAnalysis");
+    if (!el || !App.editFrame) return;
+    try {
+      const a = globalThis.RPDX.tactics.frameAnalysis(App.match, App.editFrame,
+        { team: teamOrder()[1] || teamOrder()[0], includeGK: App.options.includeGK });
+      const tips = a.suggestions.map((s, i) => (i + 1) + ". " + s.text).join("　／　");
+      el.textContent = "方向的解析（モデル推定・位置系）: " + tips;
+    } catch (e) { el.textContent = "解析エラー"; console.warn(e); }
+  };
+  $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
+  $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
+  $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editReplay") && ($("#editReplay").onclick = () => {
+    if (!App.editFrame) return;
+    const r = globalThis.RPDX.scenlib.scenarioFromFrame(App.match, App.editFrame, activeScenario());
+    if (!r.validation.ok) { console.warn("re-synth invalid", r.validation.errors); return; }
+    const tFrom = App.editFrame.t;
+    setEditMode(false);
+    refreshScenario(r.scenario);
+    App.t = tFrom;
+    $("#curveStatus") && ($("#curveStatus").textContent = "編集フレームから再合成（" + r.moved + "点）");
+  });
+  $("#editSave") && ($("#editSave").onclick = () => {
+    if (!App.editFrame) return;
+    const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-frame.json"; a.click();
+    } catch (e) { console.warn("save failed", e); }
+    $("#curveStatus") && ($("#curveStatus").textContent = "フレーム保存 (" + json.length + "B)");
+  });
+
+  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→地面交点へ移動
+  const glcv = $("#gl");
+  const editNearest = (g) => {
+    if (!App.editFrame || !g) return null;
+    let best = null, bd = 3.5;
+    for (const p of App.editFrame.players) {
+      if (!p.onPitch) continue;
+      const d = Math.hypot(p.x - g.x, p.y - g.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const b = App.editFrame.ball;
+    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd) { bd = d; best = b; } }
+    for (const rf of App.editFrame.referees) {
+      const d = Math.hypot(rf.x - g.x, rf.y - g.y);
+      if (d < bd) { bd = d; best = rf; }
+    }
+    return best;
+  };
+  glcv.addEventListener("pointerdown", (e) => {
+    if (!App.editFrame) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    App.editSel = editNearest(g);
+    if (App.editSel) { try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+  });
+  glcv.addEventListener("pointermove", (e) => {
+    if (!App.editFrame || !App.editSel) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    if (!g) return;
+    App.editSel.x = g.x; App.editSel.y = g.y;
+    App.editFrame.edited = true;
+  });
+  glcv.addEventListener("pointerup", () => { if (App.editSel) renderEditAnalysis(); App.editSel = null; });
+  if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
     const i = FIELD_MODES.findIndex(m => m[0] === App.options.fieldMode);
@@ -1600,7 +1732,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
 
     const sc = activeScenario();
-    const state = E.stateAt(App.match, sc, App.t);
+    const state = App.editFrame || E.stateAt(App.match, sc, App.t);
 
     // HUD 更新（8Hz）
     if (now - lastHUD > 125) {

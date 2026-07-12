@@ -444,6 +444,21 @@ body.showkeys #keyhelp { display: block; }
   * { animation: none !important; transition: none !important; }
 }
 
+/* #82 配置編集バー */
+#editBar{display:none;gap:6px;align-items:center;margin-top:6px}
+#editBar.open{display:flex}
+#btnEdit.on{background:#7fb2ff;color:#0a0f1a}
+
+/* #89 追補: テキスト入力の視認性（既定白背景×継承白文字＝不可視の是正）。
+   数値入力は既存の .numin/.sel が整えているので対象外にして競合を避ける。 */
+input[type="text"], input[type="search"], textarea {
+  background: #0e1420; color: #e6ecf8;
+  border: 1px solid #2a3550; border-radius: 6px;
+  padding: 3px 6px; box-sizing: border-box;
+}
+input[type="text"]::placeholder, textarea::placeholder { color: #8a96ad; }
+input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-color: #7fb2ff; outline: none; }
+
 </style>
 </head>
 <body>
@@ -472,6 +487,14 @@ body.showkeys #keyhelp { display: block; }
 <div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
+<div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
+  <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
+  <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
+  <button class="btn" id="editReplay" aria-label="この配置から再生（re-synthesize forward）">この配置から再生</button>
+  <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
+  <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
+  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:640px"></span>
+</div>
 <div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
   <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
@@ -489,6 +512,8 @@ body.showkeys #keyhelp { display: block; }
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
   <button class="btn" id="btnModel" data-i18n="モデル" aria-label="モデル解説を開く（open model explainer）">モデル</button>
+  <span class="vsep"></span>
+  <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
 
@@ -610,6 +635,8 @@ body.showkeys #keyhelp { display: block; }
   </div>
   <div class="eyebrow" style="margin-top:8px">能力値 — モデル推定</div>
   <div class="attrs" id="inspAttrs"></div>
+  <button class="btn" id="inspEditBtn" style="margin-top:6px" aria-label="選手を編集（edit player）">選手を編集</button>
+  <div id="inspEditForm" style="display:none;margin-top:6px"></div>
 </div>
 
 <!-- タイムライン -->
@@ -1564,6 +1591,16 @@ body.showkeys #keyhelp { display: block; }
   };
   E.teamKeys = (match) => Object.keys(match.teams);
   E.oppOf = (match, team) => E.teamKeys(match).find(k => k !== team);
+
+  // #89: 選手能力値・名前のシナリオ級上書き（無ければ squad 由来・golden安全）
+  E.attrsOf = (match, scenario, team, no) => {
+    const p = match.teams[team].squad.find(q => q.no === no);
+    const base = p ? p.attrs : { pac: 75, sta: 75, def: 60, att: 60, tec: 60, aer: 60 };
+    const ov = scenario && scenario.attrOverrides && scenario.attrOverrides[team] && scenario.attrOverrides[team][no];
+    return ov ? { ...base, ...ov } : base;
+  };
+  E.nameOverrideOf = (match, scenario, team, no) =>
+    (scenario && scenario.nameOverrides && scenario.nameOverrides[team] && scenario.nameOverrides[team][no]) || null;
   // P>0 が指すチーム（既定 possessionPlus）に対する符号
   E.attackSign = (match, team) => (team === (match.possessionPlus || E.teamKeys(match)[0]) ? +1 : -1);
 
@@ -1621,7 +1658,24 @@ body.showkeys #keyhelp { display: block; }
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
+      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
+    let ao = "";
+    if (scenario && scenario.attrOverrides) {
+      for (const tm of Object.keys(scenario.attrOverrides).sort())
+        for (const no of Object.keys(scenario.attrOverrides[tm]).sort()) {
+          const o = scenario.attrOverrides[tm][no];
+          ao += tm + no + ":" + ["pac","sta","def","att","tec","aer"].map(k => o[k] ?? "").join(",") + ";";
+        }
+    }
+    let nm = "";
+    if (scenario && scenario.nameOverrides) {
+      for (const tm of Object.keys(scenario.nameOverrides).sort())
+        nm += tm + Object.keys(scenario.nameOverrides[tm]).sort().join(",") + "|";
+    }
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}|${ea}|${ao}|${nm}`;
   };
 
   // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
@@ -1718,9 +1772,11 @@ body.showkeys #keyhelp { display: block; }
   let chainBuilding = false;
   const playerAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    const base = !oc
+    let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
+    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
     if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
@@ -2488,8 +2544,7 @@ body.showkeys #keyhelp { display: block; }
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr || t < pr.from) return 0;
     const mins = (Math.min(t, pr.to) - pr.from) / 60;
-    const p = match.teams[team].squad.find(q => q.no === no);
-    const sta = p ? p.attrs.sta : 75;
+    const sta = E.attrsOf(match, scenario, team, no).sta;
     return clamp((mins / 95) * (1.45 - (sta / 100) * 0.75));
   };
 
@@ -2996,10 +3051,19 @@ body.showkeys #keyhelp { display: block; }
           pos.y = lerp(sideY, pos.y, u);
           entering = 1 - u;
         }
+        const nmOv = E.nameOverrideOf(match, scenario, team, no);
+        const effA = E.attrsOf(match, scenario, team, no);
+        // #90: 危険度重み dw — 能力値の「上書き前からの差分」ベース（未編集=1.0で較正不変）。
+        // att/tec は攻撃支配、def は守備支配。pac は influence(絶対値)で別途（既に較正済み）。
+        const dAtk = clamp(((effA.att - p.attrs.att) + (effA.tec - p.attrs.tec)) / 2, -40, 40) / 100 * 0.6;
+        const dDef = clamp(effA.def - p.attrs.def, -40, 40) / 100 * 0.6;
         players.push({
-          team, no, name: p.name, ja: p.ja, label: p.label, pos2: p.pos,
+          team, no,
+          name: (nmOv && nmOv.name) || p.name, ja: (nmOv && (nmOv.ja || nmOv.name)) || p.ja,
+          label: (nmOv && nmOv.label) || p.label, pos2: p.pos,
           role: slot.role, slot: slot.id, x: pos.x, y: pos.y,
-          onPitch: true, entering, attrs: p.attrs, captain: false,
+          onPitch: true, entering, attrs: effA, captain: false,
+          dwAtk: 1 + dAtk, dwDef: 1 + dDef,   // 未編集は 1.0（golden不変）
           hasBall: false,   // ボール吸着の後段で確定（アンカー再現中は立たない）
         });
       }
@@ -3069,6 +3133,23 @@ body.showkeys #keyhelp { display: block; }
     };
     stateMemo = { key: memoKey, st };
     return st;
+  };
+
+  // #82: 編集フレーム — stateAt を深いコピーした「編集可能な state」。
+  // 選手/ボールの x,y を書き換えても合成 f(t) やキャッシュを汚さない（golden安全）。
+  // referees[] を追加（解析には使わない・シーン要素）。fieldAt/描画がそのまま食える形。
+  E.editFrameAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const st = E.stateAt(match, scenario, t);
+    return {
+      t: st.t, half: st.half, clock: st.clock, score: { ...st.score },
+      possession: st.possession,
+      players: st.players.map(p => ({ ...p, attrs: p.attrs })),
+      ball: { ...st.ball },
+      referees: [],
+      carrier: null,
+      edited: false,
+    };
   };
 
   // 特定選手の位置を直接評価（退場アニメ始点・軌跡・距離積分）
@@ -3206,12 +3287,12 @@ body.showkeys #keyhelp { display: block; }
     for (let i = 0; i < atk.length; i++) {
       const p = atk[i], dx = cx - p.x, dy = cy - p.y;
       const s = influence(p);
-      sa += Math.exp(-(dx * dx + dy * dy) / (s * s));
+      sa += Math.exp(-(dx * dx + dy * dy) / (s * s)) * (p.dwAtk ?? 1);   // #90: att/tec 重み（未編集1.0）
     }
     for (let i = 0; i < def.length; i++) {
       const p = def[i], dx = cx - p.x, dy = cy - p.y;
       const s = influence(p);
-      sd += Math.exp(-(dx * dx + dy * dy) / (s * s));
+      sd += Math.exp(-(dx * dx + dy * dy) / (s * s)) * (p.dwDef ?? 1);   // #90: def 重み（未編集1.0）
     }
     return sa / (sa + sd + 1e-6);
   };
@@ -5042,11 +5123,12 @@ body.showkeys #keyhelp { display: block; }
   };
 
   // 形メトリクス（1チーム・1時刻）
-  T.shapeMetrics = (match, scenario, team, t) => {
-    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
-    const half = st.half;
+  // #85: 任意 state（合成 or 編集フレーム）から形メトリクスを計算する核。
+  T.shapeFromState = (match, state, team) => {
+    const half = state.half;
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
-    const out = st.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    const out = state.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    if (out.length < 2) return { width: 0, depth: 0, area: 0, centroid: { x: 0, y: 0 }, lines: [out.length], effShape: String(out.length), lineGap: 0 };
     const depths = out.map(p => dir * p.x);
     const ys = out.map(p => p.y);
     const width = Math.max(...ys) - Math.min(...ys);
@@ -5068,11 +5150,12 @@ body.showkeys #keyhelp { display: block; }
       lines, effShape: lines.join("-"), lineGap,
     };
   };
+  T.shapeMetrics = (match, scenario, team, t) =>
+    T.shapeFromState(match, E.stateAt(match, scenario || E.actualScenario(match), t), team);
 
   // Voronoi占有（近似: 4m格子の最近接選手で塗り分け・GK除く・中立の空間占有%）
-  T.voronoiShare = (match, scenario, t) => {
-    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
-    const ps = st.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
+  T.voronoiFromState = (match, state) => {
+    const ps = state.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
     const count = {}; let total = 0;
     for (const k of E.teamKeys(match)) count[k] = 0;
     for (let x = -50; x <= 50; x += 4) for (let y = -32; y <= 32; y += 4) {
@@ -5086,6 +5169,101 @@ body.showkeys #keyhelp { display: block; }
     const share = {};
     for (const k of E.teamKeys(match)) share[k] = count[k] / total;
     return share;
+  };
+  T.voronoiShare = (match, scenario, t) =>
+    T.voronoiFromState(match, E.stateAt(match, scenario || E.actualScenario(match), t));
+
+  /* ---------------- 方向的タクティカル解析（Issue #85 v1・読み取り専用） ----------------
+     編集/静止フレームから「その瞬間の位置・構造の帰結」を出す。テンポ/因果は断定しない
+     （1フレームは空間、TPA/TRV=時間依存は対象外）。出力=モデル上の位置系の指摘。 */
+
+  const HALF_H = 34;
+  // フレームからのオフサイド境界（攻撃 team が越える相手2nd-lastの深さ dir·x）
+  T.frameOffside = (match, state, attackingTeam) => {
+    const opp = E.oppOf(match, attackingTeam);
+    const half = state.half;
+    const dir = match.dir[attackingTeam][half === 1 ? "h1" : "h2"];
+    const depths = state.players
+      .filter(p => p.onPitch && p.team === opp).map(p => dir * p.x).sort((a, b) => b - a);
+    const secondLast = depths.length >= 2 ? depths[1] : (depths[0] ?? dir * 52.5);
+    const ballDepth = state.ball ? dir * state.ball.x : -1e9;
+    return { offsideDepth: Math.max(secondLast, ballDepth), dir };
+  };
+
+  // 局所数的優位（ボール周辺 R=16m の 攻(team) − 守 人数差）
+  const localNumbers = (state, team, cx, cy, R = 16) => {
+    let atk = 0, def = 0;
+    for (const p of state.players) {
+      if (!p.onPitch || p.role === "GK") continue;
+      if (Math.hypot(p.x - cx, p.y - cy) > R) continue;
+      if (p.team === team) atk++; else def++;
+    }
+    return { atk, def, diff: atk - def };
+  };
+
+  // フレーム総合解析。opts.team = 助言対象（既定=possessionPlus）
+  T.frameAnalysis = (match, state, opts = {}) => {
+    const D = R.danger;
+    const keys = E.teamKeys(match);
+    const team = opts.team || match.possessionPlus || keys[0];
+    const opp = E.oppOf(match, team);
+    const half = state.half;
+    const dir = match.dir[team][half === 1 ? "h1" : "h2"];
+    // 危険度場のホットスポット（fieldAt: >0 plus脅威 / <0 minus脅威）
+    const fld = D.fieldAt(match, state, { includeGK: !!opts.includeGK });
+    const NXF = 42, NYF = 28;
+    const cellXY = (idx) => {
+      const i = idx % NXF, j = (idx / NXF) | 0;
+      return { x: -52.5 + ((i + 0.5) / NXF) * 105, y: -HALF_H + ((j + 0.5) / NYF) * 68 };
+    };
+    let plusMax = 0, minusMax = 0, plusAt = null, minusAt = null;
+    for (let k = 0; k < fld.grid.length; k++) {
+      const v = fld.grid[k];
+      if (v > plusMax) { plusMax = v; plusAt = cellXY(k); }
+      if (-v > minusMax) { minusMax = -v; minusAt = cellXY(k); }
+    }
+    const plus = match.possessionPlus || keys[0];
+    const myThreat = team === plus ? plusMax : minusMax;      // 自軍が作る脅威
+    const oppThreat = team === plus ? minusMax : plusMax;     // 被脅威
+    const myAt = team === plus ? plusAt : minusAt;
+    const oppAt = team === plus ? minusAt : plusAt;
+
+    const shape = { [team]: T.shapeFromState(match, state, team), [opp]: T.shapeFromState(match, state, opp) };
+    const voronoi = T.voronoiFromState(match, state);
+    const offOwn = T.frameOffside(match, state, team);        // 自軍が越える相手ライン
+    const offOpp = T.frameOffside(match, state, opp);         // 相手が越える自軍ライン
+
+    // 方向的な指摘（決定論・severity降順）
+    const sugg = [];
+    const b = state.ball || { x: 0, y: 0 };
+    // (1) ボール周辺の数的状況
+    const near = localNumbers(state, team, b.x, b.y);
+    if (near.diff <= -2) sugg.push({ severity: 2 + (-near.diff), exploits: "overload-against",
+      text: `ボール周辺で ${-near.diff} 人の数的不利 — カバーを寄せて局所同数化` });
+    else if (near.diff >= 2 && dir * b.x > 10) sugg.push({ severity: 1.5 + near.diff, exploits: "overload-for",
+      text: `敵陣でボール周辺 ${near.diff} 人の数的優位 — 素早い展開で仕留める` });
+    // (2) 相手最終ラインが高い → 背後スペース（相手2nd-lastから相手ゴールまでの空間）
+    const spaceBehind = 52.5 - offOwn.offsideDepth;          // 大=ライン高い=背後が広い
+    if (spaceBehind > 32) sugg.push({ severity: 1 + (spaceBehind - 32) / 10, exploits: "space-behind",
+      text: `相手の最終ラインが高い（背後に約${spaceBehind.toFixed(0)}m）— 裏へのランで背後を突く` });
+    // (3) 被脅威が大 → その地点のカバー（fieldAt はセル脅威密度 ~0..1.5）
+    if (oppThreat > 0.35 && oppAt) sugg.push({ severity: oppThreat * 3, exploits: "cover-threat",
+      text: `被危険度が高い地点(${oppAt.x.toFixed(0)},${oppAt.y.toFixed(0)}) — 最短の守備者を寄せて遮断` });
+    // (4) 幅の不均衡: 自軍が狭く、ボールがサイド
+    if (shape[team].width < 34 && Math.abs(b.y) > 14) sugg.push({ severity: 0.8, exploits: "width",
+      text: `幅が狭くボールがサイド — 逆サイドの幅を取り相手を広げる` });
+
+    sugg.sort((a, b) => b.severity - a.severity);
+    if (!sugg.length) sugg.push({ severity: 0, exploits: "stable",
+      text: `構造は安定 — 明確な位置的弱点は検出されず（テンポ/因果は本解析の対象外）` });
+    return {
+      team, opp,
+      danger: { myThreat: +myThreat.toFixed(1), oppThreat: +oppThreat.toFixed(1), myAt, oppAt },
+      shape, voronoi,
+      offside: { own: offOwn, opp: offOpp },
+      nearBall: near,
+      suggestions: sugg.slice(0, 3),
+    };
   };
 
   // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]
@@ -5420,6 +5598,56 @@ body.showkeys #keyhelp { display: block; }
       });
     }
     return rows;
+  };
+
+  /* ---- 編集フレームの直列化（#82・座標スナップショットの保存/共有） ---- */
+  // 最小表現: 選手[team,no,x,y]・ボール[x,y]・審判[x,y]・時刻。JSON/フォルダ/URLで共有。
+  SCN.serializeFrame = (frame) => {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return JSON.stringify({
+      v: 1, t: r2(frame.t ?? 0),
+      p: frame.players.filter(p => p.onPitch).map(p => [p.team, p.no, r2(p.x), r2(p.y)]),
+      b: frame.ball ? [r2(frame.ball.x), r2(frame.ball.y)] : null,
+      r: (frame.referees || []).map(rf => [r2(rf.x), r2(rf.y)]),
+    });
+  };
+  SCN.parseFrame = (match, str, baseScenario) => {
+    const E = R.engine;
+    const o = typeof str === "string" ? JSON.parse(str) : str;
+    // baseFrame（editFrameAt）に上書き — 属性・役割は合成フレームから引き継ぐ
+    const base = E.editFrameAt(match, baseScenario || E.actualScenario(match), o.t || 0);
+    const byKey = new Map(base.players.map(p => [p.team + ":" + p.no, p]));
+    for (const [team, no, x, y] of (o.p || [])) {
+      const pl = byKey.get(team + ":" + no);
+      if (pl) { pl.x = x; pl.y = y; }
+    }
+    if (o.b && base.ball) { base.ball.x = o.b[0]; base.ball.y = o.b[1]; }
+    base.referees = (o.r || []).map(([x, y]) => ({ x, y }));
+    base.edited = true;
+    return base;
+  };
+
+  /* ---- #83: 編集フレーム → 制約(editAnchors) → 再合成シナリオ（中間路） ----
+     編集位置を「その時刻を通過するガウス窓アンカー」に翻訳し、以降を既存エンジンで再合成。
+     σ は編集前 stateAt 位置からの移動距離に比例（速度上限を構成的に保証: 0.61·d/σ ≤ 3.2m/s）。
+     編集は scenario 級 → actual/既定world・golden は不変。ball 保持の再合成は将来（残）。 */
+  SCN.scenarioFromFrame = (match, frame, baseScenario) => {
+    const E = R.engine, S = R.subs;
+    const base = baseScenario || E.actualScenario(match);
+    const natural = E.stateAt(match, base, frame.t);   // 編集前の合成位置（移動距離の基準）
+    const natBy = new Map(natural.players.map(p => [p.team + ":" + p.no, p]));
+    const editAnchors = [];
+    for (const p of frame.players) {
+      if (!p.onPitch) continue;
+      const nat = natBy.get(p.team + ":" + p.no);
+      const d = nat ? Math.hypot(p.x - nat.x, p.y - nat.y) : 0;
+      if (d < 0.05) continue;                          // 動かしていない選手はアンカー不要
+      editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
+    }
+    const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
+    sc.editAnchors = editAnchors;
+    sc.editFrom = frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
   };
 
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
@@ -6485,6 +6713,7 @@ window.addEventListener("error", (e) => {
     const keys = new Set();
     let dragging = 0, lastX = 0, lastY = 0, moved = 0;
     canvas.addEventListener("pointerdown", (e) => {
+      if (api.editMode) return;        // #82: 編集モード中はカメラ操作を抑止（UI側がドラッグを持つ）
       dragging = e.button === 2 || e.shiftKey ? 2 : 1;
       lastX = e.clientX; lastY = e.clientY; moved = 0;
       canvas.setPointerCapture(e.pointerId);
@@ -7143,6 +7372,13 @@ window.addEventListener("error", (e) => {
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });
       drawMesh(mSphere);
+      // #82: 審判マーカー（編集用シーン要素・解析には非算入）
+      if (state.referees) for (const rf of state.referees) {
+        useLambert(M4.trs(rf.x, 0.55, -rf.y, 0.42, 1.1, 0.42), [0.15, 0.15, 0.16], { emiss: 0.05 });
+        drawMesh(mCapsule);
+        useLambert(M4.trs(rf.x, 1.35, -rf.y, 0.18, 0.18, 0.18), [0.9, 0.75, 0.15], { emiss: 0.2 });
+        drawMesh(mSphere);
+      }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
       gl.depthMask(false);
@@ -7228,6 +7464,28 @@ window.addEventListener("error", (e) => {
       return { hit: best, moved };
     };
 
+    // #82: 画面座標 → 地面(y=0)との交点 → ピッチ座標 {x, y}（pick と同じ光線）
+    api.groundAt = (mx, my) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((mx - rect.left) / rect.width) * 2 - 1;
+      const y = -(((my - rect.top) / rect.height) * 2 - 1);
+      const asp = canvas.width / Math.max(1, canvas.height);
+      const f = 1 / Math.tan((cam.fov * Math.PI) / 360);
+      const dirCam = [x * asp / f, y / f, -1];
+      const d = [
+        view[0] * dirCam[0] + view[1] * dirCam[1] + view[2] * dirCam[2],
+        view[4] * dirCam[0] + view[5] * dirCam[1] + view[6] * dirCam[2],
+        view[8] * dirCam[0] + view[9] * dirCam[1] + view[10] * dirCam[2],
+      ];
+      const o = eyePos();
+      if (Math.abs(d[1]) < 1e-6) return null;
+      const tHit = -o[1] / d[1];
+      if (tHit <= 0) return null;
+      const wx = o[0] + d[0] * tHit, wz = o[2] + d[2] * tHit;
+      return { x: clamp(wx, -52.5, 52.5), y: clamp(-wz, -34, 34) };   // worldZ = -fieldY
+    };
+    api.editMode = false;
+
     api.setMatch = (m) => {
       match = m;
       labelCache.clear();
@@ -7274,6 +7532,7 @@ window.addEventListener("error", (e) => {
     },
     zoneView: "BOTH",
     selected: null, hover: null,
+    editFrame: null, editSel: null,
     rosterTab: null,
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
@@ -8213,9 +8472,11 @@ self.onmessage = (e) => {
     $("#inspNum").textContent = p.no;
     $("#inspNum").style.background = isGK ? T.kit.gk : T.kit.shirt;
     $("#inspNum").style.color = isGK ? T.kit.gkNumber : T.kit.number;
-    $("#inspName").textContent = p.ja + (p.captain ? " ©" : "");
-    $("#inspSub").textContent = `${p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
-    const A = p.attrs;
+    const nmOv = E.nameOverrideOf(App.match, activeScenario(), team, no);
+    const dispJa = (nmOv && (nmOv.ja || nmOv.name)) || p.ja;
+    $("#inspName").textContent = dispJa + (p.captain ? " ©" : "") + (nmOv || E.attrsOf(App.match, activeScenario(), team, no) !== p.attrs ? "" : "");
+    $("#inspSub").textContent = `${(nmOv && nmOv.name) || p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
+    const A = E.attrsOf(App.match, activeScenario(), team, no);
     $("#inspAttrs").innerHTML = [["速度", A.pac], ["持久", A.sta], ["守備", A.def], ["攻撃", A.att], ["技術", A.tec], ["空中", A.aer]]
       .map(([k, v]) => `<div class="attr"><span>${k}</span><div class="track"><div class="fill" style="width:${v}%;background:${seriesColor(team)}"></div></div><span class="num">${v}</span></div>`).join("");
     $("#inspector").classList.add("open");
@@ -8230,7 +8491,50 @@ self.onmessage = (e) => {
       $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
     });
   };
-  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); buildRoster(); };
+  // #89: 能力値・名前の編集（シナリオ級上書き → 結果再計算）
+  const ATTR_KEYS = [["pac","速度"],["sta","持久"],["def","守備"],["att","攻撃"],["tec","技術"],["aer","空中"]];
+  const buildInspEdit = () => {
+    const sel = App.selected; if (!sel) return;
+    const A = E.attrsOf(App.match, activeScenario(), sel.team, sel.no);
+    const nm = E.nameOverrideOf(App.match, activeScenario(), sel.team, sel.no);
+    const p = App.match.teams[sel.team].squad.find(q => q.no === sel.no);
+    const rows = ATTR_KEYS.map(([k, lbl]) =>
+      `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
+       <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
+       <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    $("#inspEditForm").innerHTML =
+      `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
+      + rows
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
+         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+    $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
+      r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
+    $("#edApply").onclick = () => {
+      const sc = forkIfActual();
+      const ov = {};
+      $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r => ov[r.dataset.attr] = +r.value);
+      (sc.attrOverrides ??= {})[sel.team] ??= {}; sc.attrOverrides[sel.team][sel.no] = ov;
+      const newName = $("#edName").value.trim();
+      if (newName && newName !== p.ja) { (sc.nameOverrides ??= {})[sel.team] ??= {}; sc.nameOverrides[sel.team][sel.no] = { ja: newName, name: newName, label: newName }; }
+      refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+    $("#edReset").onclick = () => {
+      const sc = App.scenario;
+      if (sc && sc.attrOverrides && sc.attrOverrides[sel.team]) delete sc.attrOverrides[sel.team][sel.no];
+      if (sc && sc.nameOverrides && sc.nameOverrides[sel.team]) delete sc.nameOverrides[sel.team][sel.no];
+      if (sc) refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+  };
+  $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
+    const f = $("#inspEditForm");
+    if (f.style.display === "none") { buildInspEdit(); f.style.display = "block"; }
+    else f.style.display = "none";
+  });
+  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); $("#inspEditForm").style.display = "none"; buildRoster(); };
 
   let lastInspect = 0;
   const updateInspector = (force) => {
@@ -8745,6 +9049,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   /* ------------------------------ 3D操作 ------------------------------ */
   $("#gl").addEventListener("click", (e) => {
+    if (App.editFrame) return;   // #82: 編集中は選択でなく座標編集（下の pointer handlers）
     const st = E.stateAt(App.match, activeScenario(), App.t);
     const r = renderer.pick(e.clientX, e.clientY, st);
     if (r.moved > 6) return;
@@ -8757,6 +9062,91 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.setPreset(b.dataset.cam);
     };
   });
+
+  /* -------- #82: 停止フレームの手動編集（選手・ボール・審判の座標） -------- */
+  const setEditMode = (on) => {
+    if (on) {
+      setPlaying(false);
+      App.editFrame = E.editFrameAt(App.match, activeScenario(), App.t);
+      App.editSel = null;
+      renderer.editMode = true;
+      renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
+      document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+      renderEditAnalysis();
+    } else {
+      App.editFrame = null; App.editSel = null;
+      renderer.editMode = false;
+    }
+    $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
+    $("#editBar") && $("#editBar").classList.toggle("open", on);
+  };
+  const renderEditAnalysis = () => {
+    const el = $("#editAnalysis");
+    if (!el || !App.editFrame) return;
+    try {
+      const a = globalThis.RPDX.tactics.frameAnalysis(App.match, App.editFrame,
+        { team: teamOrder()[1] || teamOrder()[0], includeGK: App.options.includeGK });
+      const tips = a.suggestions.map((s, i) => (i + 1) + ". " + s.text).join("　／　");
+      el.textContent = "方向的解析（モデル推定・位置系）: " + tips;
+    } catch (e) { el.textContent = "解析エラー"; console.warn(e); }
+  };
+  $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
+  $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
+  $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editReplay") && ($("#editReplay").onclick = () => {
+    if (!App.editFrame) return;
+    const r = globalThis.RPDX.scenlib.scenarioFromFrame(App.match, App.editFrame, activeScenario());
+    if (!r.validation.ok) { console.warn("re-synth invalid", r.validation.errors); return; }
+    const tFrom = App.editFrame.t;
+    setEditMode(false);
+    refreshScenario(r.scenario);
+    App.t = tFrom;
+    $("#curveStatus") && ($("#curveStatus").textContent = "編集フレームから再合成（" + r.moved + "点）");
+  });
+  $("#editSave") && ($("#editSave").onclick = () => {
+    if (!App.editFrame) return;
+    const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-frame.json"; a.click();
+    } catch (e) { console.warn("save failed", e); }
+    $("#curveStatus") && ($("#curveStatus").textContent = "フレーム保存 (" + json.length + "B)");
+  });
+
+  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→地面交点へ移動
+  const glcv = $("#gl");
+  const editNearest = (g) => {
+    if (!App.editFrame || !g) return null;
+    let best = null, bd = 3.5;
+    for (const p of App.editFrame.players) {
+      if (!p.onPitch) continue;
+      const d = Math.hypot(p.x - g.x, p.y - g.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const b = App.editFrame.ball;
+    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd) { bd = d; best = b; } }
+    for (const rf of App.editFrame.referees) {
+      const d = Math.hypot(rf.x - g.x, rf.y - g.y);
+      if (d < bd) { bd = d; best = rf; }
+    }
+    return best;
+  };
+  glcv.addEventListener("pointerdown", (e) => {
+    if (!App.editFrame) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    App.editSel = editNearest(g);
+    if (App.editSel) { try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+  });
+  glcv.addEventListener("pointermove", (e) => {
+    if (!App.editFrame || !App.editSel) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    if (!g) return;
+    App.editSel.x = g.x; App.editSel.y = g.y;
+    App.editFrame.edited = true;
+  });
+  glcv.addEventListener("pointerup", () => { if (App.editSel) renderEditAnalysis(); App.editSel = null; });
+  if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
     const i = FIELD_MODES.findIndex(m => m[0] === App.options.fieldMode);
@@ -8845,7 +9235,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
 
     const sc = activeScenario();
-    const state = E.stateAt(App.match, sc, App.t);
+    const state = App.editFrame || E.stateAt(App.match, sc, App.t);
 
     // HUD 更新（8Hz）
     if (now - lastHUD > 125) {

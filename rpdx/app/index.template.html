@@ -34,6 +34,14 @@
 <div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
+<div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
+  <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
+  <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
+  <button class="btn" id="editReplay" aria-label="この配置から再生（re-synthesize forward）">この配置から再生</button>
+  <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
+  <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
+  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:640px"></span>
+</div>
 <div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
   <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
@@ -51,6 +59,8 @@
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
   <button class="btn" id="btnModel" data-i18n="モデル" aria-label="モデル解説を開く（open model explainer）">モデル</button>
+  <span class="vsep"></span>
+  <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
 
@@ -172,6 +182,8 @@
   </div>
   <div class="eyebrow" style="margin-top:8px">能力値 — モデル推定</div>
   <div class="attrs" id="inspAttrs"></div>
+  <button class="btn" id="inspEditBtn" style="margin-top:6px" aria-label="選手を編集（edit player）">選手を編集</button>
+  <div id="inspEditForm" style="display:none;margin-top:6px"></div>
 </div>
 
 <!-- タイムライン -->
