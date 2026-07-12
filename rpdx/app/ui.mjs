@@ -371,9 +371,13 @@ self.onmessage = (e) => {
   const rosterEditable = () => App.match.meta.calibrated === false;
 
   const commitRosterEdit = (team, oldNo) => {
-    const numEl = $("#redNum"), nameEl = $("#redName");
+    const numEl = $("#redNum"), nameEl = $("#redName"), posEl = $("#redPos");
     if (!numEl || !nameEl) return;
-    const r = G.editEntry(App.match, team, oldNo, { no: numEl.value === "" ? null : +numEl.value, name: nameEl.value });
+    const r = G.editEntry(App.match, team, oldNo, {
+      no: numEl.value === "" ? null : +numEl.value,
+      name: nameEl.value,
+      pos: posEl ? posEl.value : undefined,
+    });
     if (!r.ok) { toast(r.error, "var(--crit-t)"); return; }
     const newNo = r.newNo;
     if (newNo !== oldNo) {
@@ -389,8 +393,9 @@ self.onmessage = (e) => {
       if (App.selected && App.selected.team === team && App.selected.no === oldNo) App.selected.no = newNo;
       if (App.pickOut && App.pickOut.team === team && App.pickOut.no === oldNo) App.pickOut.no = newNo;
       if (App.pickIn && App.pickIn.team === team && App.pickIn.no === oldNo) App.pickIn.no = newNo;
-      E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
     }
+    // 背番号・ポジション（GKスワップ含む）はXI/識別に影響 → キャッシュを更新
+    E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
     rosterEdit = null;
     buildStatic();
     drawEditor();
@@ -419,7 +424,8 @@ self.onmessage = (e) => {
       if (rosterEdit && rosterEdit.team === team && rosterEdit.no === p.no) {
         row.classList.add("editing");
         row.innerHTML =
-          `<input id="redNum" class="numin" type="number" min="1" max="99" value="${p.no}" style="width:48px" aria-label="背番号">` +
+          `<input id="redNum" class="numin" type="number" min="1" max="99" value="${p.no}" style="width:44px" aria-label="背番号">` +
+          `<select id="redPos" class="sel" style="width:50px" aria-label="ポジション">${["GK", "DF", "MF", "FW"].map(o => `<option value="${o}"${p.pos === o ? " selected" : ""}>${o}</option>`).join("")}</select>` +
           `<input id="redName" type="text" value="${(p.ja || "").replace(/"/g, "&quot;")}" style="flex:1;min-width:0" aria-label="選手名">` +
           `<button class="btn" id="redSave" aria-label="保存">✓</button>` +
           `<button class="btn" id="redCancel" aria-label="取消">✕</button>`;

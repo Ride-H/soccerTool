@@ -203,6 +203,31 @@
       const nm = String(patch.name).trim();
       if (nm) { p.ja = nm; p.name = nm; p.label = nm.slice(0, 6); }
     }
+    // ポジション編集（GK は各チーム1人の不変式を保つ・自動スワップ）
+    if (patch.pos != null && String(patch.pos) !== p.pos) {
+      const newPos = String(patch.pos);
+      if (!["GK", "DF", "MF", "FW"].includes(newPos)) return { ok: false, error: "ポジションは GK/DF/MF/FW" };
+      if (newPos === "GK") {
+        // p を GK へ昇格。既存 GK を DF に降格し、XI の GK スロットを p にスワップ（1人維持）。
+        for (const q of T.squad) if (q.pos === "GK") q.pos = "DF";
+        p.pos = "GK";
+        for (const ph of T.phases) {
+          const gkSlot = ((F.SHAPES[ph.shape] || []).find(s => s.role === "GK") || {}).id || "GK";
+          const gkNo = ph.assign[gkSlot];                                   // 現 GK スロット占有者
+          const pSlot = Object.keys(ph.assign).find(sl => ph.assign[sl] === p.no);
+          ph.assign[gkSlot] = p.no;                                         // p を GK スロットへ
+          if (pSlot && pSlot !== gkSlot) ph.assign[pSlot] = gkNo;           // 旧GKは p の外野スロットへ（スワップ）
+          // p がベンチだった場合: 旧GKは XI から外れ、p が先発GK になる
+        }
+      } else if (p.pos === "GK") {
+        // 唯一の GK を外野化しようとした → 阻止（先に別選手を GK にする運用）
+        if (T.squad.filter(q => q.pos === "GK").length <= 1)
+          return { ok: false, error: "各チームに GK が1人必要です（先に別の選手を GK にしてください）" };
+        p.pos = newPos;
+      } else {
+        p.pos = newPos;   // 外野 ↔ 外野（コスメ＋役割適合のみ・危険度/位置は不変）
+      }
+    }
     let newNo = no;
     if (patch.no != null && Math.trunc(patch.no) !== no) {
       newNo = Math.trunc(patch.no);
