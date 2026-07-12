@@ -98,6 +98,29 @@
     return base;
   };
 
+  /* ---- #83: 編集フレーム → 制約(editAnchors) → 再合成シナリオ（中間路） ----
+     編集位置を「その時刻を通過するガウス窓アンカー」に翻訳し、以降を既存エンジンで再合成。
+     σ は編集前 stateAt 位置からの移動距離に比例（速度上限を構成的に保証: 0.61·d/σ ≤ 3.2m/s）。
+     編集は scenario 級 → actual/既定world・golden は不変。ball 保持の再合成は将来（残）。 */
+  SCN.scenarioFromFrame = (match, frame, baseScenario) => {
+    const E = R.engine, S = R.subs;
+    const base = baseScenario || E.actualScenario(match);
+    const natural = E.stateAt(match, base, frame.t);   // 編集前の合成位置（移動距離の基準）
+    const natBy = new Map(natural.players.map(p => [p.team + ":" + p.no, p]));
+    const editAnchors = [];
+    for (const p of frame.players) {
+      if (!p.onPitch) continue;
+      const nat = natBy.get(p.team + ":" + p.no);
+      const d = nat ? Math.hypot(p.x - nat.x, p.y - nat.y) : 0;
+      if (d < 0.05) continue;                          // 動かしていない選手はアンカー不要
+      editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
+    }
+    const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
+    sc.editAnchors = editAnchors;
+    sc.editFrom = frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+  };
+
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
   SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
     const S = R.subs;

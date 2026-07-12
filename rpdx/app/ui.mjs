@@ -1545,6 +1545,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
   $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
   $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editReplay") && ($("#editReplay").onclick = () => {
+    if (!App.editFrame) return;
+    const r = globalThis.RPDX.scenlib.scenarioFromFrame(App.match, App.editFrame, activeScenario());
+    if (!r.validation.ok) { console.warn("re-synth invalid", r.validation.errors); return; }
+    const tFrom = App.editFrame.t;
+    setEditMode(false);
+    refreshScenario(r.scenario);
+    App.t = tFrom;
+    $("#curveStatus") && ($("#curveStatus").textContent = "編集フレームから再合成（" + r.moved + "点）");
+  });
   $("#editSave") && ($("#editSave").onclick = () => {
     if (!App.editFrame) return;
     const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);

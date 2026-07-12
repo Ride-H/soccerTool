@@ -99,7 +99,10 @@
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
+      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}|${ea}`;
   };
 
   // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
@@ -196,9 +199,11 @@
   let chainBuilding = false;
   const playerAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    const base = !oc
+    let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
+    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
     if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
