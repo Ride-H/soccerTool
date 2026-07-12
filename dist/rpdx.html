@@ -444,6 +444,11 @@ body.showkeys #keyhelp { display: block; }
   * { animation: none !important; transition: none !important; }
 }
 
+/* #82 配置編集バー */
+#editBar{display:none;gap:6px;align-items:center;margin-top:6px}
+#editBar.open{display:flex}
+#btnEdit.on{background:#7fb2ff;color:#0a0f1a}
+
 </style>
 </head>
 <body>
@@ -472,6 +477,12 @@ body.showkeys #keyhelp { display: block; }
 <div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
+<div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
+  <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
+  <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
+  <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
+  <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
+</div>
 <div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
   <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
@@ -489,6 +500,8 @@ body.showkeys #keyhelp { display: block; }
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
   <button class="btn" id="btnModel" data-i18n="モデル" aria-label="モデル解説を開く（open model explainer）">モデル</button>
+  <span class="vsep"></span>
+  <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
 
@@ -3071,6 +3084,23 @@ body.showkeys #keyhelp { display: block; }
     return st;
   };
 
+  // #82: 編集フレーム — stateAt を深いコピーした「編集可能な state」。
+  // 選手/ボールの x,y を書き換えても合成 f(t) やキャッシュを汚さない（golden安全）。
+  // referees[] を追加（解析には使わない・シーン要素）。fieldAt/描画がそのまま食える形。
+  E.editFrameAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const st = E.stateAt(match, scenario, t);
+    return {
+      t: st.t, half: st.half, clock: st.clock, score: { ...st.score },
+      possession: st.possession,
+      players: st.players.map(p => ({ ...p, attrs: p.attrs })),
+      ball: { ...st.ball },
+      referees: [],
+      carrier: null,
+      edited: false,
+    };
+  };
+
   // 特定選手の位置を直接評価（退場アニメ始点・軌跡・距離積分）
   E.stateFrozenPos = (match, scenario, team, no, t) => {
     scenario = scenario || E.actualScenario(match);
@@ -5422,6 +5452,33 @@ body.showkeys #keyhelp { display: block; }
     return rows;
   };
 
+  /* ---- 編集フレームの直列化（#82・座標スナップショットの保存/共有） ---- */
+  // 最小表現: 選手[team,no,x,y]・ボール[x,y]・審判[x,y]・時刻。JSON/フォルダ/URLで共有。
+  SCN.serializeFrame = (frame) => {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return JSON.stringify({
+      v: 1, t: r2(frame.t ?? 0),
+      p: frame.players.filter(p => p.onPitch).map(p => [p.team, p.no, r2(p.x), r2(p.y)]),
+      b: frame.ball ? [r2(frame.ball.x), r2(frame.ball.y)] : null,
+      r: (frame.referees || []).map(rf => [r2(rf.x), r2(rf.y)]),
+    });
+  };
+  SCN.parseFrame = (match, str, baseScenario) => {
+    const E = R.engine;
+    const o = typeof str === "string" ? JSON.parse(str) : str;
+    // baseFrame（editFrameAt）に上書き — 属性・役割は合成フレームから引き継ぐ
+    const base = E.editFrameAt(match, baseScenario || E.actualScenario(match), o.t || 0);
+    const byKey = new Map(base.players.map(p => [p.team + ":" + p.no, p]));
+    for (const [team, no, x, y] of (o.p || [])) {
+      const pl = byKey.get(team + ":" + no);
+      if (pl) { pl.x = x; pl.y = y; }
+    }
+    if (o.b && base.ball) { base.ball.x = o.b[0]; base.ball.y = o.b[1]; }
+    base.referees = (o.r || []).map(([x, y]) => ({ x, y }));
+    base.edited = true;
+    return base;
+  };
+
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
   SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
     const S = R.subs;
@@ -6485,6 +6542,7 @@ window.addEventListener("error", (e) => {
     const keys = new Set();
     let dragging = 0, lastX = 0, lastY = 0, moved = 0;
     canvas.addEventListener("pointerdown", (e) => {
+      if (api.editMode) return;        // #82: 編集モード中はカメラ操作を抑止（UI側がドラッグを持つ）
       dragging = e.button === 2 || e.shiftKey ? 2 : 1;
       lastX = e.clientX; lastY = e.clientY; moved = 0;
       canvas.setPointerCapture(e.pointerId);
@@ -7143,6 +7201,13 @@ window.addEventListener("error", (e) => {
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });
       drawMesh(mSphere);
+      // #82: 審判マーカー（編集用シーン要素・解析には非算入）
+      if (state.referees) for (const rf of state.referees) {
+        useLambert(M4.trs(rf.x, 0.55, -rf.y, 0.42, 1.1, 0.42), [0.15, 0.15, 0.16], { emiss: 0.05 });
+        drawMesh(mCapsule);
+        useLambert(M4.trs(rf.x, 1.35, -rf.y, 0.18, 0.18, 0.18), [0.9, 0.75, 0.15], { emiss: 0.2 });
+        drawMesh(mSphere);
+      }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
       gl.depthMask(false);
@@ -7228,6 +7293,28 @@ window.addEventListener("error", (e) => {
       return { hit: best, moved };
     };
 
+    // #82: 画面座標 → 地面(y=0)との交点 → ピッチ座標 {x, y}（pick と同じ光線）
+    api.groundAt = (mx, my) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((mx - rect.left) / rect.width) * 2 - 1;
+      const y = -(((my - rect.top) / rect.height) * 2 - 1);
+      const asp = canvas.width / Math.max(1, canvas.height);
+      const f = 1 / Math.tan((cam.fov * Math.PI) / 360);
+      const dirCam = [x * asp / f, y / f, -1];
+      const d = [
+        view[0] * dirCam[0] + view[1] * dirCam[1] + view[2] * dirCam[2],
+        view[4] * dirCam[0] + view[5] * dirCam[1] + view[6] * dirCam[2],
+        view[8] * dirCam[0] + view[9] * dirCam[1] + view[10] * dirCam[2],
+      ];
+      const o = eyePos();
+      if (Math.abs(d[1]) < 1e-6) return null;
+      const tHit = -o[1] / d[1];
+      if (tHit <= 0) return null;
+      const wx = o[0] + d[0] * tHit, wz = o[2] + d[2] * tHit;
+      return { x: clamp(wx, -52.5, 52.5), y: clamp(-wz, -34, 34) };   // worldZ = -fieldY
+    };
+    api.editMode = false;
+
     api.setMatch = (m) => {
       match = m;
       labelCache.clear();
@@ -7274,6 +7361,7 @@ window.addEventListener("error", (e) => {
     },
     zoneView: "BOTH",
     selected: null, hover: null,
+    editFrame: null, editSel: null,
     rosterTab: null,
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
@@ -8745,6 +8833,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   /* ------------------------------ 3D操作 ------------------------------ */
   $("#gl").addEventListener("click", (e) => {
+    if (App.editFrame) return;   // #82: 編集中は選択でなく座標編集（下の pointer handlers）
     const st = E.stateAt(App.match, activeScenario(), App.t);
     const r = renderer.pick(e.clientX, e.clientY, st);
     if (r.moved > 6) return;
@@ -8757,6 +8846,70 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.setPreset(b.dataset.cam);
     };
   });
+
+  /* -------- #82: 停止フレームの手動編集（選手・ボール・審判の座標） -------- */
+  const setEditMode = (on) => {
+    if (on) {
+      setPlaying(false);
+      App.editFrame = E.editFrameAt(App.match, activeScenario(), App.t);
+      App.editSel = null;
+      renderer.editMode = true;
+      renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
+      document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+    } else {
+      App.editFrame = null; App.editSel = null;
+      renderer.editMode = false;
+    }
+    $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
+    $("#editBar") && $("#editBar").classList.toggle("open", on);
+  };
+  $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
+  $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
+  $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editSave") && ($("#editSave").onclick = () => {
+    if (!App.editFrame) return;
+    const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-frame.json"; a.click();
+    } catch (e) { console.warn("save failed", e); }
+    $("#curveStatus") && ($("#curveStatus").textContent = "フレーム保存 (" + json.length + "B)");
+  });
+
+  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→地面交点へ移動
+  const glcv = $("#gl");
+  const editNearest = (g) => {
+    if (!App.editFrame || !g) return null;
+    let best = null, bd = 3.5;
+    for (const p of App.editFrame.players) {
+      if (!p.onPitch) continue;
+      const d = Math.hypot(p.x - g.x, p.y - g.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const b = App.editFrame.ball;
+    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd) { bd = d; best = b; } }
+    for (const rf of App.editFrame.referees) {
+      const d = Math.hypot(rf.x - g.x, rf.y - g.y);
+      if (d < bd) { bd = d; best = rf; }
+    }
+    return best;
+  };
+  glcv.addEventListener("pointerdown", (e) => {
+    if (!App.editFrame) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    App.editSel = editNearest(g);
+    if (App.editSel) { try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+  });
+  glcv.addEventListener("pointermove", (e) => {
+    if (!App.editFrame || !App.editSel) return;
+    const g = renderer.groundAt(e.clientX, e.clientY);
+    if (!g) return;
+    App.editSel.x = g.x; App.editSel.y = g.y;
+    App.editFrame.edited = true;
+  });
+  glcv.addEventListener("pointerup", () => { App.editSel = null; });
+  if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
     const i = FIELD_MODES.findIndex(m => m[0] === App.options.fieldMode);
@@ -8845,7 +8998,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
 
     const sc = activeScenario();
-    const state = E.stateAt(App.match, sc, App.t);
+    const state = App.editFrame || E.stateAt(App.match, sc, App.t);
 
     // HUD 更新（8Hz）
     if (now - lastHUD > 125) {
