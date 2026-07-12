@@ -395,6 +395,7 @@ textarea.jsonbox {
 }
 #loading .logo { font-size: 42px; font-weight: 200; letter-spacing: .28em; margin-left: .28em; }
 #loading .logo .x { color: var(--gold-bright); font-weight: 300; }
+#loading .logo .ver { font-size: 13px; font-weight: 400; letter-spacing: .12em; color: var(--muted); vertical-align: middle; }
 #loading .sub { font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: .3em; }
 #loading .bar { width: 260px; height: 2px; background: rgba(196,212,240,.12); border-radius: 1px; overflow: hidden; }
 #loading .bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--gold-deep), var(--gold-bright)); transition: width .2s; }

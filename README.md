@@ -2,6 +2,8 @@
 
 [![CI & Deploy](https://github.com/Ride-H/soccerTool/actions/workflows/ci.yml/badge.svg)](https://github.com/Ride-H/soccerTool/actions/workflows/ci.yml)
 
+**バージョン**: `RPDX.VERSION`（`rpdx/src/version.mjs` が単一の真実源）を UI（ローディング画面・試合情報フッタ）に表示。main へのリリースごとに更新し、Git タグ `v<x.y.z>` / GitHub Release と一致させる。
+
 **▶ ライブデモ（インストール不要・ブラウザで即起動）: https://ride-h.github.io/soccerTool/**
 
 **2026 FIFA ワールドカップの検証済み実データ2試合**
@@ -33,7 +35,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 283テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
+node --test rpdx/test/*.test.mjs    # 284テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -376,7 +378,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / policy / layers / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   283テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   284テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）

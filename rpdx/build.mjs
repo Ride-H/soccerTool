@@ -14,7 +14,7 @@ const dataPacks = readdirSync(join(root, "src"))
 
 // core = 純粋計算層（DOM非依存 — Web Worker (#38) がこのタグのテキストを再評価する）
 const CORE = [
-  "src/noise.mjs", "src/formations.mjs", ...dataPacks,
+  "src/version.mjs", "src/noise.mjs", "src/formations.mjs", ...dataPacks,
   "src/engine.mjs", "src/danger.mjs", "src/subs.mjs", "src/sim.mjs", "src/psy.mjs",
   "src/duel.mjs", "src/physio.mjs", "src/filter.mjs", "src/uq.mjs", "src/tactics.mjs", "src/opponent.mjs", "src/scenlib.mjs", "src/policy.mjs", "src/layers.mjs", "src/generic.mjs",
 ];
