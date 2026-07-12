@@ -474,6 +474,7 @@ body.showkeys #keyhelp { display: block; }
 <div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
   <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
   <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
+  <button class="btn" id="editReplay" aria-label="この配置から再生（re-synthesize forward）">この配置から再生</button>
   <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
   <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
   <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:640px"></span>
@@ -1629,7 +1630,10 @@ body.showkeys #keyhelp { display: block; }
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
+      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}|${ea}`;
   };
 
   // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
@@ -1726,9 +1730,11 @@ body.showkeys #keyhelp { display: block; }
   let chainBuilding = false;
   const playerAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    const base = !oc
+    let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
+    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
     if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
@@ -5571,6 +5577,29 @@ body.showkeys #keyhelp { display: block; }
     return base;
   };
 
+  /* ---- #83: 編集フレーム → 制約(editAnchors) → 再合成シナリオ（中間路） ----
+     編集位置を「その時刻を通過するガウス窓アンカー」に翻訳し、以降を既存エンジンで再合成。
+     σ は編集前 stateAt 位置からの移動距離に比例（速度上限を構成的に保証: 0.61·d/σ ≤ 3.2m/s）。
+     編集は scenario 級 → actual/既定world・golden は不変。ball 保持の再合成は将来（残）。 */
+  SCN.scenarioFromFrame = (match, frame, baseScenario) => {
+    const E = R.engine, S = R.subs;
+    const base = baseScenario || E.actualScenario(match);
+    const natural = E.stateAt(match, base, frame.t);   // 編集前の合成位置（移動距離の基準）
+    const natBy = new Map(natural.players.map(p => [p.team + ":" + p.no, p]));
+    const editAnchors = [];
+    for (const p of frame.players) {
+      if (!p.onPitch) continue;
+      const nat = natBy.get(p.team + ":" + p.no);
+      const d = nat ? Math.hypot(p.x - nat.x, p.y - nat.y) : 0;
+      if (d < 0.05) continue;                          // 動かしていない選手はアンカー不要
+      editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
+    }
+    const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
+    sc.editAnchors = editAnchors;
+    sc.editFrom = frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+  };
+
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
   SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
     const S = R.subs;
@@ -8969,6 +8998,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   $("#btnEdit") && ($("#btnEdit").onclick = () => setEditMode(!App.editFrame));
   $("#editExit") && ($("#editExit").onclick = () => setEditMode(false));
   $("#editRef") && ($("#editRef").onclick = () => { if (App.editFrame) App.editFrame.referees.push({ x: 0, y: 0 }); });
+  $("#editReplay") && ($("#editReplay").onclick = () => {
+    if (!App.editFrame) return;
+    const r = globalThis.RPDX.scenlib.scenarioFromFrame(App.match, App.editFrame, activeScenario());
+    if (!r.validation.ok) { console.warn("re-synth invalid", r.validation.errors); return; }
+    const tFrom = App.editFrame.t;
+    setEditMode(false);
+    refreshScenario(r.scenario);
+    App.t = tFrom;
+    $("#curveStatus") && ($("#curveStatus").textContent = "編集フレームから再合成（" + r.moved + "点）");
+  });
   $("#editSave") && ($("#editSave").onclick = () => {
     if (!App.editFrame) return;
     const json = globalThis.RPDX.scenlib.serializeFrame(App.editFrame);
