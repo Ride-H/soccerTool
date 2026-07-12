@@ -239,10 +239,11 @@ self.onmessage = (e) => {
 
   let renderer, tlCtx;
   const boot = () => {
-    // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
+    // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
+    // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");
-    if (mq === "template" || mq === "__tpl__") App.match = getTemplateMatch();  // #92: 未較正テンプレ起点
-    else if (mq && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
+    if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
+    else App.match = getTemplateMatch();
     renderer = R.render3d.create($("#gl"), App.match);
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
@@ -365,11 +366,44 @@ self.onmessage = (e) => {
     return { s: "on", label: "出場中" };
   };
 
+  // #92b: 未較正（テンプレ/カスタム）試合のみ、左リストで背番号・名前を直接編集できる。
+  let rosterEdit = null;   // { team, no } 編集中の行
+  const rosterEditable = () => App.match.meta.calibrated === false;
+
+  const commitRosterEdit = (team, oldNo) => {
+    const numEl = $("#redNum"), nameEl = $("#redName");
+    if (!numEl || !nameEl) return;
+    const r = G.editEntry(App.match, team, oldNo, { no: numEl.value === "" ? null : +numEl.value, name: nameEl.value });
+    if (!r.ok) { toast(r.error, "var(--crit-t)"); return; }
+    const newNo = r.newNo;
+    if (newNo !== oldNo) {
+      // scenario 級上書き・交代の参照も再マップ（golden安全: 未較正試合のみ）
+      const sc = App.scenario;
+      if (sc) {
+        for (const key of ["attrOverrides", "nameOverrides"]) {
+          const o = sc[key];
+          if (o && o[team] && o[team][oldNo] != null) { o[team][newNo] = o[team][oldNo]; delete o[team][oldNo]; }
+        }
+        for (const s of (sc.subs?.[team] || [])) { if (s.out === oldNo) s.out = newNo; if (s.in === oldNo) s.in = newNo; }
+      }
+      if (App.selected && App.selected.team === team && App.selected.no === oldNo) App.selected.no = newNo;
+      if (App.pickOut && App.pickOut.team === team && App.pickOut.no === oldNo) App.pickOut.no = newNo;
+      if (App.pickIn && App.pickIn.team === team && App.pickIn.no === oldNo) App.pickIn.no = newNo;
+      E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
+    }
+    rosterEdit = null;
+    buildStatic();
+    drawEditor();
+    updateSubSlots();
+    toast("ロスターを更新（未較正・端末内のみ）", GOLD);
+  };
+
   const buildRoster = () => {
     const team = App.rosterTab, T = App.match.teams[team];
     const list = $("#plist");
     list.innerHTML = "";
     const kit = T.kit;
+    const editable = rosterEditable();
     const sorted = [...T.squad].sort((x, y) => {
       const sx = rosterState(team, x.no, App.t).s, sy = rosterState(team, y.no, App.t).s;
       const ord = { on: 0, willon: 1, bench: 2, used: 3 };
@@ -381,13 +415,32 @@ self.onmessage = (e) => {
       row.className = "prow";
       row.dataset.no = p.no;
       const isGK = p.pos === "GK";
+      // 編集中の行: 背番号・名前の入力欄（未較正のみ）
+      if (rosterEdit && rosterEdit.team === team && rosterEdit.no === p.no) {
+        row.classList.add("editing");
+        row.innerHTML =
+          `<input id="redNum" class="numin" type="number" min="1" max="99" value="${p.no}" style="width:48px" aria-label="背番号">` +
+          `<input id="redName" type="text" value="${(p.ja || "").replace(/"/g, "&quot;")}" style="flex:1;min-width:0" aria-label="選手名">` +
+          `<button class="btn" id="redSave" aria-label="保存">✓</button>` +
+          `<button class="btn" id="redCancel" aria-label="取消">✕</button>`;
+        list.appendChild(row);
+        $("#redSave").onclick = (e) => { e.stopPropagation(); commitRosterEdit(team, p.no); };
+        $("#redCancel").onclick = (e) => { e.stopPropagation(); rosterEdit = null; buildRoster(); };
+        $("#redName").onkeydown = (e) => { if (e.key === "Enter") commitRosterEdit(team, p.no); if (e.key === "Escape") { rosterEdit = null; buildRoster(); } };
+        continue;
+      }
       const yellow = App.match.events.some(e => e.type === "yellow" && e.team === team && e.no === p.no && e.t <= App.t);
       row.innerHTML =
         `<span class="dot ${st.s === "on" ? "on" : st.s === "used" ? "used" : "off"}"></span>` +
         `<span class="pnum" style="background:${isGK ? kit.gk : kit.shirt};color:${isGK ? kit.gkNumber : kit.number}">${p.no}</span>` +
         `<span class="pname">${p.ja}${p.captain ? " ©" : ""}${yellow ? '<span class="ycard" title="警告"></span>' : ""}</span>` +
-        `<span class="ppos">${p.pos}</span><span class="pstat">${st.label}</span>`;
+        `<span class="ppos">${p.pos}</span><span class="pstat">${st.label}</span>` +
+        (editable ? `<button class="redit" title="背番号・名前を編集" aria-label="背番号・名前を編集（未較正）">✎</button>` : "");
       row.onclick = () => onRosterClick(team, p, st);
+      if (editable) {
+        const eb = row.querySelector(".redit");
+        if (eb) eb.onclick = (e) => { e.stopPropagation(); rosterEdit = { team, no: p.no }; buildRoster(); };
+      }
       if (App.selected && App.selected.team === team && App.selected.no === p.no) row.classList.add("sel");
       if (App.pickOut && App.pickOut.team === team && App.pickOut.no === p.no) row.classList.add("pick-out");
       if (App.pickIn && App.pickIn.team === team && App.pickIn.no === p.no) row.classList.add("pick-in");
