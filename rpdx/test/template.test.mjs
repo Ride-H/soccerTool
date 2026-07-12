@@ -98,6 +98,37 @@ test("#92b editEntry: 重複番号は拒否・較正済み試合は拒否", () =
   assert.notEqual(real.teams[rk].squad[0].ja, "X", "実試合スカッドは不変（golden保護）");
 });
 
+test("#92d editEntry pos: GK昇格で旧GKをDF降格しGKスロットをスワップ（1人維持）", () => {
+  const m = G.templateMatch();
+  const team = m.teamOrder[0], T = m.teams[team];
+  const gkSlot = "GK";
+  const oldGKno = T.phases[0].assign[gkSlot];
+  // XI に居る外野選手を GK に昇格
+  const outSlot = Object.keys(T.phases[0].assign).find(s => s !== gkSlot);
+  const promote = T.phases[0].assign[outSlot];
+  const r = G.editEntry(m, team, promote, { pos: "GK" });
+  assert.ok(r.ok);
+  assert.equal(T.squad.find(p => p.no === promote).pos, "GK", "昇格選手がGK");
+  assert.equal(T.squad.find(p => p.no === oldGKno).pos, "DF", "旧GKはDFへ降格");
+  assert.equal(T.squad.filter(p => p.pos === "GK").length, 1, "GKは1人だけ");
+  assert.equal(T.phases[0].assign[gkSlot], promote, "GKスロットは新GK");
+  assert.equal(T.phases[0].assign[outSlot], oldGKno, "旧GKは外野スロットへスワップ");
+});
+
+test("#92d editEntry pos: 唯一のGKを外野化は阻止・不正posは拒否・外野↔外野は可", () => {
+  const m = G.templateMatch();
+  const team = m.teamOrder[0], T = m.teams[team];
+  const gkNo = T.phases[0].assign.GK;
+  const blocked = G.editEntry(m, team, gkNo, { pos: "MF" });
+  assert.ok(!blocked.ok && /GK/.test(blocked.error), "唯一GKの外野化を阻止");
+  assert.equal(T.squad.find(p => p.no === gkNo).pos, "GK", "GKのまま");
+  const bad = G.editEntry(m, team, 5, { pos: "XX" });
+  assert.ok(!bad.ok, "不正pos拒否");
+  const df = T.squad.find(p => p.pos === "DF");
+  const ok = G.editEntry(m, team, df.no, { pos: "FW" });
+  assert.ok(ok.ok && T.squad.find(p => p.no === df.no).pos === "FW", "外野↔外野は可");
+});
+
 test("#92 編集可能: template 上の能力値上書きで危険度が動く（#89/#90 と連結）", () => {
   const m = G.templateMatch();
   const keys = E.teamKeys(m);
