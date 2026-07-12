@@ -31,7 +31,7 @@
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
+<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip warn" id="calibChip" title="この試合は実測に非依存の汎用推定（未較正）です。能力値・名前・配置を編集し JSON で往復して自チームの起点に使えます。危険度・支配率は較正済みの実試合値ではありません。" style="display:none">未較正・汎用推定</span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
 <div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">

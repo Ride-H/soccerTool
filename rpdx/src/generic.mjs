@@ -163,6 +163,9 @@
         venue: cfg.venue || "仮想スタジアム", attendance: cfg.attendance || 0,
         referee: cfg.referee || "-", score,
         note: "選手情報のみから決定論生成（RPDX.generic）",
+        // #92: 実測に非依存の汎用推定＝未較正。UI はこのフラグで「未較正」を明示する。
+        // 収録実試合パック（data_match*.mjs）は本フラグを持たない＝較正済み扱い。
+        calibrated: false,
       },
       time, dir, kickoffBy: { h1: kA, h2: kB },
       possessionPlus: kA, teamOrder: [kA, kB],
@@ -178,6 +181,18 @@
       ],
     };
   };
+
+  // #92: 編集可能テンプレート試合（実測なしの起点）。generic の薄い活用で、
+  //   自チーム運用の土台を1コールで生成。id は安定・「未較正」を meta で明示。
+  //   ※ レジストリ（R.data.MATCHES）には常時登録しない（収録2試合の golden/テスト不変）。
+  //     UI が ?match=template / ピッカーからオンデマンド生成する。
+  G.templateMatch = () => G.createMatch({
+    ...G.template(),
+    seed: "template-generic",
+    competition: "テンプレート・マッチ（未較正・自チーム起点）",
+    stage: "汎用推定",
+    venue: "テンプレート",
+  });
 
   // 最小テンプレート（UIの「カスタム試合」初期値）
   G.template = () => ({
