@@ -12,7 +12,7 @@
 <canvas id="gl" role="img" aria-label="3D 戦術ピッチ — 選手・ボール・危険度場の可視化（3D tactical pitch: players, ball and danger field）"></canvas>
 
 <div id="loading">
-  <div class="logo">RPD<span class="x">–X</span></div>
+  <div class="logo">RPD<span class="x">–X</span> <span class="ver" id="appVer"></span></div>
   <div class="sub">D²-FIELD v2 · 距離 × 人数 × 時間</div>
   <div class="bar"><div class="fill" id="loadFill"></div></div>
   <div class="sub" id="loadMsg">実試合データ照合済 — 危険度曲線を事前計算中…</div>
@@ -31,7 +31,7 @@
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
+<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip warn" id="calibChip" title="この試合は実測に非依存の汎用推定（未較正）です。能力値・名前・配置を編集し JSON で往復して自チームの起点に使えます。危険度・支配率は較正済みの実試合値ではありません。" style="display:none">未較正・汎用推定</span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
 <div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
@@ -233,9 +233,23 @@
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn primary" id="customLoad">この試合を読み込む</button>
         <button class="btn" id="customTemplate">テンプレートを再挿入</button>
-        <button class="btn" id="customBack">日本×ブラジル戦に戻る</button>
+        <button class="btn" id="customBack">既定テンプレに戻る</button>
       </div>
       <div id="customErr" style="color:var(--crit-t);margin-top:8px;font-size:11.5px"></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+      <p style="color:var(--muted);margin-bottom:8px;font-size:11.5px">
+        <b>現在のシナリオを JSON で往復</b>（交代・布陣・能力値/名前の上書き・編集フレームを 1 ファイルへ）。
+        取込はファイル選択・ドラッグ&ドロップ・<code>?data=</code> に対応。<b>すべて端末内で完結し、送信・サーバ蓄積はありません。</b>
+        取り込んだ JSON はシナリオ級の上書きとして反映され、収録試合そのもの（golden）は不変です。
+      </p>
+      <div id="bundleZone" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="bundleExport" aria-label="シナリオを JSON で書き出す（export scenario JSON）">シナリオを書き出す</button>
+        <label class="btn" for="bundleFile" style="cursor:pointer" aria-label="JSON を取り込む（import scenario JSON）">JSON を取り込む</label>
+        <input type="file" id="bundleFile" accept="application/json,.json" style="display:none">
+        <button class="btn" id="bundleStore" aria-label="この端末に保存（save to this device）">端末に保存</button>
+        <button class="btn" id="bundleRestore" aria-label="この端末から復元（restore from this device）">端末から復元</button>
+      </div>
+      <div id="bundleMsg" style="color:var(--muted);margin-top:8px;font-size:11.5px" aria-live="polite"></div>
     </div>
   </div>
 </div>

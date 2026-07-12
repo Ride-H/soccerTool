@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const dataPacks = readdirSync(dir).filter((f) => /^data_match.*\.mjs$/.test(f)).sort();
 export const SRC_ORDER = [
-  "noise.mjs", "formations.mjs", ...dataPacks,
+  "version.mjs", "noise.mjs", "formations.mjs", ...dataPacks,
   "engine.mjs", "danger.mjs", "subs.mjs", "sim.mjs", "psy.mjs",
   "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "policy.mjs", "layers.mjs", "generic.mjs",
 ];

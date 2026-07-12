@@ -239,9 +239,12 @@ self.onmessage = (e) => {
 
   let renderer, tlCtx;
   const boot = () => {
-    // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
+    $("#appVer") && ($("#appVer").textContent = "v" + (R.VERSION || "?"));   // バージョン表示
+    // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
+    // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");
-    if (mq && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
+    if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
+    else App.match = getTemplateMatch();
     renderer = R.render3d.create($("#gl"), App.match);
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
@@ -266,6 +269,14 @@ self.onmessage = (e) => {
         if (validation.ok) refreshScenario(scenario);
         else console.warn("scenario param invalid:", validation.errors);
       } catch (e) { console.warn("scenario param parse error", e); }
+    }
+    if (urlq.has("data")) {
+      // #91: 統合バンドル JSON の深いリンク（端末内のみ・検証NG時は無視）
+      try {
+        const r = globalThis.RPDX.scenlib.parseBundle(App.match, decodeURIComponent(urlq.get("data")));
+        if (!r.error && r.validation && r.validation.ok) { refreshScenario(r.scenario); if (r.frame) App.editFrame = r.frame; }
+        else console.warn("data param invalid:", r.error || (r.validation && r.validation.errors));
+      } catch (e) { console.warn("data param parse error", e); }
     }
     if (urlq.get("demo") === "sim") {
       // 検証/デモ用: 66' 鎌田→久保 のwhat-ifシナリオを自動生成
@@ -315,6 +326,9 @@ self.onmessage = (e) => {
     buildKikenTiles();
     buildPsyPanel();
     buildMatchSel();
+    // #92: 未較正（汎用推定）試合は明示。収録実試合（calibrated未設定）では非表示。
+    const cc = $("#calibChip");
+    if (cc) cc.style.display = App.match.meta.calibrated === false ? "" : "none";
     buildZoneViewBtns();
     buildInfoModal();
     buildModelModal();
@@ -353,11 +367,54 @@ self.onmessage = (e) => {
     return { s: "on", label: "出場中" };
   };
 
+  // #92b: 未較正（テンプレ/カスタム）試合のみ、左リストで背番号・名前を直接編集できる。
+  let rosterEdit = null;   // { team, no } 編集中の行
+  const rosterEditable = () => App.match.meta.calibrated === false;
+
+  const commitRosterEdit = (team, oldNo) => {
+    const numEl = $("#redNum"), nameEl = $("#redName"), posEl = $("#redPos");
+    if (!numEl || !nameEl) return;
+    const r = G.editEntry(App.match, team, oldNo, {
+      no: numEl.value === "" ? null : +numEl.value,
+      name: nameEl.value,
+      pos: posEl ? posEl.value : undefined,
+    });
+    if (!r.ok) { toast(r.error, "var(--crit-t)"); return; }
+    const newNo = r.newNo;
+    if (newNo !== oldNo) {
+      // scenario 級上書き・交代の参照も再マップ（golden安全: 未較正試合のみ）
+      const sc = App.scenario;
+      if (sc) {
+        for (const key of ["attrOverrides", "nameOverrides"]) {
+          const o = sc[key];
+          if (o && o[team] && o[team][oldNo] != null) { o[team][newNo] = o[team][oldNo]; delete o[team][oldNo]; }
+        }
+        for (const s of (sc.subs?.[team] || [])) { if (s.out === oldNo) s.out = newNo; if (s.in === oldNo) s.in = newNo; }
+      }
+      if (App.selected && App.selected.team === team && App.selected.no === oldNo) App.selected.no = newNo;
+      if (App.pickOut && App.pickOut.team === team && App.pickOut.no === oldNo) App.pickOut.no = newNo;
+      if (App.pickIn && App.pickIn.team === team && App.pickIn.no === oldNo) App.pickIn.no = newNo;
+    }
+    // 背番号・ポジション（GKスワップ含む）・名前はXI/識別/属性に影響 → 全キャッシュを更新
+    E.clearCaches(); D.clearCaches(); PSY.clearCaches(); PHYS.clearCaches(); curveStore.clear();
+    rosterEdit = null;
+    buildStatic();
+    drawEditor();
+    updateSubSlots();
+    // 危険度カーブ・シナリオ結果は curveStore 由来 → クリア後に必ず再計算する（setCore と同じ正準パターン）
+    ensureCurveFor(E.actualScenario(App.match), { includeGK: false }, () => {
+      ensureCurveFor(E.actualScenario(App.match), { includeGK: App.options.includeGK }, () => {});
+      if (isSim()) computeOutcome(App.scenario); else renderOutcome();
+    });
+    toast("ロスターを更新（未較正・端末内のみ）", GOLD);
+  };
+
   const buildRoster = () => {
     const team = App.rosterTab, T = App.match.teams[team];
     const list = $("#plist");
     list.innerHTML = "";
     const kit = T.kit;
+    const editable = rosterEditable();
     const sorted = [...T.squad].sort((x, y) => {
       const sx = rosterState(team, x.no, App.t).s, sy = rosterState(team, y.no, App.t).s;
       const ord = { on: 0, willon: 1, bench: 2, used: 3 };
@@ -369,13 +426,33 @@ self.onmessage = (e) => {
       row.className = "prow";
       row.dataset.no = p.no;
       const isGK = p.pos === "GK";
+      // 編集中の行: 背番号・名前の入力欄（未較正のみ）
+      if (rosterEdit && rosterEdit.team === team && rosterEdit.no === p.no) {
+        row.classList.add("editing");
+        row.innerHTML =
+          `<input id="redNum" class="numin" type="number" min="1" max="99" value="${p.no}" style="width:44px" aria-label="背番号">` +
+          `<select id="redPos" class="sel" style="width:50px" aria-label="ポジション">${["GK", "DF", "MF", "FW"].map(o => `<option value="${o}"${p.pos === o ? " selected" : ""}>${o}</option>`).join("")}</select>` +
+          `<input id="redName" type="text" value="${(p.ja || "").replace(/"/g, "&quot;")}" style="flex:1;min-width:0" aria-label="選手名">` +
+          `<button class="btn" id="redSave" aria-label="保存">✓</button>` +
+          `<button class="btn" id="redCancel" aria-label="取消">✕</button>`;
+        list.appendChild(row);
+        $("#redSave").onclick = (e) => { e.stopPropagation(); commitRosterEdit(team, p.no); };
+        $("#redCancel").onclick = (e) => { e.stopPropagation(); rosterEdit = null; buildRoster(); };
+        $("#redName").onkeydown = (e) => { if (e.key === "Enter") commitRosterEdit(team, p.no); if (e.key === "Escape") { rosterEdit = null; buildRoster(); } };
+        continue;
+      }
       const yellow = App.match.events.some(e => e.type === "yellow" && e.team === team && e.no === p.no && e.t <= App.t);
       row.innerHTML =
         `<span class="dot ${st.s === "on" ? "on" : st.s === "used" ? "used" : "off"}"></span>` +
         `<span class="pnum" style="background:${isGK ? kit.gk : kit.shirt};color:${isGK ? kit.gkNumber : kit.number}">${p.no}</span>` +
         `<span class="pname">${p.ja}${p.captain ? " ©" : ""}${yellow ? '<span class="ycard" title="警告"></span>' : ""}</span>` +
-        `<span class="ppos">${p.pos}</span><span class="pstat">${st.label}</span>`;
+        `<span class="ppos">${p.pos}</span><span class="pstat">${st.label}</span>` +
+        (editable ? `<button class="redit" title="背番号・名前を編集" aria-label="背番号・名前を編集（未較正）">✎</button>` : "");
       row.onclick = () => onRosterClick(team, p, st);
+      if (editable) {
+        const eb = row.querySelector(".redit");
+        if (eb) eb.onclick = (e) => { e.stopPropagation(); rosterEdit = { team, no: p.no }; buildRoster(); };
+      }
       if (App.selected && App.selected.team === team && App.selected.no === p.no) row.classList.add("sel");
       if (App.pickOut && App.pickOut.team === team && App.pickOut.no === p.no) row.classList.add("pick-out");
       if (App.pickIn && App.pickIn.team === team && App.pickIn.no === p.no) row.classList.add("pick-in");
@@ -892,18 +969,27 @@ self.onmessage = (e) => {
   };
 
   /* --------------------------- 試合スイッチャ --------------------------- */
+  // #92: テンプレ試合はレジストリに常時登録せず（収録2試合の golden/テスト不変）、
+  //   ここでオンデマンド生成してキャッシュする。自チーム運用の「未較正の起点」。
+  let templateMatchCache = null;
+  const getTemplateMatch = () => (templateMatchCache ??= G.templateMatch());
+  const TPL_ID = "__tpl__";
+
   const buildMatchSel = () => {
     const sel = $("#matchSel");
     const reg = R.data.MATCHES || { [App.match.meta.id]: App.match };
     const ids = Object.keys(reg);
-    sel.style.display = ids.length > 1 ? "" : "none";
-    sel.innerHTML = ids.map(id => {
+    const isTpl = App.match.meta.calibrated === false;
+    sel.style.display = "";
+    const opts = ids.map(id => {
       const m = reg[id];
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
-    }).join("");
+    });
+    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    sel.innerHTML = opts.join("");
     sel.onchange = () => {
-      const m = reg[sel.value];
+      const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
         toast(`試合を切替 — ${m.meta.competition} ${m.meta.stage}`, GOLD);
@@ -1343,18 +1429,25 @@ self.onmessage = (e) => {
         return `<span class="chip" style="margin:2px 3px 2px 0">${p.no} ${p.ja}</span>`;
       }).join("");
     };
+    // #92c: 出典表示を較正状態・シナリオ状態に整合させる（未較正/what-if で実記録の断定を出さない）
+    const cal = m.meta.calibrated !== false;            // 収録実試合か（テンプレ/カスタムは false）
+    const sim = isSim();                                // what-if シナリオが有効か
+    const provNote = !cal
+      ? `<div class="chip est" style="margin:6px 0">この試合は<b>モデル生成（未較正・実測非依存）</b>。数値は決定論モデルの汎用推定で、公式記録の出典はありません。能力値・名前・背番号・配置は編集可（自チーム起点）。</div>`
+      : (sim ? `<div class="chip warn" style="margin:6px 0">現在 <b>what-if シナリオ</b>表示中 — 下記の記録・スコア・出典は<b>収録実試合</b>のもので、現在のシナリオ結果ではありません（シナリオ結果は右下「結果」パネル）。</div>` : "");
     $("#infoBody").innerHTML = `
       <h4>${m.meta.competition} ${m.meta.stage}</h4>
       <div style="color:var(--muted)">${m.meta.date} ${m.meta.kickoffLocal || ""} · ${m.meta.venue} · 観衆 ${m.meta.attendance.toLocaleString()}名 · 主審 ${m.meta.referee}</div>
-      <div style="font-size:21px;font-weight:300;margin:8px 0;letter-spacing:.04em">${m.teams[a].name} ${m.meta.score[a]} – ${m.meta.score[b]} ${m.teams[b].name}</div>
+      <div style="font-size:21px;font-weight:300;margin:8px 0;letter-spacing:.04em">${m.teams[a].name} ${m.meta.score[a]} – ${m.meta.score[b]} ${m.teams[b].name}${cal ? "" : ' <span class="chip est" style="vertical-align:middle">モデル生成</span>'}</div>
+      ${provNote}
       ${m.meta.motm ? `<div class="chip warn">MOM ${m.teams[m.meta.motm.team].squad.find(p => p.no === m.meta.motm.no).ja}</div>` : ""}
-      <h4>スタメン（FIFA公式記録）</h4>
+      <h4>スタメン${cal ? "（FIFA公式記録）" : "（モデル生成・未較正）"}</h4>
       <div><b style="color:${seriesColor(a, true)}">${m.teams[a].name}</b>（${m.teams[a].phases[0].shape} / ${m.teams[a].coach}）</div>
       <div style="margin:4px 0 8px">${xiRows(a)}</div>
       <div><b style="color:${seriesColor(b, true)}">${m.teams[b].name}</b>（${m.teams[b].phases[0].shape} / ${m.teams[b].coach}）</div>
       <div style="margin:4px 0 8px">${xiRows(b)}</div>
-      <h4>スタッツ（実測 — 各行に出典 / プロバイダにより差があり得ます）</h4>
-      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}${s.src ? `<div class="statsrc">出典: ${s.src}</div>` : ""}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
+      <h4>スタッツ${cal ? "（実測 — 各行に出典 / プロバイダにより差があり得ます）" : "（モデル推定・未較正 — 実測の出典はありません）"}</h4>
+      <table class="stat-table">${(m.stats || []).map(s => `<tr><td class="a">${s[a] ?? s.BRA}</td><td class="k">${s.key}${cal && s.src ? `<div class="statsrc">出典: ${s.src}</div>` : ""}</td><td class="b">${s[b] ?? s.JPN}</td></tr>`).join("")}</table>
       <h4>パスネットワーク上位（モデル推定 — 保持チェーン由来・実パス記録ではない）</h4>
       ${(() => {
         const range = E.playedRange(m);
@@ -1403,8 +1496,10 @@ self.onmessage = (e) => {
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
       <h4>データ出典</h4>
-      <div style="color:var(--muted);font-size:11.5px">背番号・XI・交代・警告・得点・スタッツ: FIFA公式記録（Tactical Line-up / Match Report）・Wikipedia・ESPN照合（2026-07-03検証）。
-      選手座標・能力値は実スタッツ（支配率69/31, xG2.07/0.33）と実況記述に整合するよう較正した決定論モデル。${m.meta.note || ""}</div>`;
+      <div style="color:var(--muted);font-size:11.5px">${cal
+        ? `背番号・XI・交代・警告・得点・スタッツは本試合の<b>公式記録</b>（FIFA Tactical Line-up / Match Report・Wikipedia・ESPN 照合）に基づく。選手座標・能力値は実スタッツと実況記述に整合するよう較正した決定論モデル。`
+        : `本試合は<b>モデル生成（未較正・実測非依存）</b>。すべての数値は選手情報のみから決定論生成した汎用推定で、<b>公式記録の出典はありません</b>。自チームの構成に合わせて能力値・名前・背番号・配置を編集し、JSON で往復共有できます。`}${m.meta.note ? " " + m.meta.note : ""}</div>
+      <div style="color:var(--faint);font-size:11px;margin-top:8px;font-family:var(--mono)">RPD-X v${R.VERSION || "?"}</div>`;
     $("#infoBody").querySelectorAll("[data-jump]").forEach(d => d.onclick = () => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
@@ -1520,10 +1615,65 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
   };
   $("#customBack").onclick = () => {
-    setMatch(R.data.MATCH);
+    setMatch(getTemplateMatch());
     $("#modalCustom").classList.remove("open");
-    toast("日本×ブラジル戦（実データ）に戻しました", "#7FA6FF");
+    toast("既定のテンプレ（チームA×チームB）に戻しました", "#7FA6FF");
   };
+
+  /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
+  const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
+  const applyBundle = (text, src) => {
+    const r = R.scenlib.parseBundle(App.match, text);
+    if (r.error) { bMsg("⚠ " + r.error, true); return false; }
+    if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
+    refreshScenario(r.scenario);
+    if (r.frame) App.editFrame = r.frame;
+    $("#modalCustom").classList.remove("open");
+    toast("シナリオを取り込みました（端末内）" + (src ? "・" + src : ""), "#7FA6FF");
+    return true;
+  };
+  const readBundleFile = (file) => {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => applyBundle(rd.result, file.name);
+    rd.onerror = () => bMsg("⚠ ファイル読込に失敗", true);
+    rd.readAsText(file);
+  };
+  $("#bundleExport") && ($("#bundleExport").onclick = () => {
+    const sc = activeScenario();
+    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null);
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      a.download = "rpdx-scenario.json"; a.click();
+      bMsg("書き出し完了（" + json.length + "B）— 端末内のみ");
+    } catch (e) { bMsg("⚠ 書き出し失敗: " + (e && e.message), true); }
+  });
+  $("#bundleFile") && ($("#bundleFile").onchange = (e) => { readBundleFile(e.target.files && e.target.files[0]); e.target.value = ""; });
+  // ドラッグ&ドロップ（モーダル全体）
+  const cm = $("#modalCustom");
+  if (cm) {
+    cm.addEventListener("dragover", (e) => { e.preventDefault(); });
+    cm.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readBundleFile(f);
+    });
+  }
+  // localStorage（任意・端末内のみ・サーバ非経由）
+  const LS_KEY = "rpdx.scenario.v1";
+  $("#bundleStore") && ($("#bundleStore").onclick = () => {
+    try {
+      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null));
+      bMsg("この端末に保存しました（localStorage・送信なし）");
+    } catch (e) { bMsg("⚠ 端末保存に失敗: " + (e && e.message), true); }
+  });
+  $("#bundleRestore") && ($("#bundleRestore").onclick = () => {
+    let text = null;
+    try { text = localStorage.getItem(LS_KEY); } catch { /* ignore */ }
+    if (!text) { bMsg("⚠ 端末に保存されたシナリオがありません", true); return; }
+    applyBundle(text, "端末");
+  });
 
   const setMatch = (m) => {
     App.match = m;

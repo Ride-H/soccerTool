@@ -163,6 +163,9 @@
         venue: cfg.venue || "仮想スタジアム", attendance: cfg.attendance || 0,
         referee: cfg.referee || "-", score,
         note: "選手情報のみから決定論生成（RPDX.generic）",
+        // #92: 実測に非依存の汎用推定＝未較正。UI はこのフラグで「未較正」を明示する。
+        // 収録実試合パック（data_match*.mjs）は本フラグを持たない＝較正済み扱い。
+        calibrated: false,
       },
       time, dir, kickoffBy: { h1: kA, h2: kB },
       possessionPlus: kA, teamOrder: [kA, kB],
@@ -179,22 +182,78 @@
     };
   };
 
-  // 最小テンプレート（UIの「カスタム試合」初期値）
-  G.template = () => ({
-    seed: "demo-1",
-    home: {
-      code: "RED", name: "レッドスターズ", formation: "433", color: "#E5533D",
-      squad: Array.from({ length: 18 }, (_, i) => ({
-        no: i + 1, pos: i === 0 ? "GK" : i < 6 ? "DF" : i < 12 ? "MF" : "FW",
-        name: `Red ${i + 1}`, ja: `レッド${i + 1}`,
-      })),
-    },
-    away: {
-      code: "SKY", name: "スカイユナイテッド", formation: "442", color: "#4FA3FF",
-      squad: Array.from({ length: 18 }, (_, i) => ({
-        no: i + 1, pos: i === 0 ? "GK" : i < 6 ? "DF" : i < 12 ? "MF" : "FW",
-        name: `Sky ${i + 1}`, ja: `スカイ${i + 1}`,
-      })),
-    },
-  });
+  // #92: 編集可能テンプレート試合（実測なしの起点）。generic の薄い活用で、
+  //   自チーム運用の土台を1コールで生成。id は安定・「未較正」を meta で明示。
+  //   チーム名は既定「チームA / チームB」、選手名は「プレイヤーA1.. / プレイヤーB1..」の中立ラベル。
+  //   ※ レジストリ（R.data.MATCHES）には常時登録しない（収録2試合の golden/テスト不変）。
+  //     UI が ?match=template / ピッカー / 既定起動でオンデマンド生成する。
+  //   ※ G.template()（「カスタム試合」モーダルの初期値）と同一定義を共有＝両者は完全にリンクする。
+  G.templateMatch = () => G.createMatch(G.template());
+
+  // #92b: ロスター項目（背番号・名前）の直接編集。**未較正（calibrated=false）試合のみ許可**。
+  //   背番号は選手の識別キー＝XI割当・主将順・交代の参照を一括で再マップする（重複/範囲を検証）。
+  //   収録実試合（較正済み）は公式記録・golden 保護のため拒否する。scenario 級上書きの再マップは呼び出し側。
+  G.editEntry = (match, team, no, patch) => {
+    if (match.meta.calibrated !== false) return { ok: false, error: "較正済み（収録）試合は編集できません" };
+    const T = match.teams[team];
+    if (!T) return { ok: false, error: "チームが見つかりません" };
+    const p = T.squad.find(q => q.no === no);
+    if (!p) return { ok: false, error: "選手が見つかりません" };
+    if (patch.name != null) {
+      const nm = String(patch.name).trim();
+      if (nm) { p.ja = nm; p.name = nm; p.label = nm.slice(0, 6); }
+    }
+    // ポジション編集（GK は各チーム1人の不変式を保つ・自動スワップ）
+    if (patch.pos != null && String(patch.pos) !== p.pos) {
+      const newPos = String(patch.pos);
+      if (!["GK", "DF", "MF", "FW"].includes(newPos)) return { ok: false, error: "ポジションは GK/DF/MF/FW" };
+      if (newPos === "GK") {
+        // p を GK へ昇格。既存 GK を DF に降格し、XI の GK スロットを p にスワップ（1人維持）。
+        for (const q of T.squad) if (q.pos === "GK") q.pos = "DF";
+        p.pos = "GK";
+        for (const ph of T.phases) {
+          const gkSlot = ((F.SHAPES[ph.shape] || []).find(s => s.role === "GK") || {}).id || "GK";
+          const gkNo = ph.assign[gkSlot];                                   // 現 GK スロット占有者
+          const pSlot = Object.keys(ph.assign).find(sl => ph.assign[sl] === p.no);
+          ph.assign[gkSlot] = p.no;                                         // p を GK スロットへ
+          if (pSlot && pSlot !== gkSlot) ph.assign[pSlot] = gkNo;           // 旧GKは p の外野スロットへ（スワップ）
+          // p がベンチだった場合: 旧GKは XI から外れ、p が先発GK になる
+        }
+      } else if (p.pos === "GK") {
+        // 唯一の GK を外野化しようとした → 阻止（先に別選手を GK にする運用）
+        if (T.squad.filter(q => q.pos === "GK").length <= 1)
+          return { ok: false, error: "各チームに GK が1人必要です（先に別の選手を GK にしてください）" };
+        p.pos = newPos;
+      } else {
+        p.pos = newPos;   // 外野 ↔ 外野（コスメ＋役割適合のみ・危険度/位置は不変）
+      }
+    }
+    let newNo = no;
+    if (patch.no != null && Math.trunc(patch.no) !== no) {
+      newNo = Math.trunc(patch.no);
+      if (!(newNo >= 1 && newNo <= 99)) return { ok: false, error: "背番号は 1〜99" };
+      if (T.squad.some(q => q.no === newNo)) return { ok: false, error: "背番号が重複しています" };
+      p.no = newNo;
+      for (const ph of T.phases) for (const s of Object.keys(ph.assign)) if (ph.assign[s] === no) ph.assign[s] = newNo;
+      if (T.captainOrder) T.captainOrder = T.captainOrder.map(n => (n === no ? newNo : n));
+      for (const s of (match.subsActual[team] || [])) { if (s.out === no) s.out = newNo; if (s.in === no) s.in = newNo; }
+    }
+    return { ok: true, newNo };
+  };
+
+  // 正典テンプレート（#92: 既定起動の試合・UI「カスタム試合」の初期値・両者で共有）。
+  //   チーム名「チームA / チームB」、選手「プレイヤーA1.. / プレイヤーB1..」の中立ラベル。
+  G.template = () => {
+    const mkSquad = (side) => Array.from({ length: 18 }, (_, i) => ({
+      no: i + 1, pos: i === 0 ? "GK" : i < 6 ? "DF" : i < 12 ? "MF" : "FW",
+      name: `Player ${side}${i + 1}`, ja: `プレイヤー${side}${i + 1}`, label: `${side}${i + 1}`,
+    }));
+    return {
+      seed: "template-generic",
+      competition: "テンプレート・マッチ（未較正・自チーム起点）",
+      stage: "汎用推定", venue: "テンプレート",
+      home: { code: "TMA", name: "チームA", nameEn: "Team A", formation: "433", color: "#E5533D", squad: mkSquad("A") },
+      away: { code: "TMB", name: "チームB", nameEn: "Team B", formation: "442", color: "#4FA3FF", squad: mkSquad("B") },
+    };
+  };
 })();

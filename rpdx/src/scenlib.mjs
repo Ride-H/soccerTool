@@ -121,6 +121,104 @@
     return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
   };
 
+  /* ---- #91: ロスター/シナリオ/フレームの JSON 往復（統合スキーマ・取込→反映→書出） ----
+     すべて端末内で完結（送信・サーバ蓄積なし）。上書きは scenario 級のみ＝match/golden は不変。
+     スキーマ（最小・後方互換）:
+       { v:1, kind:"rpdx-bundle", match, label,
+         overrides?: { subs?, lineup?, tweaks?, opponentHt?, attrOverrides?, nameOverrides?, editAnchors?, editFrom? },
+         roster?: { TEAM: { name?, players:[{no,label?,name?,ja?,attrs?}] } },   // 能力値/名前を no でマッチ→上書きへ翻訳
+         frame?: <serializeFrame の中身> }                                        // 任意の編集フレーム座標 */
+  const ATTR_RANGE = { pac: [40, 99], sta: [40, 99], def: [20, 99], att: [20, 99], tec: [40, 99], aer: [30, 99] };
+
+  SCN.serializeBundle = (match, scenario, editFrame) => {
+    const ov = {};
+    if (scenario.subs) {
+      const subs = {};
+      for (const [k, arr] of Object.entries(scenario.subs))
+        if (arr && arr.length) subs[k] = arr.map(s => [s.t, s.out, s.in]);
+      if (Object.keys(subs).length) ov.subs = subs;
+    }
+    if (scenario.lineup) ov.lineup = scenario.lineup;
+    if (scenario.tweaks) ov.tweaks = scenario.tweaks;
+    if (scenario.opponentHt) ov.opponentHt = scenario.opponentHt;
+    if (scenario.attrOverrides) ov.attrOverrides = scenario.attrOverrides;
+    if (scenario.nameOverrides) ov.nameOverrides = scenario.nameOverrides;
+    if (scenario.editAnchors && scenario.editAnchors.length) {
+      ov.editAnchors = scenario.editAnchors;
+      if (scenario.editFrom != null) ov.editFrom = scenario.editFrom;
+    }
+    const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
+    if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
+    return JSON.stringify(bundle, null, 2);
+  };
+
+  SCN.parseBundle = (match, input) => {
+    const S = R.subs, E = R.engine;
+    let o;
+    try { o = typeof input === "string" ? JSON.parse(input) : input; }
+    catch (e) { return { error: "JSON 解析に失敗: " + (e && e.message || e) }; }
+    if (!o || typeof o !== "object") return { error: "不正な形式（オブジェクトではありません）" };
+    const keys = E.teamKeys(match);
+    const keySet = new Set(keys);
+    const ov = o.overrides || {};
+
+    // 交代（配列 [t,out,in] / オブジェクト両対応）
+    const subs = {};
+    for (const k of keys)
+      subs[k] = ((ov.subs && ov.subs[k]) || []).map(s =>
+        Array.isArray(s) ? { t: s[0], out: s[1], in: s[2] } : { t: s.t, out: s.out, in: s.in });
+    const sc = S.createScenario(match, o.label || "取込シナリオ", { subs, lineup: ov.lineup || null, tweaks: ov.tweaks || null });
+    if (ov.opponentHt) sc.opponentHt = ov.opponentHt;
+
+    // 能力値・名前の上書き（clamp・no でマッチ・未知チーム/属性は無視）
+    const clampAttr = (kk, v) => {
+      const r = ATTR_RANGE[kk]; if (!r || typeof v !== "number" || !isFinite(v)) return null;
+      return Math.max(r[0], Math.min(r[1], Math.round(v)));
+    };
+    const ao = {}, nm = {};
+    const putAttr = (team, no, attrs) => {
+      if (!keySet.has(team) || attrs == null || typeof attrs !== "object") return;
+      const dst = {};
+      for (const kk of Object.keys(ATTR_RANGE)) {
+        const c = clampAttr(kk, attrs[kk]);
+        if (c != null) dst[kk] = c;
+      }
+      if (Object.keys(dst).length) { (ao[team] ??= {}); ao[team][no] = { ...(ao[team][no] || {}), ...dst }; }
+    };
+    const putName = (team, no, src) => {
+      if (!keySet.has(team) || !src) return;
+      const dst = {};
+      if (src.name) dst.name = String(src.name);
+      if (src.ja) dst.ja = String(src.ja);
+      if (src.label) dst.label = String(src.label);
+      if (Object.keys(dst).length) { (nm[team] ??= {}); nm[team][no] = { ...(nm[team][no] || {}), ...dst }; }
+    };
+    if (ov.attrOverrides) for (const t of Object.keys(ov.attrOverrides))
+      for (const no of Object.keys(ov.attrOverrides[t])) putAttr(t, +no, ov.attrOverrides[t][no]);
+    if (ov.nameOverrides) for (const t of Object.keys(ov.nameOverrides))
+      for (const no of Object.keys(ov.nameOverrides[t])) putName(t, +no, ov.nameOverrides[t][no]);
+    // roster 形式（能力値/名前を選手行から翻訳・能力値なしは既存squad既定のまま＝上書きしない）
+    if (o.roster) for (const [team, r] of Object.entries(o.roster)) {
+      for (const pl of ((r && r.players) || [])) {
+        if (pl == null || pl.no == null) continue;
+        if (pl.attrs) putAttr(team, +pl.no, pl.attrs);
+        putName(team, +pl.no, pl);
+      }
+    }
+    if (Object.keys(ao).length) sc.attrOverrides = ao;
+    if (Object.keys(nm).length) sc.nameOverrides = nm;
+
+    // 編集アンカー（#83 再合成の制約）
+    if (Array.isArray(ov.editAnchors) && ov.editAnchors.length) {
+      sc.editAnchors = ov.editAnchors.filter(a => a && keySet.has(a.team));
+      sc.editFrom = ov.editFrom != null ? ov.editFrom : ov.editAnchors[0].t;
+    }
+
+    const validation = S.validateScenario(match, sc);
+    const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
+    return { scenario: sc, validation, frame, match: o.match || null };
+  };
+
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
   SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
     const S = R.subs;

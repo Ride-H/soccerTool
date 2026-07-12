@@ -186,6 +186,16 @@ button, select, input, textarea { font-family: inherit; color: inherit; }
 .prow .pname { flex: 1; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prow .ppos { font-size: 10px; color: var(--faint); width: 26px; }
 .prow .pstat { font-size: 9.5px; font-family: var(--mono); color: var(--muted); width: 46px; text-align: right; }
+/* #92b: ロスター行の編集（未較正試合のみ） */
+.prow .redit {
+  opacity: 0; flex-shrink: 0; margin-left: 2px; width: 22px; height: 20px; padding: 0;
+  border-radius: 5px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font-size: 11px; cursor: pointer;
+}
+.prow:hover .redit { opacity: 1; }
+.prow .redit:hover { color: var(--fg); border-color: var(--gold-line); }
+.prow.editing { cursor: default; gap: 6px; }
+.prow.editing .btn { padding: 2px 7px; }
 .prow .dot { width: 6px; height: 6px; border-radius: 99px; flex-shrink: 0; }
 .dot.on { background: var(--ok-t); box-shadow: 0 0 7px var(--ok); }
 .dot.off { background: rgba(196,212,240,.28); }
@@ -385,6 +395,7 @@ textarea.jsonbox {
 }
 #loading .logo { font-size: 42px; font-weight: 200; letter-spacing: .28em; margin-left: .28em; }
 #loading .logo .x { color: var(--gold-bright); font-weight: 300; }
+#loading .logo .ver { font-size: 13px; font-weight: 400; letter-spacing: .12em; color: var(--muted); vertical-align: middle; }
 #loading .sub { font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: .3em; }
 #loading .bar { width: 260px; height: 2px; background: rgba(196,212,240,.12); border-radius: 1px; overflow: hidden; }
 #loading .bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--gold-deep), var(--gold-bright)); transition: width .2s; }
