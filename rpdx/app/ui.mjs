@@ -121,16 +121,89 @@
   const curveStore = new Map();
   const curveKeyOf = (sc, opts) =>
     `${App.match.meta.id}|${E.scenarioKey(sc)}|8|${opts.includeGK ? 1 : 0}`;
+
+  /* Web Worker オフロード（#38）: core script タグ（DOM非依存の計算層）のテキストから
+     Blob Worker を生成し、危険度曲線をメインスレッド外で計算する。
+     Worker 不可（CSP/file制限/エラー）時は従来のチャンク計算へ自動フォールバック。
+     シナリオは scenlib で直列化して渡す — 内容ベース hash なので同一世界・同一結果。 */
+  let dWorker = null, dwSeq = 0, dwFailed = false;
+  const dwCbs = new Map();
+  const workerCurve = (match, sc, opts, onDone) => {
+    if (dwFailed || typeof Worker === "undefined") return false;
+    try {
+      if (!dWorker) {
+        const core = document.getElementById("rpdx-core");
+        if (!core || !core.textContent.includes("R.danger")) return false;
+        const glue = `
+self.onmessage = (e) => {
+  const { id, matchId, scen, opts, geomOnly } = e.data;
+  try {
+    const R = globalThis.RPDX;
+    const m = R.data.MATCHES[matchId];
+    if (R.danger.isGeomOnly() !== !!geomOnly) R.danger.setGeomOnly(!!geomOnly);
+    const scenario = scen ? R.scenlib.parse(m, scen).scenario : R.engine.actualScenario(m);
+    if (e.data.withOutcome && scen) R.sim.attach(m, scenario);   // outcome込みの世界を決定論再構成
+    const pts = R.danger.curve(m, scenario, opts);
+    postMessage({ id, pts });
+  } catch (err) { postMessage({ id, error: String(err && err.message || err) }); }
+};`;
+        dWorker = new Worker(URL.createObjectURL(
+          new Blob([core.textContent + glue], { type: "text/javascript" })));
+        dWorker.onmessage = (e) => {
+          const cb = dwCbs.get(e.data.id);
+          dwCbs.delete(e.data.id);
+          if (e.data.error) { console.warn("worker curve error:", e.data.error); cb && cb(null); }
+          else cb && cb(e.data.pts);
+        };
+        dWorker.onerror = (e) => {
+          console.warn("curve worker failed — チャンク計算へフォールバック", e.message || "");
+          dwFailed = true;
+          for (const cb of dwCbs.values()) cb(null);
+          dwCbs.clear();
+          try { dWorker.terminate(); } catch {}
+          dWorker = null;
+        };
+      }
+      const id = ++dwSeq;
+      dwCbs.set(id, onDone);
+      dWorker.postMessage({
+        id, matchId: match.meta.id,
+        scen: sc.actual ? null : globalThis.RPDX.scenlib.serialize(sc),
+        withOutcome: !!sc.outcome,
+        opts: { step: opts.step || 8, includeGK: !!opts.includeGK },
+        geomOnly: D.isGeomOnly(),
+      });
+      return true;
+    } catch (e) {
+      console.warn("worker unavailable:", e && e.message);
+      dwFailed = true;
+      return false;
+    }
+  };
+
   const ensureCurveFor = (sc, opts, cb) => {
     const key = curveKeyOf(sc, opts);
     if (curveStore.has(key)) { cb && cb(); return; }
-    D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
+    const finish = (pts) => {
+      curveStore.set(key, pts);
+      $("#curveStatus").textContent = "";
+      cb && cb();
+    };
+    const fallback = () => D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
       (p) => { $("#curveStatus").textContent = `D²曲線 ${Math.round(p * 100)}%`; },
-      (pts) => {
-        curveStore.set(key, pts);
-        $("#curveStatus").textContent = "";
-        cb && cb();
-      });
+      finish);
+    $("#curveStatus").textContent = "D²曲線 計算中…";
+    // 無応答フォールバック: Worker が2.5秒応答しなければチャンク計算へ切替
+    //（ヘッドレス仮想時間や環境制限で Worker が進まないケースの保険。
+    //  二重完了は done ガードで抑止 — 結果は決定論なのでどちらでも同一値）
+    let done = false;
+    const once = (fn) => (arg) => { if (done) return; done = true; fn(arg); };
+    const finishOnce = once(finish);
+    const fallbackOnce = once(fallback);
+    const sent = workerCurve(App.match, sc, { step: 8, includeGK: opts.includeGK },
+      (pts) => { if (pts) finishOnce(pts); else fallbackOnce(); });
+    if (!sent) { fallbackOnce(); return; }
+    setTimeout(() => fallbackOnce(), 2500);
   };
   const actualCurve = () => curveStore.get(curveKeyOf(E.actualScenario(App.match), { includeGK: App.options.includeGK }));
   const activeCurve = () => curveStore.get(curveKeyOf(activeScenario(), { includeGK: App.options.includeGK }));
@@ -140,6 +213,29 @@
   /* ------------------------------ 起動 ------------------------------ */
   // URLパラメータ: ?t=秒 &cam=broadcast|tactical|goal|pitch|fly &play=0|1 &speed=n
   const urlq = new URLSearchParams(location.search);
+
+  /* ------ 国際化 i18n v1（#42・静的クロームのみ・?lang=en で英語）------
+     動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
+  const I18N = {
+    en: {
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
+      "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
+      "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
+      "算定モジュール": "Modules", "ゾーニング視点": "Zoning View", "脅威寄与 TOP": "Top Threats", "危険度": "Index",
+    },
+  };
+  const LANG = urlq.get("lang") === "en" ? "en" : "ja";
+  const t = (ja) => (LANG !== "ja" && I18N[LANG] && I18N[LANG][ja]) || ja;
+  const applyI18n = () => {
+    if (LANG === "ja") return;
+    document.documentElement.lang = LANG;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  };
+
   let renderer, tlCtx;
   const boot = () => {
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
@@ -151,6 +247,7 @@
     window.addEventListener("resize", fit);
     fit();
     buildStatic();
+    applyI18n();
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
@@ -160,6 +257,14 @@
     if (urlq.has("sel")) {
       const [tm, no] = urlq.get("sel").split(":");
       if (App.match.teams[tm]) selectPlayer(tm, +no);
+    }
+    if (urlq.has("scenario")) {
+      // #34: 直列化シナリオの深いリンク（scenlib 形式 JSON）— 検証NG時は無視
+      try {
+        const { scenario, validation } = globalThis.RPDX.scenlib.parse(App.match, decodeURIComponent(urlq.get("scenario")));
+        if (validation.ok) refreshScenario(scenario);
+        else console.warn("scenario param invalid:", validation.errors);
+      } catch (e) { console.warn("scenario param parse error", e); }
     }
     if (urlq.get("demo") === "sim") {
       // 検証/デモ用: 66' 鎌田→久保 のwhat-ifシナリオを自動生成
@@ -181,7 +286,7 @@
       setTimeout(() => {
         $("#loading").style.display = "none";
         App.playing = urlq.get("play") !== "0";
-        $("#btnPlay").textContent = App.playing ? "❚❚ 停止" : "▶ 再生";
+        $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
     // 事前計算の進捗をローディングにも反映
@@ -989,6 +1094,26 @@
     g.fillStyle = "rgba(148,162,189,.9)";
     g.fillText("HT", htX + 3, 12);
 
+    // フェーズ帯（#32）: 上端3pxに局面を色分け（保持チーム色の濃淡・set-piece=白系）
+    if (globalThis.RPDX.tactics) {
+      const strip = globalThis.RPDX.tactics.phaseStrip(App.match, sc0, Math.min(300, W >> 1));
+      const PHC = {
+        "set-piece": "rgba(230,236,248,.75)", "transition": "rgba(255,160,64,.8)",
+        "build-up": "rgba(110,130,170,.55)", "progression": "rgba(120,170,255,.6)",
+        "finishing": "rgba(255,90,90,.8)",
+      };
+      const teamTint = (team) => team === App.match.possessionPlus ? 1 : 0.55;
+      const x0 = X(range.t0), x1 = X(range.t1);
+      const bw = (x1 - x0) / strip.length;
+      for (let i = 0; i < strip.length; i++) {
+        const s = strip[i];
+        g.globalAlpha = s.team ? teamTint(s.team) : 0.4;
+        g.fillStyle = PHC[s.phase] || "rgba(120,120,120,.4)";
+        g.fillRect(x0 + i * bw, 2, Math.ceil(bw), 3);
+      }
+      g.globalAlpha = 1;
+    }
+
     // 閾値ガイド
     for (const [v, lbl] of [[D.WARN_AT, "WARN 45"], [D.CRIT_AT, "CRIT 75"]]) {
       g.strokeStyle = "rgba(196,212,240,.2)"; g.setLineDash([4, 4]);
@@ -1109,7 +1234,7 @@
   buildSpeed();
   const setPlaying = (p) => {
     App.playing = p;
-    $("#btnPlay").textContent = p ? "❚❚ 停止" : "▶ 再生";
+    $("#btnPlay").textContent = p ? "❚❚ " + t("停止") : "▶ " + t("再生");
   };
   $("#btnPlay").onclick = () => setPlaying(!App.playing);
   const evTimes = () => E.eventsOf(App.match, activeScenario())
@@ -1195,6 +1320,38 @@
           const cent = T.central.slice(0, 3).map(c => `${c.no} ${nameOf(c.no)} ${(c.c * 100).toFixed(0)}%`).join(" · ");
           return `<div style="margin:4px 0 8px"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b>（推定パス${T.total}本）<br>${pairs}<br><span style="color:var(--muted);font-size:11px">次数中心性: ${cent}</span></div>`;
         }).join("");
+      })()}
+      <h4>相手分析体制の脆弱性プロファイル（モデル仮定 — 実在体制への断定ではない）</h4>
+      ${(() => {
+        const O = globalThis.RPDX.opponent;
+        const declared = teamOrder().map(k => [k, O.setupOf(m, k)]).filter(([, s]) => s);
+        const row = (label, p, setup) => {
+          const sat = O.htSaturation(m, E.actualScenario(m), setup);   // #60: 前半の処理飽和
+          return `<tr><td class="k">${label}</td>` +
+          `<td>収集${p.budget.collect.toFixed(1)}分 / 会議${p.budget.meeting.toFixed(1)}分 / <b>共有 実質${sat.shareEff.toFixed(1)}分</b></td>` +
+          `<td title="前半の情報フロー圧/処理能力">${Math.round(sat.meanSat * 100)}%</td>` +
+          ["delay", "sway", "sysDep", "overall"].map(x => `<td title="${p.labels[x]}">${O.stars(p.scores[x])}</td>`).join("") + "</tr>";
+        };
+        const head = `<tr><td class="k"></td><td>HT15分の配分</td><td>飽和</td><td>遅延</td><td>ブレ</td><td>依存</td><td><b>総合</b></td></tr>`;
+        const body = declared.length
+          ? declared.map(([k, s]) => row(m.teams[k].name + "（宣言値）", O.profile(s), s)).join("")
+          : Object.values(O.ARCHETYPES).map(a2 => row(a2.label, O.profile(a2), a2)).join("");
+        return `<table class="stat-table" style="font-size:11px">${head}${body}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。飽和=前半の情報フロー圧IFL(t)×体制の生成率÷処理能力の平均（#60）。</div>`;
+      })()}
+      <h4>実効フォーメーション & 形（モデル推定・現在時刻のスナップショット）</h4>
+      ${(() => {
+        const T2 = globalThis.RPDX.tactics, sc = E.actualScenario(m), t = App.t;
+        const vor = T2.voronoiShare(m, sc, t);
+        const row = (k) => {
+          const s = T2.shapeMetrics(m, sc, k, t);
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>` +
+            `<td>${s.effShape}</td><td>${s.width.toFixed(0)}</td><td>${s.depth.toFixed(0)}</td>` +
+            `<td>${Math.round(s.area)}</td><td>${s.lineGap.toFixed(1)}</td><td>${Math.round(vor[k] * 100)}%</td></tr>`;
+        };
+        const head = `<tr><td class="k"></td><td>実効ライン</td><td>幅m</td><td>縦m</td><td>凸包m²</td><td>ライン間m</td><td>占有</td></tr>`;
+        return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
       })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>

@@ -39,7 +39,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button, select, input, textarea { font-family: inherit; color: inherit; }
-:focus-visible { outline: 1.5px solid var(--gold); outline-offset: 2px; }
+/* #42 a11y: キーボード操作時のみ現れる高コントラストの可視フォーカス */
+:focus-visible { outline: 2px solid #7fb2ff; outline-offset: 2px; border-radius: 3px; }
+:focus:not(:focus-visible) { outline: none; }
 ::selection { background: rgba(200,169,110,.3); }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: var(--mono); }
@@ -439,7 +441,7 @@ body.showkeys #keyhelp { display: block; }
 
 </style>
 
-<canvas id="gl"></canvas>
+<canvas id="gl" role="img" aria-label="3D 戦術ピッチ — 選手・ボール・危険度場の可視化（3D tactical pitch: players, ball and danger field）"></canvas>
 
 <div id="loading">
   <div class="logo">RPD<span class="x">–X</span></div>
@@ -461,91 +463,91 @@ body.showkeys #keyhelp { display: block; }
   </div>
   <div class="team jpn"><span id="nameB">JPN</span><canvas class="flag" id="flagB" width="52" height="36"></canvas></div>
 </div>
-<div id="statusband" class="panel"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
+<div id="statusband" class="panel" role="status" aria-live="polite"><span id="sbText"></span><span class="carrier" id="carrierChip"></span><span class="chip est" id="estChip" title="選手座標・動き・チェーンはモデル推定（記録イベントの時刻・記録者は公式どおり）">座標・動き=推定</span></div>
 
 <!-- ビューバー -->
-<div id="viewbar" class="panel">
-  <button class="btn cam on" data-cam="broadcast">放送</button>
-  <button class="btn cam" data-cam="tactical">俯瞰</button>
-  <button class="btn cam" data-cam="goal">ゴール裏</button>
-  <button class="btn cam" data-cam="pitch">追従</button>
-  <button class="btn cam" data-cam="fly">自由飛行</button>
+<div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
+  <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
+  <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
+  <button class="btn cam" data-cam="goal" data-i18n="ゴール裏" aria-label="ゴール裏カメラ（goal-line camera）">ゴール裏</button>
+  <button class="btn cam" data-cam="pitch" data-i18n="追従" aria-label="選手追従カメラ（follow camera）">追従</button>
+  <button class="btn cam" data-cam="fly" data-i18n="自由飛行" aria-label="自由飛行カメラ（free-fly camera）">自由飛行</button>
   <span class="vsep"></span>
-  <button class="btn tog on" id="togField">危険場 <b id="fieldModeLbl">粒子</b></button>
-  <button class="btn tog on" id="togZones">ゾーン</button>
-  <button class="btn tog on" id="togTrail">軌跡</button>
-  <button class="btn tog on" id="togLabel">番号</button>
-  <button class="btn tog on" id="togSpeed">速度</button>
-  <button class="btn tog on" id="togPsy">PSY</button>
+  <button class="btn tog on" id="togField" aria-label="危険度場の表示切替（toggle danger field）"><span data-i18n="危険場">危険場</span> <b id="fieldModeLbl">粒子</b></button>
+  <button class="btn tog on" id="togZones" data-i18n="ゾーン" aria-label="ゾーン表示切替（toggle zones）">ゾーン</button>
+  <button class="btn tog on" id="togTrail" data-i18n="軌跡" aria-label="軌跡表示切替（toggle trails）">軌跡</button>
+  <button class="btn tog on" id="togLabel" data-i18n="番号" aria-label="背番号表示切替（toggle numbers）">番号</button>
+  <button class="btn tog on" id="togSpeed" data-i18n="速度" aria-label="速度表示切替（toggle speed）">速度</button>
+  <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
   <span class="vsep"></span>
-  <select id="matchSel" class="sel" title="試合を切替"></select>
-  <button class="btn" id="btnInfo">試合情報</button>
-  <button class="btn" id="btnModel">モデル</button>
-  <button class="btn" id="btnCustom">カスタム</button>
+  <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
+  <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
+  <button class="btn" id="btnModel" data-i18n="モデル" aria-label="モデル解説を開く（open model explainer）">モデル</button>
+  <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
 
 <!-- 左ドック: 選手・配置・交代・結果 -->
-<button class="dock-toggle" id="toggleL">≡</button>
+<button class="dock-toggle" id="toggleL" aria-label="左パネルの開閉（toggle left panel）">≡</button>
 <div class="dock" id="dockL">
   <section class="panel">
-    <h3>選手 <span class="eyebrow">SQUADS</span></h3>
-    <div class="roster-tabs" id="rosterTabs"></div>
+    <h3><span data-i18n="選手">選手</span> <span class="eyebrow">SQUADS</span></h3>
+    <div class="roster-tabs" id="rosterTabs" role="tablist" aria-label="チーム選択（select team）"></div>
     <div class="plist" id="plist"></div>
   </section>
   <section class="panel" id="outcomePanel" style="display:none">
-    <h3>シナリオ結果 <span class="eyebrow">OUTCOME</span></h3>
+    <h3><span data-i18n="シナリオ結果">シナリオ結果</span> <span class="eyebrow">OUTCOME</span></h3>
     <div id="outcomeBody"></div>
   </section>
   <section class="panel" id="formationEditor">
-    <h3>配置 <span class="eyebrow">FORMATION</span></h3>
+    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span></h3>
     <div class="row">
-      <select id="fmShape" class="sel"></select>
-      <span class="eyebrow">分</span>
-      <input type="number" id="fmMin" min="0" max="105" value="0" class="num numin">
-      <button class="btn primary" id="fmApply">陣形を適用</button>
+      <select id="fmShape" class="sel" aria-label="フォーメーションを選択（select formation）"></select>
+      <span class="eyebrow" data-i18n="分">分</span>
+      <input type="number" id="fmMin" min="0" max="105" value="0" class="num numin" aria-label="適用する分（minute to apply）">
+      <button class="btn primary" id="fmApply" data-i18n="陣形を適用">陣形を適用</button>
     </div>
-    <canvas id="fmPitch" width="292" height="234"></canvas>
+    <canvas id="fmPitch" width="292" height="234" role="img" aria-label="配置エディタ（formation editor pitch）"></canvas>
     <div class="hint" id="fmHint">選手をドラッグ = 配置の微調整 · クリック2回 = 入替 · 選択中にベンチ選手クリック = 先発差替</div>
     <div id="fmPhases"></div>
     <div class="row">
-      <button class="btn" id="fmClearTweaks">微調整を解除</button>
+      <button class="btn" id="fmClearTweaks" data-i18n="微調整を解除">微調整を解除</button>
       <button class="btn" id="fmReset">このチームの布陣を実試合に戻す</button>
     </div>
   </section>
   <section class="panel" id="subBuilder">
-    <h3>交代 <span class="eyebrow">WHAT-IF</span></h3>
+    <h3><span data-i18n="交代">交代</span> <span class="eyebrow">WHAT-IF</span></h3>
     <div class="scenario-chips" id="scenarioChips"></div>
     <div class="row">
       <div class="slot out" id="slotOut">OUT — ピッチ上の選手をクリック</div>
       <div class="slot in" id="slotIn">IN — ベンチの選手をクリック</div>
     </div>
     <div class="row">
-      <span class="eyebrow">分</span>
-      <input type="number" id="subMin" min="1" max="105" value="60" class="num numin">
-      <button class="btn" id="subNow">現在</button>
-      <button class="btn primary" id="subApply">交代を追加</button>
-      <button class="btn" id="subClear">クリア</button>
+      <span class="eyebrow" data-i18n="分">分</span>
+      <input type="number" id="subMin" min="1" max="105" value="60" class="num numin" aria-label="交代の分（substitution minute）">
+      <button class="btn" id="subNow" data-i18n="現在">現在</button>
+      <button class="btn primary" id="subApply" data-i18n="交代を追加">交代を追加</button>
+      <button class="btn" id="subClear" data-i18n="クリア">クリア</button>
     </div>
     <div id="subErrors"></div>
     <div id="subList"></div>
     <div class="row" style="margin-top:9px">
       <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>
-      <button class="btn danger" id="btnReset">実試合に戻す</button>
+      <button class="btn danger" id="btnReset" data-i18n="実試合に戻す">実試合に戻す</button>
     </div>
     <div id="suggestions"></div>
   </section>
 </div>
 
 <!-- 右ドック: D²-Field -->
-<button class="dock-toggle" id="toggleR">◫</button>
+<button class="dock-toggle" id="toggleR" aria-label="右パネルの開閉（toggle right panel）">◫</button>
 <div class="dock" id="dockR">
   <section class="panel">
-    <h3>D²-Field v2 危険度 <span class="eyebrow">KIKEN INDEX</span></h3>
+    <h3>D²-Field v2 <span data-i18n="危険度">危険度</span> <span class="eyebrow">KIKEN INDEX</span></h3>
     <div id="kikenTiles"></div>
     <div class="legend-line" id="fieldLegend"></div>
   </section>
   <section class="panel">
-    <h3>算定モジュール <span class="eyebrow">D × N × T</span></h3>
+    <h3><span data-i18n="算定モジュール">算定モジュール</span> <span class="eyebrow">D × N × T</span></h3>
     <div id="modBars"></div>
     <div class="gk-toggle" style="margin-top:10px">
       <button class="btn on" id="gk20">20人 — チャンス創出</button>
@@ -560,25 +562,25 @@ body.showkeys #keyhelp { display: block; }
   <section class="panel">
     <h3>PSY 心理生理レイヤー <span class="eyebrow">HEURISTIC · 非予測</span></h3>
     <div id="psyMomo"></div>
-    <canvas id="psySpark" width="292" height="54"></canvas>
+    <canvas id="psySpark" width="292" height="54" role="img" aria-label="モメンタム推移（momentum sparkline）"></canvas>
     <div id="psyTeams"></div>
     <div id="psyDD" class="hint" style="margin-top:8px"></div>
     <div class="hint" id="psyHint"></div>
   </section>
   <section class="panel">
-    <h3>ゾーニング視点 <span class="eyebrow">PERSPECTIVE</span></h3>
+    <h3><span data-i18n="ゾーニング視点">ゾーニング視点</span> <span class="eyebrow">PERSPECTIVE</span></h3>
     <div class="zone-toggle" id="zoneViewBtns"></div>
     <div class="hint">粒子は各選手の支配空間。白い継ぎ目が両軍ゾーンの境界線。選手を選択するとその選手の支配域が強調されます。</div>
   </section>
   <section class="panel">
-    <h3>脅威寄与 TOP <span class="eyebrow">CONTRIBUTORS</span></h3>
+    <h3><span data-i18n="脅威寄与 TOP">脅威寄与 TOP</span> <span class="eyebrow">CONTRIBUTORS</span></h3>
     <div id="contribList"></div>
   </section>
 </div>
 
 <!-- インスペクタ -->
-<div id="inspector" class="panel">
-  <button class="close" id="inspClose">✕</button>
+<div id="inspector" class="panel" role="dialog" aria-label="選手インスペクタ（player inspector）">
+  <button class="close" id="inspClose" aria-label="インスペクタを閉じる（close inspector）">✕</button>
   <div class="head">
     <div class="bignum" id="inspNum">10</div>
     <div>
@@ -607,15 +609,15 @@ body.showkeys #keyhelp { display: block; }
 <!-- タイムライン -->
 <div id="timelineWrap" class="panel">
   <div id="tlHead">
-    <button class="btn" id="btnPlay">▶ 再生</button>
-    <div class="speedgrp" id="speedGrp"></div>
-    <button class="btn" id="btnPrevEv">|◀ 前</button>
-    <button class="btn" id="btnNextEv">▶| 次</button>
+    <button class="btn" id="btnPlay" aria-label="再生 / 停止（play or pause）">▶ 再生</button>
+    <div class="speedgrp" id="speedGrp" role="group" aria-label="再生速度（playback speed）"></div>
+    <button class="btn" id="btnPrevEv" aria-label="前のイベントへ（previous event）">|◀ <span data-i18n="前">前</span></button>
+    <button class="btn" id="btnNextEv" aria-label="次のイベントへ（next event）">▶| <span data-i18n="次">次</span></button>
     <span class="eyebrow" id="curveStatus"></span>
     <span class="spacer"></span>
     <span class="legend-line" id="tlLegend"></span>
   </div>
-  <canvas id="tlCanvas"></canvas>
+  <canvas id="tlCanvas" role="img" aria-label="試合タイムライン — 危険度とフェーズ（match timeline: danger and phases）"></canvas>
 </div>
 <div id="tlTip"></div>
 <div id="toasts"></div>
@@ -626,28 +628,28 @@ body.showkeys #keyhelp { display: block; }
 
 <!-- モーダル: 試合情報 -->
 <div class="modal-back" id="modalInfo">
-  <div class="modal panel">
-    <div class="mhead">試合情報 — 検証済み実データ<button class="close" data-close="modalInfo">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="試合情報（match info）">
+    <div class="mhead">試合情報 — 検証済み実データ<button class="close" data-close="modalInfo" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody" id="infoBody"></div>
   </div>
 </div>
 <!-- モーダル: モデル -->
 <div class="modal-back" id="modalModel">
-  <div class="modal panel">
-    <div class="mhead">D²-Field v2 — 距離 × 人数 × 時間<button class="close" data-close="modalModel">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="モデル解説（model explainer）">
+    <div class="mhead">D²-Field v2 — 距離 × 人数 × 時間<button class="close" data-close="modalModel" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody" id="modelBody"></div>
   </div>
 </div>
 <!-- モーダル: カスタム試合 -->
 <div class="modal-back" id="modalCustom">
-  <div class="modal panel">
-    <div class="mhead">カスタム試合 — 選手情報だけで解析<button class="close" data-close="modalCustom">✕</button></div>
+  <div class="modal panel" role="dialog" aria-label="カスタム試合（custom match）">
+    <div class="mhead">カスタム試合 — 選手情報だけで解析<button class="close" data-close="modalCustom" aria-label="閉じる（close）">✕</button></div>
     <div class="mbody">
       <p style="color:var(--muted);margin-bottom:8px">
         選手情報（背番号・氏名・ポジション、任意で能力値・XI・イベント）から決定論的に試合を生成します。
         過去データがなくてもフォーメーション・危険度・交代シミュレーションが完全動作します。
       </p>
-      <textarea class="jsonbox" id="customJson" spellcheck="false"></textarea>
+      <textarea class="jsonbox" id="customJson" spellcheck="false" aria-label="カスタム試合 JSON（custom match JSON）"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn primary" id="customLoad">この試合を読み込む</button>
         <button class="btn" id="customTemplate">テンプレートを再挿入</button>
@@ -658,20 +660,7 @@ body.showkeys #keyhelp { display: block; }
   </div>
 </div>
 
-<script>
-
-/* 実行時エラーの可視化（ヘッドレス検証用） */
-window.addEventListener("error", (e) => {
-  document.title = "RPDX-ERROR";
-  let d = document.getElementById("fatal");
-  if (!d) {
-    d = document.createElement("div");
-    d.id = "fatal";
-    d.style.cssText = "position:fixed;z-index:9999;left:8px;top:8px;right:8px;background:#3a0d10;color:#ffb4ac;font:11px monospace;padding:10px;border-radius:8px;white-space:pre-wrap";
-    document.body && document.body.appendChild(d);
-  }
-  d.textContent += (e.message || e.error) + " @ " + (e.filename || "") + ":" + e.lineno + "\n";
-});
+<script id="rpdx-core">
 
 /* ===== src/noise.mjs ===== */
 /* =========================================================================
@@ -1618,9 +1607,41 @@ window.addEventListener("error", (e) => {
     }
     return h || 1;
   };
-  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる
-  E.scenarioKey = (scenario) =>
-    `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}`;
+  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる。
+  // opponentHt（#61 HT修正ハンディ）は「表示・ブレンドの変調」であり世界シード
+  //（scenarioHash→チェーン）には入れない。ただし位置・危険度が変わるため
+  // キャッシュ・キーには含めて衝突を防ぐ。
+  E.scenarioKey = (scenario) => {
+    const ht = scenario && scenario.opponentHt
+      ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
+      : "";
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+  };
+
+  // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
+  // 指定チームの「HT近傍のフェーズ切替」を、体制脆弱性に応じて遅延・鈍化させる。
+  // 飽和(backlog)は actual 世界の前半から算出（what-if 自身を参照しない — 再帰回避）。
+  const htCorrCache = new Map();
+  E.htCorrectionOf = (match, scenario, team) => {
+    const o = scenario && scenario.opponentHt;
+    if (!o || o.team !== team || !R.opponent) return null;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + team;
+    const hit = htCorrCache.get(key);
+    if (hit !== undefined) return hit;
+    const base = o.archetype && R.opponent.ARCHETYPES[o.archetype] ? R.opponent.ARCHETYPES[o.archetype] : {};
+    const setup = { ...base, ...o };
+    const prof = R.opponent.profile(setup);
+    const sat = R.opponent.htSaturation(match, E.actualScenario(match), setup);
+    const delayMin = clamp(((prof.scores.overall - 1) / 4) * 7 + sat.backlog * 1.5, 0, 10);
+    const out = {
+      delaySec: delayMin * 60,
+      blendSec: 45 * (1 + ((prof.scores.sway - 1) / 4) * 2),   // 45〜135s（浸透の鈍さ）
+      profile: prof,
+    };
+    if (htCorrCache.size > 64) htCorrCache.clear();
+    htCorrCache.set(key, out);
+    return out;
+  };
 
   // 布陣フェーズ（シナリオ上書き優先）
   E.phasesOf = (match, scenario, team) =>
@@ -1742,7 +1763,33 @@ window.addEventListener("error", (e) => {
   const P_OUT = 0.052;
   const chainCache = new Map();
 
+  // 基礎位置のメモ（#39）: separationAt / pressRankAt / defensiveLineAt / 本体が
+  // 同一 (scenario, t) で同じ選手の基礎位置を重複評価する（実測で ~38回/係数）。
+  // 純関数なのでメモは値を一切変えない（ゴールデンマスターがビット同一を保証）。
+  // 注意: lineComputing 中はライン同期/ランが無効化された「別の値」になるため
+  // キーに含めて分離する（混ぜると再帰ガードが壊れる）。
+  const basePosCache = new Map();
+  // シナリオ→短トークン（ホットパスで scenarioHash の再計算を避ける）
+  const scenTokMap = new WeakMap();
+  let scenTokSeq = 0;
+  const scenTok = (sc) => {
+    let tok = scenTokMap.get(sc);
+    if (tok === undefined) { tok = ++scenTokSeq; scenTokMap.set(sc, tok); }
+    return tok;
+  };
   const basePosOf = (match, scenario, team, no, slot, t) => {
+    // chainBuilding 中はラン(#30)が無効化された「別の値」— メモを迂回して混入を防ぐ
+    // （チェーン構築はシナリオ毎に1回きり・キャッシュ済みなのでメモ価値も低い）
+    if (chainBuilding) {
+      const half0 = E.halfOf(match, t);
+      return basePlayerPos(match, scenario, team, no, slot, t, {
+        half: half0, dir: match.dir[team][half0 === 1 ? "h1" : "h2"],
+        P: E.possessionAt(match, t), ballS: E.ballSlowAt(match, t),
+      });
+    }
+    const key = scenTok(scenario) + "|" + team + no + "|" + slot.id + "|" + t + "|" + (lineComputing ? 1 : 0);
+    const hit = basePosCache.get(key);
+    if (hit !== undefined) return hit;
     const half = E.halfOf(match, t);
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
     const bctx = {
@@ -1750,7 +1797,10 @@ window.addEventListener("error", (e) => {
       P: E.possessionAt(match, t),
       ballS: E.ballSlowAt(match, t),
     };
-    return basePlayerPos(match, scenario, team, no, slot, t, bctx);
+    const out = basePlayerPos(match, scenario, team, no, slot, t, bctx);
+    if (basePosCache.size > 120000) basePosCache.clear();
+    basePosCache.set(key, out);
+    return out;
   };
 
   /* ============ 協調ラインコントロール & オフサイド（#27・純関数・ガード付き） ============
@@ -2828,7 +2878,31 @@ window.addEventListener("error", (e) => {
       const d = disp.get(k) || { dx: 0, dy: 0 };
       d.dx += dx; d.dy += dy; disp.set(k, d);
     };
-    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+    // 空間ハッシュ（#39）: セル4m（> SEP_R）に登録し、近傍9セルの候補ペアだけ評価。
+    // 候補は (i,j) 昇順で処理 = 従来の全ペア走査と同じ加算順序（ビット同一）
+    const CELL = 4;
+    const grid = new Map();
+    for (let i = 0; i < pts.length; i++) {
+      const ck = ((pts[i].x / CELL) | 0) + ":" + ((pts[i].y / CELL) | 0);
+      (grid.get(ck) || grid.set(ck, []).get(ck)).push(i);
+    }
+    const candidates = [];
+    for (const [ck, idxs] of grid) {
+      const [cx, cy] = ck.split(":").map(Number);
+      for (const i of idxs) {
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+          const nb = grid.get((cx + ox) + ":" + (cy + oy));
+          if (!nb) continue;
+          for (const j of nb) if (j > i) candidates.push(i * 64 + j);
+        }
+      }
+    }
+    candidates.sort((a, b) => a - b);
+    let prev = -1;
+    for (const c of candidates) {
+      if (c === prev) continue;   // 重複除去（同一ペアが複数セル走査で出得る）
+      prev = c;
+      const i = (c / 64) | 0, j = c % 64;
       const a = pts[i], b = pts[j];
       let dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.hypot(dx, dy);
@@ -2876,13 +2950,18 @@ window.addEventListener("error", (e) => {
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
-      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
+      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド。
+      // #61: opponentHt 指定チームのHT近傍切替は delay 秒ホールド後、blendSec かけて浸透
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
-      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < 45) {
+      const htMod = E.htCorrectionOf(match, scenario, team);
+      const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
+      const phDelay = htNear ? htMod.delaySec : 0;
+      const phDur = htNear ? htMod.blendSec : 45;
+      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur) {
         rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
         prevShape = F.SHAPES[rosterPrev.shape];
-        blendU = N.smooth(clamp(dtPhase / 45));
+        blendU = N.smooth(clamp((dtPhase - phDelay) / phDur));
       }
       // 現在ピッチ上の11人
       for (const slot of shape) {
@@ -3052,7 +3131,7 @@ window.addEventListener("error", (e) => {
   E.clearCaches = () => {
     distCache.clear(); chainCache.clear(); trackCache.clear();
     restartCache.clear(); celeCache.clear(); panchorCache.clear(); pnetCache.clear();
-    rankCache.clear(); lineCache.clear(); sepCache.clear();
+    rankCache.clear(); lineCache.clear(); sepCache.clear(); basePosCache.clear();
     stateMemo = null;
   };
 })();
@@ -4840,6 +4919,730 @@ window.addEventListener("error", (e) => {
 })();
 
 
+/* ===== src/tactics.mjs ===== */
+/* =========================================================================
+   RPDX.tactics — 戦術フェーズ自動分類（Issue #32 v1・読み取り専用）
+   ---------------------------------------------------------------------------
+   合成状態から各時刻の「局面（フェーズ）」を決定論分類する解釈レイヤ。
+   ヒューリスティックの決定木であり、実測ラベルの学習ではない（非予測・明示規律）。
+   位置・イベント・危険度・結果には一切影響しない。
+
+   タクソノミ（保持チーム視点 + 状況）:
+     set-piece   … リスタート（スローイン/コーナー/ゴールキック/キックオフ）のピン〜再開
+     transition  … 奪取直後（ターンオーバーから4秒・攻守が切り替わる過渡）
+     build-up    … 保持チームが自陣~40%でボールを動かす
+     progression … 中盤の前進（40〜75%）
+     finishing   … 敵陣最終域（>75% またはゴール25m以内）
+   press フラグ … 相手の協調プレスが点灯中（#29 pressTriggerAt・build-up等に重なる）
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const T = (R.tactics = {});
+  const E = R.engine;
+  const HALF_W = 52.5;
+
+  T.PHASES = ["set-piece", "transition", "build-up", "progression", "finishing"];
+
+  // 各時刻のフェーズ: { phase, team, press } / プレー外は null を返さず set-piece に含める
+  T.phaseAt = (match, scenario, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const c = E.carrierAt(match, scenario, t);
+    if (!c) return { phase: "transition", team: null, press: false };
+    const trig = E.pressTriggerAt(match, scenario, t);
+    const press = !!(trig && trig.level > 0.5);
+    // 1) セットピース: リスタート区間（運搬〜ピン〜解放直後）
+    if (c.seg && c.seg.restart && t <= c.seg.tf + (c.seg.rdelay || 0) + 1.2)
+      return { phase: "set-piece", team: c.team, press: false };
+    // 2) トランジション: 奪取（相手からのターンオーバー）後4秒
+    if (c.seg && c.seg.from && c.seg.from.team !== c.team && t - c.seg.t0 < 4)
+      return { phase: "transition", team: c.team, press };
+    // 3) 保持フェーズ: ボール前進度で3分割
+    const half = E.halfOf(match, t);
+    const dir = match.dir[c.team][half === 1 ? "h1" : "h2"];
+    const bs = E.ballSlowAt(match, t);
+    const prog = (dir * bs.x + HALF_W) / 105;            // 0=自ゴール … 1=敵ゴール
+    const dGoal = Math.hypot(dir * HALF_W - bs.x, bs.y); // 敵ゴールまで
+    const phase = (prog > 0.75 || dGoal < 25) ? "finishing"
+      : prog < 0.40 ? "build-up" : "progression";
+    return { phase, team: c.team, press };
+  };
+
+  // フェーズ別の時間集計 [秒]（チーム別・2s格子・シナリオ毎にキャッシュ）
+  const shareCache = new Map();
+  T.clearCaches = () => shareCache.clear();
+  T.phaseShares = (match, scenario) => {
+    scenario = scenario || E.actualScenario(match);
+    const key = match.meta.id + "|" + E.scenarioKey(scenario);
+    const hit = shareCache.get(key);
+    if (hit) return hit;
+    const range = E.playedRange(match);
+    const out = {};
+    for (const team of E.teamKeys(match)) {
+      out[team] = {}; for (const ph of T.PHASES) out[team][ph] = 0;
+      out[team].press = 0;
+    }
+    const STEP = 2;
+    for (let t = range.t0 + 2; t < range.t1; t += STEP) {
+      const p = T.phaseAt(match, scenario, t);
+      if (!p.team) continue;
+      out[p.team][p.phase] += STEP;
+      if (p.press) {
+        const opp = E.oppOf(match, p.team);
+        out[opp].press += STEP;                          // プレスは守備側の実績
+      }
+    }
+    if (shareCache.size > 16) shareCache.clear();
+    shareCache.set(key, out);
+    return out;
+  };
+
+  /* ---------------- 実効フォーメーション & 形メトリクス（Issue #33 v1） ----------------
+     宣言陣形ではなく「いま実際にどう並んでいるか」を中立に測る読み取りレイヤ。
+     width/depth/凸包面積(compactness)/重心/実効ライン構成/ライン間距離/Voronoi占有。 */
+
+  // 凸包（Andrew monotone chain・依存ゼロ）→ 面積 [m²]
+  const hullArea = (pts) => {
+    if (pts.length < 3) return 0;
+    const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const half = (arr) => {
+      const h = [];
+      for (const q of arr) {
+        while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+        h.push(q);
+      }
+      return h;
+    };
+    const hull = [...half(p).slice(0, -1), ...half(p.reverse()).slice(0, -1)];
+    let a = 0;
+    for (let i = 0; i < hull.length; i++) {
+      const q = hull[i], r = hull[(i + 1) % hull.length];
+      a += q.x * r.y - r.x * q.y;
+    }
+    return Math.abs(a) / 2;
+  };
+
+  // 実効ライン推定: 深さ順に並べ、最大2ギャップで3ラインへ分割（決定論）
+  const effLines = (depths) => {
+    const d = [...depths].sort((a, b) => a - b);
+    const gaps = [];
+    for (let i = 1; i < d.length; i++) gaps.push({ i, g: d[i] - d[i - 1] });
+    gaps.sort((a, b) => b.g - a.g || a.i - b.i);
+    const cuts = gaps.slice(0, 2).map(x => x.i).sort((a, b) => a - b);
+    const lines = [];
+    let prev = 0;
+    for (const c of [...cuts, d.length]) { lines.push(c - prev); prev = c; }
+    return lines;   // 守備側から [DF, MF, FW]
+  };
+
+  // 形メトリクス（1チーム・1時刻）
+  T.shapeMetrics = (match, scenario, team, t) => {
+    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
+    const half = st.half;
+    const dir = match.dir[team][half === 1 ? "h1" : "h2"];
+    const out = st.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK");
+    const depths = out.map(p => dir * p.x);
+    const ys = out.map(p => p.y);
+    const width = Math.max(...ys) - Math.min(...ys);
+    const depth = Math.max(...depths) - Math.min(...depths);
+    const lines = effLines(depths);
+    // ライン間距離: ライン重心間の平均ギャップ
+    const sorted = [...depths].sort((a, b) => a - b);
+    let idx = 0; const centers = [];
+    for (const n of lines) { centers.push(sorted.slice(idx, idx + n).reduce((a, b) => a + b, 0) / n); idx += n; }
+    const lineGap = centers.length > 1
+      ? (centers[centers.length - 1] - centers[0]) / (centers.length - 1) : 0;
+    return {
+      width, depth,
+      area: hullArea(out.map(p => ({ x: p.x, y: p.y }))),     // compactness（小=圧縮）
+      centroid: {
+        x: out.reduce((a, p) => a + p.x, 0) / out.length,
+        y: out.reduce((a, p) => a + p.y, 0) / out.length,
+      },
+      lines, effShape: lines.join("-"), lineGap,
+    };
+  };
+
+  // Voronoi占有（近似: 4m格子の最近接選手で塗り分け・GK除く・中立の空間占有%）
+  T.voronoiShare = (match, scenario, t) => {
+    const st = E.stateAt(match, scenario || E.actualScenario(match), t);
+    const ps = st.players.filter(p => p.onPitch && !p.entering && p.role !== "GK");
+    const count = {}; let total = 0;
+    for (const k of E.teamKeys(match)) count[k] = 0;
+    for (let x = -50; x <= 50; x += 4) for (let y = -32; y <= 32; y += 4) {
+      let best = null, bd = 1e9;
+      for (const p of ps) {
+        const d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      count[best.team]++; total++;
+    }
+    const share = {};
+    for (const k of E.teamKeys(match)) share[k] = count[k] / total;
+    return share;
+  };
+
+  // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]
+  T.phaseStrip = (match, scenario, n = 240) => {
+    scenario = scenario || E.actualScenario(match);
+    const range = E.playedRange(match);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = range.t0 + ((i + 0.5) / n) * (range.t1 - range.t0);
+      const p = T.phaseAt(match, scenario, t);
+      out.push({ u: i / n, phase: p.phase, team: p.team });
+    }
+    return out;
+  };
+})();
+
+
+/* ===== src/opponent.mjs ===== */
+/* =========================================================================
+   RPDX.opponent — 相手分析体制の脆弱性プロファイラ（Issue #59 v1・読み取り専用）
+   ---------------------------------------------------------------------------
+   「リアルタイムデータ解析 → ベンチ → 選手」というフィードバック体制そのものの
+   組織的・技術的脆弱性（意思決定遅延・情報ノイズ・指揮系統・認知キャパ）を、
+   宣言されたパラメータから決定論評価する。ピッチ解析（D²-Field）に対する
+   「ベンチ・組織側」の解釈レイヤ。
+
+   重要（責任ある表現）: これは実在の連盟・チームへの断定ではない。
+   体制パラメータは「宣言された仮定」であり、出力はそのモデル評価にすぎない。
+   マッチパックが teams[team].analysisSetup を宣言しない限り、実チームには
+   何も帰属しない（UIはアーキタイプ比較のみを表示する）。
+
+   パラメータ:
+     staff      … 分析関与人数（アナリスト+コーチ）
+     stages     … 情報がベンチへ届くまでの段数（収集→精査→合意→伝達…）
+     toolShare  … 自動化・ツール/リモート依存度 0..1
+     fieldShare … 現場の直感・属人依存度 0..1
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const OPP = (R.opponent = {});
+  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+
+  // 体制アーキタイプ（3類型のプリセット — 一般的な運用像の仮定値）
+  OPP.ARCHETYPES = {
+    mass:  { key: "mass",  label: "人海戦術型",     staff: 70, stages: 5, toolShare: 0.45, fieldShare: 0.35 },
+    tech:  { key: "tech",  label: "AI・テック特化型", staff: 18, stages: 3, toolShare: 0.85, fieldShare: 0.20 },
+    field: { key: "field", label: "現場主義型",     staff: 6,  stages: 2, toolShare: 0.15, fieldShare: 0.85 },
+  };
+
+  // HT15分の時間配分モデル [分]（収集/集計 → コーチ会議/合意 → 選手共有）
+  OPP.htBudget = (setup) => {
+    const s = { staff: 20, stages: 3, toolShare: 0.5, fieldShare: 0.5, ...setup };
+    // 収集・集計: 人数の対数で増える（クリップ量↑・選別コスト↑）。ツール化で短縮
+    const collect = clamp(1.2 + Math.log(s.staff / 6 + 1) * 2.1 * (1 - 0.35 * s.toolShare), 1, 8);
+    // 会議・合意: 段数に線形 + データ派×現場派の対立（両依存が拮抗するほど長い）
+    const conflict = 4 * s.toolShare * s.fieldShare;               // 0..1（0.5×0.5で最大1）
+    const meeting = clamp(0.9 * s.stages * (1 + 0.6 * conflict), 1, 9);
+    const share = clamp(15 - collect - meeting, 1, 12);            // 残りが選手共有
+    return { collect, meeting, share };
+  };
+
+  // 4軸脆弱性スコア（1..5・大きいほど脆弱）
+  OPP.profile = (setup) => {
+    const s = { staff: 20, stages: 3, toolShare: 0.5, fieldShare: 0.5, ...setup };
+    const b = OPP.htBudget(s);
+    const to5 = (u) => Math.round(clamp(u) * 40) / 10 + 1;         // 0..1 → 1.0..5.0
+    // 情報遅延: 収集+会議が15分を圧迫するほど危険
+    const delay = to5((b.collect + b.meeting - 3) / 9);
+    // 意思決定ブレ: 段数（伝言ゲーム）+ 派閥対立 + 属人依存（想定外に弱い）
+    const sway = to5(((s.stages - 2) / 5) * 0.45 + (4 * s.toolShare * s.fieldShare) * 0.3
+      + Math.max(0, s.fieldShare - 0.6) * 0.9);
+    // システム依存: ツール/リモート依存（障害・遅延・プランB不足）
+    const sysDep = to5(Math.pow(s.toolShare, 1.3));
+    // 総合HT修正力の脆弱性: 共有時間の不足 × ブレ の合成
+    const overall = to5(clamp((12 - b.share) / 10) * 0.55 + (sway - 1) / 4 * 0.45);
+    return {
+      params: s, budget: b,
+      scores: { delay, sway, sysDep, overall },
+      labels: { delay: "情報遅延リスク", sway: "意思決定ブレ度", sysDep: "システム依存度", overall: "HT修正力の脆弱性" },
+    };
+  };
+
+  // パック宣言の取得（未宣言なら null — 実チームへの帰属はパックの明示宣言のみ）
+  OPP.setupOf = (match, team) => {
+    const t = match.teams && match.teams[team];
+    if (!t || !t.analysisSetup) return null;
+    const a = t.analysisSetup;
+    const base = a.archetype && OPP.ARCHETYPES[a.archetype] ? OPP.ARCHETYPES[a.archetype] : {};
+    return { ...base, ...a };
+  };
+
+  // 星表示ユーティリティ（UI用）
+  OPP.stars = (v) => "★".repeat(Math.round(v)) + "☆".repeat(5 - Math.round(v));
+
+  /* ---------------- リアルタイム意思決定負荷（Issue #60 v1） ----------------
+     試合中にベンチの分析体制へかかる「情報フロー圧 IFL(t)」と、その体制の処理能力に
+     対する飽和度を決定論算出する。IFL は試合そのものの性質（イベント密度・危険度の
+     変動・局面切替の頻度）、処理能力は体制パラメータの関数。
+     大人数体制は「自ら生成する情報も多い」ため、同じ試合でも飽和しやすい。 */
+
+  const iflCache = new Map();
+  OPP.clearCaches = () => iflCache.clear();
+
+  // 試合固有の情報フロー圧（体制非依存の素点・0..~3）: 60秒窓
+  OPP.iflAt = (match, scenario, t) => {
+    const E = R.engine, T = R.tactics, D = R.danger;
+    scenario = scenario || E.actualScenario(match);
+    const key = match.meta.id + "|" + E.scenarioKey(scenario);
+    let base = iflCache.get(key);
+    if (!base) {
+      // 8秒格子で全編を前計算（危険度曲線は既存キャッシュを再利用）
+      const pts = D.curve(match, scenario, { step: 8, includeGK: false });
+      const keys = E.teamKeys(match);
+      const events = E.eventsOf(match, scenario).filter(e => e.type !== "kickoff");
+      const ts = [], vals = [];
+      let prevPhase = null;
+      for (let i = 0; i < pts.length; i++) {
+        const tt = pts[i].t;
+        // (1) イベント密度: ±60秒内の記録イベント数
+        const evd = events.reduce((a, e) => a + (Math.abs(e.t - tt) < 60 ? 1 : 0), 0);
+        // (2) 危険度の変動: 直近60秒の両チーム危険度の振れ幅（クリップ対象の多さ）
+        let hi = 0, lo = 100;
+        for (let j = Math.max(0, i - 7); j <= i; j++) {
+          for (const k of keys) { hi = Math.max(hi, pts[j].v[k]); lo = Math.min(lo, pts[j].v[k]); }
+        }
+        // (3) 局面切替: フェーズが直前サンプルから変わったか（切替率の proxy）
+        const ph = T.phaseAt(match, scenario, tt).phase;
+        const sw = prevPhase && ph !== prevPhase ? 1 : 0;
+        prevPhase = ph;
+        ts.push(tt);
+        vals.push(clamp(evd / 3, 0, 1) * 0.4 + clamp((hi - lo) / 55, 0, 1) * 0.4 + sw * 0.2);
+      }
+      base = { ts, vals };
+      if (iflCache.size > 12) iflCache.clear();
+      iflCache.set(key, base);
+    }
+    // 最近傍サンプル（8s格子・決定論）
+    let lo = 0, hi = base.ts.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (base.ts[mid] <= t) lo = mid; else hi = mid; }
+    return base.vals[Math.abs(base.ts[lo] - t) <= Math.abs(base.ts[hi] - t) ? lo : hi];
+  };
+
+  // 体制の処理能力: 段数がボトルネック・ツールで緩和（人数では増えない — 合意が律速）
+  OPP.capacityOf = (setup) => {
+    const s = { staff: 20, stages: 3, toolShare: 0.5, ...setup };
+    return clamp((2.2 - 0.25 * s.stages) * (1 + 0.5 * s.toolShare), 0.3, 3);
+  };
+  // 体制の情報生成率: 大人数ほど自らクリップ/レポートを量産する
+  OPP.genRateOf = (setup) => {
+    const s = { staff: 20, ...setup };
+    return 0.6 + 0.4 * Math.log(1 + s.staff / 8);
+  };
+
+  // 前半の飽和サマリ: {meanSat, backlog, shareEff} — HTへ持ち込む未処理情報量と
+  // 実質共有時間（予算の share から backlog ペナルティを引く）
+  OPP.htSaturation = (match, scenario, setup) => {
+    const E = R.engine;
+    scenario = scenario || E.actualScenario(match);
+    const gen = OPP.genRateOf(setup), cap = OPP.capacityOf(setup);
+    const htEnd = match.time.h1.end;
+    let sat = 0, over = 0, n = 0;
+    for (let t = 30; t < htEnd; t += 16) {
+      const load = OPP.iflAt(match, scenario, t) * gen;
+      sat += load / cap;
+      over += Math.max(0, load - cap) * 16;   // 未処理の積分 [情報量·秒]
+      n++;
+    }
+    const budget = OPP.htBudget(setup);
+    const backlog = over / 60;                 // 分相当
+    const shareEff = clamp(budget.share - backlog * 0.8, 0.5, budget.share);
+    return { meanSat: sat / n, backlog, shareEff, share: budget.share };
+  };
+
+  /* ---------------- カウンタープラン（Issue #62 v1） ----------------
+     相手体制の弱点タイプ → それをピッチ上で引き出す戦術テンプレ → 実行可能な
+     what-if シナリオへ決定論変換。効果は evaluatePlans で「モデル上の比較」として
+     数値化する（断定ではない）。生成物は既存のシナリオ規則検証を必ず通す。 */
+
+  const altShapesOf = (match, team) => {
+    const F = R.formations;
+    const cur = match.teams[team].phases[0].shape;
+    return Object.keys(F.SHAPES).filter(s => s !== cur).sort();
+  };
+
+  // 生成: [{id, label, desc, exploits, scenario, validation}]
+  OPP.counterPlans = (match, opponentTeam) => {
+    const E = R.engine, S = R.subs, F = R.formations;
+    const my = E.oppOf(match, opponentTeam);
+    const alts = altShapesOf(match, my);
+    const mk = (label) => S.createScenario(match, label, E.actualScenario(match));
+    const plans = [];
+    // 1) 二段可変（情報過多型の集計をリセットさせる）: 25' と 65' で別システムへ
+    if (alts.length >= 2) {
+      let r = S.withFormation(match, mk(`${my} 二段可変 25'/65'`), my, 25, alts[0]);
+      if (r.validation.ok) r = S.withFormation(match, r.scenario, my, 65, alts[1]);
+      plans.push({ id: "two-stage", label: "二段システム可変（25'→65'）",
+        desc: "前半と後半で全く別の可変システム — 相手の集計・クリップ分類を2度リセットさせる",
+        exploits: "delay", scenario: r.scenario, validation: r.validation });
+    }
+    // 2) HT直前圧縮（共通）: 43' に布陣変更 — 相手のHT準備時間を新情報で圧迫
+    if (alts.length >= 1) {
+      const r = S.withFormation(match, mk(`${my} 43'可変`), my, 43, alts[0]);
+      plans.push({ id: "pre-ht", label: "HT直前の可変（43'）",
+        desc: "前半終了間際に新情報を注入 — 相手アナリストのHT集計・編集時間を物理的に奪う",
+        exploits: "common", scenario: r.scenario, validation: r.validation });
+    }
+    // 3) ミスマッチ作出（現場主義の眼と直感を飽和させる）: 後半頭に前線スロットを入替
+    {
+      const shape = F.SHAPES[match.teams[my].phases[0].shape];
+      const atk = shape.filter(s => ["ST", "W", "AM", "FB", "WB"].includes(s.role)).map(s => s.id).sort();
+      if (atk.length >= 2) {
+        const r = S.withSlotSwap(match, mk(`${my} 前線入替`), my, match.time.h2.start + 1, atk[0], atk[1]);
+        plans.push({ id: "mismatch", label: "後半頭のミスマッチ作出（前線入替）",
+          desc: "想定外の対面を作る — 属人的な読みと少数の眼を飽和させる",
+          exploits: "sway", scenario: r.scenario, validation: r.validation });
+      }
+    }
+    // 4) 非定型キックオフ（テック依存の自動分類の信頼度を下げる）: 開始から非典型システム
+    if (alts.length >= 2) {
+      const r = S.withFormation(match, mk(`${my} 非定型`), my, 0, alts[alts.length - 1]);
+      plans.push({ id: "atypical", label: "非定型システムでの立ち上がり",
+        desc: "パターン外の配置で開始 — 自動分析のテンプレ適合を外し、データと現場感覚の乖離を突く",
+        exploits: "sysDep", scenario: r.scenario, validation: r.validation });
+    }
+    return plans.filter(p => p.validation && p.validation.ok);
+  };
+
+  // 評価: 各プランの「相手のHT情報環境への打撃」と「自軍の結果」を actual 比で数値化
+  OPP.evaluatePlans = (match, plans, setup) => {
+    const E = R.engine, SCN = R.scenlib;
+    const base = OPP.htSaturation(match, E.actualScenario(match), setup);
+    const batch = SCN.batch(match, [
+      { name: "actual", scenario: E.actualScenario(match) },
+      ...plans.map(p => ({ name: p.id, scenario: p.scenario })),
+    ]);
+    return plans.map((p, i) => {
+      const sat = OPP.htSaturation(match, p.scenario, setup);
+      return {
+        id: p.id, label: p.label, exploits: p.exploits,
+        dMeanSat: +(sat.meanSat - base.meanSat).toFixed(4),
+        dBacklog: +(sat.backlog - base.backlog).toFixed(3),
+        dShareEff: +(sat.shareEff - base.shareEff).toFixed(2),
+        score: batch[i + 1].score, added: batch[i + 1].added,
+        baseScore: batch[0].score,
+      };
+    });
+  };
+
+  // 選手認知キャパ: HTで伝わる変更点数（交代+布陣切替）が上限3を超えると過負荷
+  OPP.htCognitive = (match, scenario, team) => {
+    const E = R.engine;
+    scenario = scenario || E.actualScenario(match);
+    const htEnd = match.time.h1.end, h2 = match.time.h2.start;
+    let changes = 0;
+    for (const sub of (scenario.subs[team] || [])) if (sub.t >= htEnd - 60 && sub.t <= h2 + 90) changes++;
+    const phases = E.phasesOf ? E.phasesOf(match, scenario, team) : [];
+    for (const ph of phases) if (Math.abs(ph.from - h2) < 90 && ph.from > 0) changes++;
+    return { changes, capacity: 3, overload: Math.max(0, changes - 3) };
+  };
+})();
+
+
+/* ===== src/scenlib.mjs ===== */
+/* =========================================================================
+   RPDX.scenlib — シナリオ・ライブラリ & バッチ・シミュレーション（Issue #34 v1）
+   ---------------------------------------------------------------------------
+   決定論エンジンの強み＝「同じシナリオは何度でも同じ結果」を運用へ:
+     - シナリオの最小表現（直列化/復元・URL/ファイル共有）
+     - 多数シナリオの一括実行と結果集計（スコア再構成・危険度平均・フェーズ配分）
+     - パラメータ格子（例: 交代分スイープ）の生成ヘルパ
+   すべて純関数・乱数なし。CLI は rpdx/tools/batch.mjs、UI は ?scenario= 読込。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const SCN = (R.scenlib = {});
+
+  /* ---- 直列化（最小表現・決定論） ---- */
+  SCN.serialize = (scenario) => {
+    const o = { l: scenario.label || "" };
+    if (scenario.subs) {
+      const subs = {};
+      for (const [k, arr] of Object.entries(scenario.subs)) {
+        if (arr && arr.length) subs[k] = arr.map(s => [s.t, s.out, s.in]);
+      }
+      if (Object.keys(subs).length) o.s = subs;
+    }
+    if (scenario.lineup) o.u = scenario.lineup;
+    if (scenario.tweaks) o.w = scenario.tweaks;
+    if (scenario.opponentHt) o.h = scenario.opponentHt;
+    return JSON.stringify(o);
+  };
+
+  SCN.parse = (match, str) => {
+    const S = R.subs, E = R.engine;
+    const o = typeof str === "string" ? JSON.parse(str) : str;
+    const subs = {};
+    for (const k of E.teamKeys(match)) {
+      subs[k] = ((o.s && o.s[k]) || []).map(([t, out, inn]) => ({ t, out, in: inn }));
+    }
+    const sc = S.createScenario(match, o.l || "imported", { subs, lineup: o.u || null, tweaks: o.w || null });
+    if (o.h) sc.opponentHt = o.h;
+    const validation = S.validateScenario(match, sc);
+    return { scenario: sc, validation };
+  };
+
+  /* ---- バッチ実行（決定論・読み取り） ----
+     entries: [{name, scenario}] → 行: 結果スコア・ゴール増減・危険度平均・首位フェーズ */
+  SCN.batch = (match, entries) => {
+    const E = R.engine, D = R.danger, SIM = R.sim, T = R.tactics;
+    const keys = E.teamKeys(match);
+    const rows = [];
+    for (const { name, scenario } of entries) {
+      const oc = scenario.actual ? null : SIM.outcome(match, scenario);
+      const score = {};
+      if (oc) for (const k of keys) score[k] = oc.score[k];
+      else for (const k of keys) score[k] = match.events.filter(e => e.type === "goal" && e.team === k).length;
+      const pts = D.curve(match, scenario, { step: 8, includeGK: false });
+      const dMean = {};
+      for (const k of keys) dMean[k] = pts.reduce((a, p) => a + p.v[k], 0) / pts.length;
+      const shares = T.phaseShares(match, scenario);
+      const topPhase = {};
+      for (const k of keys) {
+        topPhase[k] = T.PHASES.reduce((best, ph) =>
+          shares[k][ph] > shares[k][best] ? ph : best, T.PHASES[0]);
+      }
+      rows.push({
+        name,
+        score: keys.map(k => `${k} ${score[k]}`).join(" - "),
+        added: oc ? oc.events.filter(e => e.sim).length : 0,
+        dangerMean: Object.fromEntries(keys.map(k => [k, +dMean[k].toFixed(1)])),
+        topPhase,
+      });
+    }
+    return rows;
+  };
+
+  /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
+  SCN.subMinuteGrid = (match, base, team, subIdx, minutes) => {
+    const S = R.subs;
+    const out = [];
+    for (const min of minutes) {
+      const sc = S.fork(match, base);
+      const arr = sc.subs[team] || [];
+      if (!arr[subIdx]) continue;
+      arr[subIdx] = { ...arr[subIdx], t: S.minuteToT(match, min) };
+      sc.label = `${team} sub#${subIdx} @${min}'`;
+      const validation = S.validateScenario(match, sc);
+      if (validation.ok) out.push({ name: sc.label, scenario: sc });
+    }
+    return out;
+  };
+})();
+
+
+/* ===== src/policy.mjs ===== */
+/* =========================================================================
+   RPDX.policy — 決定論ポリシー探索（Issue #45 research・軽量v1・読み取り専用）
+   ---------------------------------------------------------------------------
+   決定論エンジン（同一入力=同一出力）を「意思決定の探索」に使う研究用レイヤ。
+   陣形×交代分の格子を張り、各候補シナリオを決定論目的値で評価してランク付けする。
+
+   ★ これは【モデル上の探索】であり、実試合の予測ではない。目的値は本ツールの
+     結果再構成（SIM.outcome）と危険度場（D.curve）というモデル出力に対する順序付け
+     であって、現実の戦術的優劣を主張するものではない。乱数なし・同一入力=同一出力。
+
+     envSpec(match, team)          … 行動空間メタ（利用可能な陣形・交代枠・分レンジ）
+     objective(match, scenario, team)
+                                   … 決定論目的値 = 得失点差(再構成) + 小さな危険度差の項
+     gridSearch(match, team, opts, topK)
+                                   … 陣形×分の格子から validator 通過候補を生成し降順ランク
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const P = (R.policy = {});
+  const E = R.engine, S = R.subs, F = R.formations, D = R.danger, SIM = R.sim, SCN = R.scenlib;
+
+  // 危険度差の重み: 得失点差（整数）に対し従属的な「小項」（タイブレーク相当）。
+  //   value = (score[team]-score[opp]) + W_DANGER*(dangerMean[team]-dangerMean[opp])
+  //   危険度平均差は概ね ±30 程度 → 寄与は ±0.3 に収まり、整数の得失点差を覆さない。
+  const W_DANGER = 0.01;
+  const DANGER_STEP = 12;   // 目的値用の粗い決定論サンプル（実行時間<30s の予算内）
+
+  const defaultTeam = (match, team) =>
+    team || match.possessionPlus || E.teamKeys(match)[0];
+
+  // 結果再構成のシナリオ単位メモ（objective と score の二重計算を避ける・決定論不変）
+  const ocCache = new WeakMap();
+  const outcomeOf = (match, scenario) => {
+    if (scenario.actual) return null;
+    if (ocCache.has(scenario)) return ocCache.get(scenario);
+    const oc = SIM.outcome(match, scenario);
+    ocCache.set(scenario, oc);
+    return oc;
+  };
+  const scoreMap = (match, scenario) => {
+    const keys = E.teamKeys(match), oc = outcomeOf(match, scenario), s = {};
+    if (oc) for (const k of keys) s[k] = oc.score[k];
+    else for (const k of keys) s[k] = match.events.filter(e => e.type === "goal" && e.team === k).length;
+    return s;
+  };
+
+  // 行動空間メタ（探索の定義域）
+  P.envSpec = (match, team) => {
+    team = defaultTeam(match, team);
+    const range = E.playedRange(match);
+    const t1min = Math.floor((range.t1 / 60));
+    const subsUsed = (match.subsActual && match.subsActual[team]) ? match.subsActual[team].length : 0;
+    return {
+      team,
+      formations: Object.keys(F.SHAPES),        // 利用可能な陣形キー
+      minutesRange: [1, Math.min(90, t1min)],   // 陣形適用/交代の分レンジ
+      subWindows: 3,                            // FIFA: 交代機会（HT除く）
+      subsActual: subsUsed,                     // 実試合で使った交代枠
+    };
+  };
+
+  // 決定論目的値（team 視点・省略時は優勢側）
+  P.objective = (match, scenario, team) => {
+    team = defaultTeam(match, team);
+    const opp = E.oppOf(match, team);
+    // 得失点差: what-if は結果再構成 / actual は記録スコア
+    const score = scoreMap(match, scenario);
+    const goalDiff = score[team] - score[opp];
+    // 平均危険度差（小項）
+    const pts = D.curve(match, scenario, { step: DANGER_STEP, includeGK: false });
+    const mean = (k) => pts.reduce((a, p) => a + p.v[k], 0) / pts.length;
+    const dangerDiff = mean(team) - mean(opp);
+    return goalDiff + W_DANGER * dangerDiff;
+  };
+
+  // スコア文字列（表示・比較用）
+  const scoreOf = (match, scenario) => {
+    const s = scoreMap(match, scenario);
+    return E.teamKeys(match).map(k => `${k} ${s[k]}`).join(" - ");
+  };
+
+  /* 格子探索: 陣形×分の全組合せ（validator 通過のみ）を objective で降順ランク。
+     opts = { formations?, minutes?, subIdx? }。基準として実試合の what-if コピーを常に含める。
+     返り値 [{ label, scenario, value, score }]（value 降順・同値は label 昇順で安定）。 */
+  P.gridSearch = (match, team, opts = {}, topK = 5) => {
+    team = defaultTeam(match, team);
+    const spec = P.envSpec(match, team);
+    const formations = opts.formations || spec.formations;
+    const minutes = opts.minutes || [46, 60, 70];
+    const base = S.fromActual(match, "policy-base");   // actual:false（結果再構成が有効）
+
+    const cands = [{ label: `${team} 実試合（基準）`, scenario: base }];
+    for (const shape of formations) {
+      for (const min of minutes) {
+        const r = S.withFormation(match, base, team, min, shape);
+        if (r.validation.ok) cands.push({ label: `${team} ${shape}@${min}'`, scenario: r.scenario });
+      }
+    }
+    // 任意: 交代分スイープ（idx 番目の交代の分を動かす）
+    if (opts.subIdx != null) {
+      for (const g of SCN.subMinuteGrid(match, base, team, opts.subIdx, minutes)) cands.push(g);
+    }
+
+    const ranked = cands.map(c => ({
+      label: c.label,
+      scenario: c.scenario,
+      value: P.objective(match, c.scenario, team),
+      score: scoreOf(match, c.scenario),
+    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+
+    return ranked.slice(0, topK);
+  };
+})();
+
+
+/* ===== src/layers.mjs ===== */
+/* =========================================================================
+   RPDX.layers — レイヤ・プラグイン・アーキテクチャ（Issue #41 v1・レジストリ+契約）
+   ---------------------------------------------------------------------------
+   異分野から輸入した解析レイヤ（危険度/心理/接触/生理/フィルタ/UQ/戦術/相手分析/
+   シナリオ）を、拡張の「正式な受け口」として一元登録する読み取り専用レジストリ。
+   各レイヤの実装モジュールは一切変更せず、公開関数への参照だけを収集して束ねる。
+
+     register({id,label,kind,api,readonly,deps}) … レイヤを登録（id重複は例外）
+     list()  … 登録済みレイヤの配列
+     get(id) … レイヤ1件（未登録は null）
+     has(id) … 登録有無
+
+   契約（v1）: kind="analysis" のレイヤは全て readonly=true。api の各関数は合成状態
+   を読むだけで、位置・イベント・危険度・結果を変えない（golden 不変が保証）。
+   deps はレジストリ内の他レイヤ id（実行トポロジ・UI自動配線は将来スコープ）。
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const L = (R.layers = {});
+  const reg = new Map();
+
+  L.register = (spec) => {
+    if (!spec || typeof spec.id !== "string" || !spec.id)
+      throw new Error("layers.register: id は必須");
+    if (reg.has(spec.id))
+      throw new Error("layers.register: id 重複 — " + spec.id);
+    const api = spec.api || {};
+    for (const [k, fn] of Object.entries(api))
+      if (typeof fn !== "function")
+        throw new Error(`layers.register(${spec.id}): api.${k} は関数参照でなければならない`);
+    const entry = {
+      id: spec.id,
+      label: spec.label || spec.id,
+      kind: spec.kind || "analysis",
+      readonly: spec.readonly !== false,          // 既定 true（読み取り専用契約）
+      deps: Object.freeze([...(spec.deps || [])]),
+      api: Object.freeze({ ...api }),
+    };
+    reg.set(spec.id, Object.freeze(entry));
+    return entry;
+  };
+  L.list = () => [...reg.values()];
+  L.get = (id) => reg.get(id) || null;
+  L.has = (id) => reg.has(id);
+
+  /* ---- 既存レイヤを一括登録（モジュールは不変・公開関数参照のみ収集）---- */
+  const src = (id) => R[id] || {};
+  const pick = (id, keys) => {
+    const o = src(id), out = {};
+    for (const k of keys) if (typeof o[k] === "function") out[k] = o[k];
+    return out;
+  };
+
+  L.register({
+    id: "danger", label: "危険度 D²-Field", kind: "analysis", readonly: true, deps: [],
+    api: pick("danger", ["threatAt", "indexAt", "indexSmooth", "fieldAt", "zoneField", "curve", "seqAccumAt"]),
+  });
+  L.register({
+    id: "psy", label: "心理・モメンタム（PSY）", kind: "analysis", readonly: true, deps: ["danger"],
+    api: pick("psy", ["momentumAt", "playerAt", "teamAt", "decisionAt", "momentumCurve"]),
+  });
+  L.register({
+    id: "duel", label: "デュエル・接触", kind: "analysis", readonly: true, deps: [],
+    api: pick("duel", ["tackleAt", "shieldAt", "aerialAt", "foulsOf"]),
+  });
+  L.register({
+    id: "physio", label: "生理・メタボリックパワー", kind: "analysis", readonly: true, deps: [],
+    api: pick("physio", ["ecCost", "summary", "summaryAsync"]),
+  });
+  L.register({
+    id: "filter", label: "α-β-γ フィルタ", kind: "analysis", readonly: true, deps: [],
+    api: pick("filter", ["abg", "gainsFromTheta"]),
+  });
+  L.register({
+    id: "uq", label: "不確実性定量化（UQ）", kind: "analysis", readonly: true, deps: ["danger"],
+    api: pick("uq", ["wilson", "evaluate", "sweep", "reportText"]),
+  });
+  L.register({
+    id: "tactics", label: "戦術フェーズ & 形メトリクス", kind: "analysis", readonly: true, deps: [],
+    api: pick("tactics", ["phaseAt", "phaseShares", "phaseStrip", "shapeMetrics", "voronoiShare"]),
+  });
+  L.register({
+    id: "opponent", label: "相手分析体制の脆弱性", kind: "analysis", readonly: true, deps: ["danger", "tactics", "scenlib"],
+    api: pick("opponent", ["profile", "setupOf", "htBudget", "htSaturation", "counterPlans", "evaluatePlans"]),
+  });
+  L.register({
+    id: "scenlib", label: "シナリオ・ライブラリ", kind: "analysis", readonly: true, deps: ["danger", "tactics"],
+    api: pick("scenlib", ["serialize", "parse", "batch", "subMinuteGrid"]),
+  });
+})();
+
+
 /* ===== src/generic.mjs ===== */
 /* =========================================================================
    RPDX.generic — 汎用試合ファクトリ
@@ -5042,6 +5845,21 @@ window.addEventListener("error", (e) => {
   });
 })();
 
+</script>
+<script>
+
+/* 実行時エラーの可視化（ヘッドレス検証用） */
+window.addEventListener("error", (e) => {
+  document.title = "RPDX-ERROR";
+  let d = document.getElementById("fatal");
+  if (!d) {
+    d = document.createElement("div");
+    d.id = "fatal";
+    d.style.cssText = "position:fixed;z-index:9999;left:8px;top:8px;right:8px;background:#3a0d10;color:#ffb4ac;font:11px monospace;padding:10px;border-radius:8px;white-space:pre-wrap";
+    document.body && document.body.appendChild(d);
+  }
+  d.textContent += (e.message || e.error) + " @ " + (e.filename || "") + ":" + e.lineno + "\n";
+});
 
 /* ===== app/render3d.mjs ===== */
 /* =========================================================================
@@ -6542,16 +7360,89 @@ window.addEventListener("error", (e) => {
   const curveStore = new Map();
   const curveKeyOf = (sc, opts) =>
     `${App.match.meta.id}|${E.scenarioKey(sc)}|8|${opts.includeGK ? 1 : 0}`;
+
+  /* Web Worker オフロード（#38）: core script タグ（DOM非依存の計算層）のテキストから
+     Blob Worker を生成し、危険度曲線をメインスレッド外で計算する。
+     Worker 不可（CSP/file制限/エラー）時は従来のチャンク計算へ自動フォールバック。
+     シナリオは scenlib で直列化して渡す — 内容ベース hash なので同一世界・同一結果。 */
+  let dWorker = null, dwSeq = 0, dwFailed = false;
+  const dwCbs = new Map();
+  const workerCurve = (match, sc, opts, onDone) => {
+    if (dwFailed || typeof Worker === "undefined") return false;
+    try {
+      if (!dWorker) {
+        const core = document.getElementById("rpdx-core");
+        if (!core || !core.textContent.includes("R.danger")) return false;
+        const glue = `
+self.onmessage = (e) => {
+  const { id, matchId, scen, opts, geomOnly } = e.data;
+  try {
+    const R = globalThis.RPDX;
+    const m = R.data.MATCHES[matchId];
+    if (R.danger.isGeomOnly() !== !!geomOnly) R.danger.setGeomOnly(!!geomOnly);
+    const scenario = scen ? R.scenlib.parse(m, scen).scenario : R.engine.actualScenario(m);
+    if (e.data.withOutcome && scen) R.sim.attach(m, scenario);   // outcome込みの世界を決定論再構成
+    const pts = R.danger.curve(m, scenario, opts);
+    postMessage({ id, pts });
+  } catch (err) { postMessage({ id, error: String(err && err.message || err) }); }
+};`;
+        dWorker = new Worker(URL.createObjectURL(
+          new Blob([core.textContent + glue], { type: "text/javascript" })));
+        dWorker.onmessage = (e) => {
+          const cb = dwCbs.get(e.data.id);
+          dwCbs.delete(e.data.id);
+          if (e.data.error) { console.warn("worker curve error:", e.data.error); cb && cb(null); }
+          else cb && cb(e.data.pts);
+        };
+        dWorker.onerror = (e) => {
+          console.warn("curve worker failed — チャンク計算へフォールバック", e.message || "");
+          dwFailed = true;
+          for (const cb of dwCbs.values()) cb(null);
+          dwCbs.clear();
+          try { dWorker.terminate(); } catch {}
+          dWorker = null;
+        };
+      }
+      const id = ++dwSeq;
+      dwCbs.set(id, onDone);
+      dWorker.postMessage({
+        id, matchId: match.meta.id,
+        scen: sc.actual ? null : globalThis.RPDX.scenlib.serialize(sc),
+        withOutcome: !!sc.outcome,
+        opts: { step: opts.step || 8, includeGK: !!opts.includeGK },
+        geomOnly: D.isGeomOnly(),
+      });
+      return true;
+    } catch (e) {
+      console.warn("worker unavailable:", e && e.message);
+      dwFailed = true;
+      return false;
+    }
+  };
+
   const ensureCurveFor = (sc, opts, cb) => {
     const key = curveKeyOf(sc, opts);
     if (curveStore.has(key)) { cb && cb(); return; }
-    D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
+    const finish = (pts) => {
+      curveStore.set(key, pts);
+      $("#curveStatus").textContent = "";
+      cb && cb();
+    };
+    const fallback = () => D.curveAsync(App.match, sc, { step: 8, includeGK: opts.includeGK },
       (p) => { $("#curveStatus").textContent = `D²曲線 ${Math.round(p * 100)}%`; },
-      (pts) => {
-        curveStore.set(key, pts);
-        $("#curveStatus").textContent = "";
-        cb && cb();
-      });
+      finish);
+    $("#curveStatus").textContent = "D²曲線 計算中…";
+    // 無応答フォールバック: Worker が2.5秒応答しなければチャンク計算へ切替
+    //（ヘッドレス仮想時間や環境制限で Worker が進まないケースの保険。
+    //  二重完了は done ガードで抑止 — 結果は決定論なのでどちらでも同一値）
+    let done = false;
+    const once = (fn) => (arg) => { if (done) return; done = true; fn(arg); };
+    const finishOnce = once(finish);
+    const fallbackOnce = once(fallback);
+    const sent = workerCurve(App.match, sc, { step: 8, includeGK: opts.includeGK },
+      (pts) => { if (pts) finishOnce(pts); else fallbackOnce(); });
+    if (!sent) { fallbackOnce(); return; }
+    setTimeout(() => fallbackOnce(), 2500);
   };
   const actualCurve = () => curveStore.get(curveKeyOf(E.actualScenario(App.match), { includeGK: App.options.includeGK }));
   const activeCurve = () => curveStore.get(curveKeyOf(activeScenario(), { includeGK: App.options.includeGK }));
@@ -6561,6 +7452,29 @@ window.addEventListener("error", (e) => {
   /* ------------------------------ 起動 ------------------------------ */
   // URLパラメータ: ?t=秒 &cam=broadcast|tactical|goal|pitch|fly &play=0|1 &speed=n
   const urlq = new URLSearchParams(location.search);
+
+  /* ------ 国際化 i18n v1（#42・静的クロームのみ・?lang=en で英語）------
+     動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
+  const I18N = {
+    en: {
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
+      "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
+      "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
+      "算定モジュール": "Modules", "ゾーニング視点": "Zoning View", "脅威寄与 TOP": "Top Threats", "危険度": "Index",
+    },
+  };
+  const LANG = urlq.get("lang") === "en" ? "en" : "ja";
+  const t = (ja) => (LANG !== "ja" && I18N[LANG] && I18N[LANG][ja]) || ja;
+  const applyI18n = () => {
+    if (LANG === "ja") return;
+    document.documentElement.lang = LANG;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  };
+
   let renderer, tlCtx;
   const boot = () => {
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる
@@ -6572,6 +7486,7 @@ window.addEventListener("error", (e) => {
     window.addEventListener("resize", fit);
     fit();
     buildStatic();
+    applyI18n();
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
@@ -6581,6 +7496,14 @@ window.addEventListener("error", (e) => {
     if (urlq.has("sel")) {
       const [tm, no] = urlq.get("sel").split(":");
       if (App.match.teams[tm]) selectPlayer(tm, +no);
+    }
+    if (urlq.has("scenario")) {
+      // #34: 直列化シナリオの深いリンク（scenlib 形式 JSON）— 検証NG時は無視
+      try {
+        const { scenario, validation } = globalThis.RPDX.scenlib.parse(App.match, decodeURIComponent(urlq.get("scenario")));
+        if (validation.ok) refreshScenario(scenario);
+        else console.warn("scenario param invalid:", validation.errors);
+      } catch (e) { console.warn("scenario param parse error", e); }
     }
     if (urlq.get("demo") === "sim") {
       // 検証/デモ用: 66' 鎌田→久保 のwhat-ifシナリオを自動生成
@@ -6602,7 +7525,7 @@ window.addEventListener("error", (e) => {
       setTimeout(() => {
         $("#loading").style.display = "none";
         App.playing = urlq.get("play") !== "0";
-        $("#btnPlay").textContent = App.playing ? "❚❚ 停止" : "▶ 再生";
+        $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
     // 事前計算の進捗をローディングにも反映
@@ -7410,6 +8333,26 @@ window.addEventListener("error", (e) => {
     g.fillStyle = "rgba(148,162,189,.9)";
     g.fillText("HT", htX + 3, 12);
 
+    // フェーズ帯（#32）: 上端3pxに局面を色分け（保持チーム色の濃淡・set-piece=白系）
+    if (globalThis.RPDX.tactics) {
+      const strip = globalThis.RPDX.tactics.phaseStrip(App.match, sc0, Math.min(300, W >> 1));
+      const PHC = {
+        "set-piece": "rgba(230,236,248,.75)", "transition": "rgba(255,160,64,.8)",
+        "build-up": "rgba(110,130,170,.55)", "progression": "rgba(120,170,255,.6)",
+        "finishing": "rgba(255,90,90,.8)",
+      };
+      const teamTint = (team) => team === App.match.possessionPlus ? 1 : 0.55;
+      const x0 = X(range.t0), x1 = X(range.t1);
+      const bw = (x1 - x0) / strip.length;
+      for (let i = 0; i < strip.length; i++) {
+        const s = strip[i];
+        g.globalAlpha = s.team ? teamTint(s.team) : 0.4;
+        g.fillStyle = PHC[s.phase] || "rgba(120,120,120,.4)";
+        g.fillRect(x0 + i * bw, 2, Math.ceil(bw), 3);
+      }
+      g.globalAlpha = 1;
+    }
+
     // 閾値ガイド
     for (const [v, lbl] of [[D.WARN_AT, "WARN 45"], [D.CRIT_AT, "CRIT 75"]]) {
       g.strokeStyle = "rgba(196,212,240,.2)"; g.setLineDash([4, 4]);
@@ -7530,7 +8473,7 @@ window.addEventListener("error", (e) => {
   buildSpeed();
   const setPlaying = (p) => {
     App.playing = p;
-    $("#btnPlay").textContent = p ? "❚❚ 停止" : "▶ 再生";
+    $("#btnPlay").textContent = p ? "❚❚ " + t("停止") : "▶ " + t("再生");
   };
   $("#btnPlay").onclick = () => setPlaying(!App.playing);
   const evTimes = () => E.eventsOf(App.match, activeScenario())
@@ -7616,6 +8559,38 @@ window.addEventListener("error", (e) => {
           const cent = T.central.slice(0, 3).map(c => `${c.no} ${nameOf(c.no)} ${(c.c * 100).toFixed(0)}%`).join(" · ");
           return `<div style="margin:4px 0 8px"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b>（推定パス${T.total}本）<br>${pairs}<br><span style="color:var(--muted);font-size:11px">次数中心性: ${cent}</span></div>`;
         }).join("");
+      })()}
+      <h4>相手分析体制の脆弱性プロファイル（モデル仮定 — 実在体制への断定ではない）</h4>
+      ${(() => {
+        const O = globalThis.RPDX.opponent;
+        const declared = teamOrder().map(k => [k, O.setupOf(m, k)]).filter(([, s]) => s);
+        const row = (label, p, setup) => {
+          const sat = O.htSaturation(m, E.actualScenario(m), setup);   // #60: 前半の処理飽和
+          return `<tr><td class="k">${label}</td>` +
+          `<td>収集${p.budget.collect.toFixed(1)}分 / 会議${p.budget.meeting.toFixed(1)}分 / <b>共有 実質${sat.shareEff.toFixed(1)}分</b></td>` +
+          `<td title="前半の情報フロー圧/処理能力">${Math.round(sat.meanSat * 100)}%</td>` +
+          ["delay", "sway", "sysDep", "overall"].map(x => `<td title="${p.labels[x]}">${O.stars(p.scores[x])}</td>`).join("") + "</tr>";
+        };
+        const head = `<tr><td class="k"></td><td>HT15分の配分</td><td>飽和</td><td>遅延</td><td>ブレ</td><td>依存</td><td><b>総合</b></td></tr>`;
+        const body = declared.length
+          ? declared.map(([k, s]) => row(m.teams[k].name + "（宣言値）", O.profile(s), s)).join("")
+          : Object.values(O.ARCHETYPES).map(a2 => row(a2.label, O.profile(a2), a2)).join("");
+        return `<table class="stat-table" style="font-size:11px">${head}${body}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">${declared.length ? "パック宣言の体制パラメータによる評価" : "本試合パックは体制未宣言 — 3類型アーキタイプの一般比較を表示"}。ハーフタイム（15分）の意思決定脆弱性を体制パラメータ（人数・段数・ツール/属人依存）から決定論算出。飽和=前半の情報フロー圧IFL(t)×体制の生成率÷処理能力の平均（#60）。</div>`;
+      })()}
+      <h4>実効フォーメーション & 形（モデル推定・現在時刻のスナップショット）</h4>
+      ${(() => {
+        const T2 = globalThis.RPDX.tactics, sc = E.actualScenario(m), t = App.t;
+        const vor = T2.voronoiShare(m, sc, t);
+        const row = (k) => {
+          const s = T2.shapeMetrics(m, sc, k, t);
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>` +
+            `<td>${s.effShape}</td><td>${s.width.toFixed(0)}</td><td>${s.depth.toFixed(0)}</td>` +
+            `<td>${Math.round(s.area)}</td><td>${s.lineGap.toFixed(1)}</td><td>${Math.round(vor[k] * 100)}%</td></tr>`;
+        };
+        const head = `<tr><td class="k"></td><td>実効ライン</td><td>幅m</td><td>縦m</td><td>凸包m²</td><td>ライン間m</td><td>占有</td></tr>`;
+        return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
       })()}
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>

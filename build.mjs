@@ -16,7 +16,7 @@ const dataPacks = readdirSync(join(root, "src"))
 const CORE = [
   "src/noise.mjs", "src/formations.mjs", ...dataPacks,
   "src/engine.mjs", "src/danger.mjs", "src/subs.mjs", "src/sim.mjs", "src/psy.mjs",
-  "src/duel.mjs", "src/physio.mjs", "src/filter.mjs", "src/uq.mjs", "src/tactics.mjs", "src/opponent.mjs", "src/scenlib.mjs", "src/policy.mjs", "src/layers.mjs", "src/generic.mjs",
+  "src/duel.mjs", "src/physio.mjs", "src/filter.mjs", "src/uq.mjs", "src/tactics.mjs", "src/opponent.mjs", "src/scenlib.mjs", "src/generic.mjs",
 ];
 const APP = ["app/render3d.mjs", "app/ui.mjs"];
 

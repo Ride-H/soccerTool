@@ -37,7 +37,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button, select, input, textarea { font-family: inherit; color: inherit; }
-:focus-visible { outline: 1.5px solid var(--gold); outline-offset: 2px; }
+/* #42 a11y: キーボード操作時のみ現れる高コントラストの可視フォーカス */
+:focus-visible { outline: 2px solid #7fb2ff; outline-offset: 2px; border-radius: 3px; }
+:focus:not(:focus-visible) { outline: none; }
 ::selection { background: rgba(200,169,110,.3); }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: var(--mono); }

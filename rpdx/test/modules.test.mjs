@@ -238,3 +238,242 @@ test("#43 fouls: 決定論（キャッシュ有無で同一）・エンジン出
   const s2 = JSON.stringify(E.stateAt(m, act(m), 1234).players.map(p => [p.no, p.x.toFixed(4)]));
   assert.equal(s1, s2, "エンジン出力不変");
 });
+
+/* ================= #59 相手分析体制の脆弱性プロファイラ ================= */
+
+test("#59 opponent: HT予算は15分に整合・スコアは1..5・決定論", () => {
+  const O = RPDX.opponent;
+  for (const a of Object.values(O.ARCHETYPES)) {
+    const p = O.profile(a);
+    const sum = p.budget.collect + p.budget.meeting + p.budget.share;
+    assert.ok(Math.abs(sum - 15) < 0.01 || p.budget.share === 1 || p.budget.share === 12,
+      `${a.label} 予算計 ${sum.toFixed(2)}`);
+    for (const k of ["delay", "sway", "sysDep", "overall"]) {
+      assert.ok(p.scores[k] >= 1 && p.scores[k] <= 5, `${a.label} ${k}=${p.scores[k]}`);
+    }
+    assert.deepEqual(p, O.profile(a), "決定論");
+  }
+});
+
+test("#59 opponent: 単調性 — 人数↑=遅延↑・段数↑=ブレ↑・ツール依存↑=システム依存↑", () => {
+  const O = RPDX.opponent;
+  const base = { staff: 20, stages: 3, toolShare: 0.5, fieldShare: 0.4 };
+  assert.ok(O.profile({ ...base, staff: 90 }).scores.delay > O.profile({ ...base, staff: 8 }).scores.delay, "staff→delay");
+  assert.ok(O.profile({ ...base, stages: 6 }).scores.sway > O.profile({ ...base, stages: 2 }).scores.sway, "stages→sway");
+  assert.ok(O.profile({ ...base, toolShare: 0.9 }).scores.sysDep > O.profile({ ...base, toolShare: 0.1 }).scores.sysDep, "tool→sysDep");
+  // 共有時間は人数・段数に単調減少
+  assert.ok(O.htBudget({ ...base, staff: 90, stages: 6 }).share < O.htBudget({ ...base, staff: 8, stages: 2 }).share, "share単調");
+});
+
+test("#59 opponent: アーキタイプの署名 — 人海=遅延最大・テック=依存最大・現場=総合最小", () => {
+  const O = RPDX.opponent;
+  const ps = Object.fromEntries(Object.entries(O.ARCHETYPES).map(([k, a]) => [k, O.profile(a)]));
+  assert.ok(ps.mass.scores.delay > ps.tech.scores.delay && ps.mass.scores.delay > ps.field.scores.delay, "mass=遅延最大");
+  assert.ok(ps.tech.scores.sysDep > ps.mass.scores.sysDep && ps.tech.scores.sysDep > ps.field.scores.sysDep, "tech=依存最大");
+  assert.ok(ps.field.scores.overall <= ps.mass.scores.overall && ps.field.scores.overall <= ps.tech.scores.overall, "field=総合最小");
+});
+
+test("#59 opponent: パック未宣言では実チームに何も帰属しない（setupOf=null）", () => {
+  const O = RPDX.opponent;
+  for (const m of Object.values(MATCHES)) {
+    for (const team of E.teamKeys(m)) {
+      assert.equal(O.setupOf(m, team), null, `${m.meta.id} ${team} は未宣言のはず`);
+    }
+  }
+  // 宣言時はアーキタイプ既定値とマージされる
+  const fake = { teams: { X: { analysisSetup: { archetype: "tech", staff: 30 } } } };
+  const s = O.setupOf(fake, "X");
+  assert.equal(s.staff, 30);
+  assert.equal(s.toolShare, O.ARCHETYPES.tech.toolShare);
+});
+
+/* ================= #60 リアルタイム意思決定負荷 ================= */
+
+test("#60 ifl: 情報フロー圧はイベント近傍で上がる・有界・決定論", () => {
+  const O = RPDX.opponent;
+  for (const m of Object.values(MATCHES)) {
+    const range = E.playedRange(m);
+    const goals = m.events.filter(e => e.type === "goal").map(e => e.t);
+    let gSum = 0, gN = 0, qSum = 0, qN = 0;
+    for (let t = 60; t < range.t1; t += 16) {
+      const v = O.iflAt(m, null, t);
+      assert.ok(v >= 0 && v <= 1.2, `IFL域 ${v}`);
+      if (goals.some(g => Math.abs(t - g) < 50)) { gSum += v; gN++; }
+      else if (goals.every(g => Math.abs(t - g) > 180)) { qSum += v; qN++; }
+    }
+    assert.ok(gSum / gN > qSum / qN + 0.05,
+      `${m.meta.id} ゴール近傍IFL ${(gSum / gN).toFixed(3)} > 静穏 ${(qSum / qN).toFixed(3)}`);
+    assert.equal(O.iflAt(m, null, 1234), O.iflAt(m, null, 1234), "決定論");
+  }
+});
+
+test("#60 saturation: 人海戦術型が最も飽和・極端体制ではHT持ち込み(backlog)が発生", () => {
+  const O = RPDX.opponent;
+  const m = MATCH;
+  const sat = (setup) => O.htSaturation(m, null, setup);
+  const s = Object.fromEntries(Object.entries(O.ARCHETYPES).map(([k, a]) => [k, sat(a)]));
+  assert.ok(s.mass.meanSat > s.tech.meanSat && s.mass.meanSat > s.field.meanSat,
+    `mass最飽和 ${s.mass.meanSat.toFixed(2)} vs tech ${s.tech.meanSat.toFixed(2)} / field ${s.field.meanSat.toFixed(2)}`);
+  // 極端体制（超大人数×多段）は処理が溢れ、HT実質共有時間が削られる
+  const extreme = sat({ staff: 140, stages: 6, toolShare: 0.3, fieldShare: 0.4 });
+  assert.ok(extreme.backlog > 0, `extreme backlog ${extreme.backlog.toFixed(2)}分`);
+  assert.ok(extreme.shareEff < extreme.share, "実質共有 < 予算共有");
+  // 飽和は人数に単調
+  assert.ok(sat({ staff: 100, stages: 3 }).meanSat > sat({ staff: 8, stages: 3 }).meanSat, "staff単調");
+});
+
+test("#60 cognitive: HT変更点数の計上と過負荷判定（actualはキャパ内）", () => {
+  const O = RPDX.opponent;
+  const c = O.htCognitive(MATCH, null, "BRA");
+  assert.ok(c.changes >= 1, `BRA HT変更 ${c.changes}（46'交代など）`);
+  assert.equal(c.capacity, 3);
+  assert.equal(c.overload, Math.max(0, c.changes - 3));
+  // 交代を盛った what-if では過負荷が検出される
+  const sc = structuredClone(E.actualScenario(MATCH));
+  delete sc.actual; sc.id = "cog-test";
+  const h2 = MATCH.time.h2.start;
+  sc.subs.JPN = [
+    { t: h2 + 10, out: 13, in: 8 }, { t: h2 + 20, out: 11, in: 25 },
+    { t: h2 + 30, out: 14, in: 17 }, { t: h2 + 40, out: 15, in: 6 },
+  ];
+  const c2 = O.htCognitive(MATCH, sc, "JPN");
+  assert.ok(c2.changes >= 4 && c2.overload >= 1, `過負荷検出 ${JSON.stringify(c2)}`);
+});
+
+/* ================= #34 シナリオ・ライブラリ & バッチ ================= */
+
+test("#34 scenlib: 直列化↔復元の往復一致・検証つき", () => {
+  const SCN = RPDX.scenlib, S = RPDX.subs;
+  const base = S.createScenario(MATCH, "往復テスト", E.actualScenario(MATCH));
+  base.subs.JPN = base.subs.JPN.slice(0, 3);
+  const str = SCN.serialize(base);
+  const { scenario, validation } = SCN.parse(MATCH, str);
+  assert.ok(validation.ok, JSON.stringify(validation.errors));
+  assert.equal(scenario.label, "往復テスト");
+  assert.deepEqual(
+    scenario.subs.JPN.map(s => [s.t, s.out, s.in]),
+    base.subs.JPN.map(s => [s.t, s.out, s.in]));
+  // 再直列化も一致（最小表現の安定性）
+  assert.equal(SCN.serialize(scenario), str.replace('"往復テスト"', '"往復テスト"'));
+});
+
+test("#34 scenlib: バッチ — actualは記録スコア・交代取消は結果再構成・決定論", () => {
+  const SCN = RPDX.scenlib, S = RPDX.subs, SIM = RPDX.sim;
+  const cancel = S.createScenario(MATCH, "BRA交代2取消", E.actualScenario(MATCH));
+  cancel.subs.BRA = cancel.subs.BRA.filter((_, i) => i !== 1);   // 66' マルティネッリ取消
+  const entries = [
+    { name: "actual", scenario: E.actualScenario(MATCH) },
+    { name: "cancel", scenario: cancel },
+  ];
+  const rows = SCN.batch(MATCH, entries);
+  assert.equal(rows[0].score, "JPN 1 - BRA 2", "actual=記録スコア");
+  const oc = SIM.outcome(MATCH, cancel);
+  assert.equal(rows[1].score, `JPN ${oc.score.JPN} - BRA ${oc.score.BRA}`, "what-if=結果再構成");
+  assert.deepEqual(rows, SCN.batch(MATCH, entries), "決定論");
+  for (const r of rows) {
+    assert.ok(r.dangerMean.BRA > r.dangerMean.JPN, "危険度平均の向き（BRA優勢）");
+    assert.ok(RPDX.tactics.PHASES.includes(r.topPhase.JPN));
+  }
+});
+
+test("#34 scenlib: 交代分スイープ格子 — 全変種が規則検証を通過し結果が動き得る", () => {
+  const SCN = RPDX.scenlib;
+  const grid = SCN.subMinuteGrid(MATCH, E.actualScenario(MATCH), "BRA", 1, [50, 60, 70, 80]);
+  assert.ok(grid.length >= 3, `格子 ${grid.length}変種`);
+  const rows = SCN.batch(MATCH, grid);
+  assert.equal(rows.length, grid.length);
+  for (const r of rows) assert.ok(/BRA \d/.test(r.score));
+});
+
+/* ================= #61 HT修正力シミュレーション ================= */
+
+test("#61 htmod: knob無し=null・mass遅延>field遅延・決定論", () => {
+  const S = RPDX.subs;
+  const sc = S.createScenario(MATCH, "plain", E.actualScenario(MATCH));
+  assert.equal(E.htCorrectionOf(MATCH, sc, "JPN"), null, "knob無し");
+  const mk = (arch) => {
+    const s = S.createScenario(MATCH, arch, E.actualScenario(MATCH));
+    s.opponentHt = { team: "JPN", archetype: arch };
+    return E.htCorrectionOf(MATCH, s, "JPN");
+  };
+  const mass = mk("mass"), field = mk("field");
+  assert.ok(mass.delaySec > field.delaySec, `mass遅延 ${mass.delaySec}s > field ${field.delaySec}s`);
+  assert.ok(mass.blendSec >= 45 && mass.blendSec <= 135, `blend域 ${mass.blendSec}`);
+  assert.deepEqual(mk("mass"), mass, "決定論");
+});
+
+test("#61 htmod: HT修正（46'布陣変更）が遅延・鈍化し、その後は収束する", () => {
+  const S = RPDX.subs;
+  // what-if: JPN が 46' に 4-4-2 へHT修正
+  const base = S.createScenario(MATCH, "JPN 46' 442", E.actualScenario(MATCH));
+  const r = S.withFormation(MATCH, base, "JPN", 46, "442");
+  assert.ok(r.validation.ok, JSON.stringify(r.validation.errors));
+  const sc1 = r.scenario;
+  const sc2 = S.fork(MATCH, sc1);
+  sc2.opponentHt = { team: "JPN", archetype: "mass" };   // 相手(JPN)の体制が脆弱
+
+  const phaseFrom = MATCH.time.h2.start + 60;            // 46' 切替
+  const maxDiff = (t) => {
+    const a = E.stateAt(MATCH, sc1, t).players.filter(p => p.onPitch && p.team === "JPN");
+    E.clearCaches();
+    const b = E.stateAt(MATCH, sc2, t).players.filter(p => p.onPitch && p.team === "JPN");
+    E.clearCaches();
+    let d = 0;
+    for (const pa of a) {
+      const pb = b.find(q => q.no === pa.no);
+      if (pb) d = Math.max(d, Math.hypot(pa.x - pb.x, pa.y - pb.y));
+    }
+    return d;
+  };
+  // 切替前: 世界は同一（opponentHt はチェーン/シードに入らない）
+  assert.ok(maxDiff(1500) < 1e-6, `前半は同一 ${maxDiff(1500)}`);
+  // 切替直後〜遅延窓: ハンディ側は旧布陣をホールド → 位置が有意に異なる
+  const dMid = maxDiff(phaseFrom + 60);
+  assert.ok(dMid > 1.5, `遅延窓で乖離 ${dMid.toFixed(2)}m`);
+  // 十分後（+14分）: どちらも新布陣に浸透し収束
+  const dLate = maxDiff(phaseFrom + 840);
+  assert.ok(dLate < 0.8, `収束 ${dLate.toFixed(2)}m`);
+});
+
+test("#61 htmod: scenarioKey が opponentHt を区別（キャッシュ衝突なし）・世界シードは不変", () => {
+  const S = RPDX.subs;
+  const a = S.createScenario(MATCH, "a", E.actualScenario(MATCH));
+  const b = S.fork(MATCH, a);
+  b.opponentHt = { team: "BRA", archetype: "tech" };
+  assert.notEqual(E.scenarioKey(a), E.scenarioKey(b), "キャッシュキーは区別");
+  assert.equal(E.scenarioHash(a), E.scenarioHash(b), "世界シード（チェーン）は同一");
+});
+
+/* ================= #62 カウンタープラン ================= */
+
+test("#62 plans: 4種の定石が生成され全て規則検証を通過・決定論", () => {
+  const O = RPDX.opponent;
+  const plans = O.counterPlans(MATCH, "JPN");
+  assert.ok(plans.length >= 4, `プラン数 ${plans.length}`);
+  const ids = plans.map(p => p.id);
+  for (const want of ["two-stage", "pre-ht", "mismatch", "atypical"]) assert.ok(ids.includes(want), want);
+  for (const p of plans) {
+    assert.ok(p.validation.ok, `${p.id}: ${JSON.stringify(p.validation.errors)}`);
+    assert.ok(p.exploits && p.desc, "弱点タイプと説明");
+    // 生成シナリオはエンジン安全（11人×2）
+    const st = E.stateAt(MATCH, p.scenario, 3000);
+    for (const team of E.teamKeys(MATCH))
+      assert.equal(st.players.filter(q => q.onPitch && q.team === team).length, 11, `${p.id} ${team}`);
+  }
+  assert.deepEqual(plans.map(p => p.id), O.counterPlans(MATCH, "JPN").map(p => p.id), "決定論");
+});
+
+test("#62 evaluate: 各プランの効果が数値化され、少なくとも1つは相手の情報環境を有意に動かす", () => {
+  const O = RPDX.opponent;
+  const plans = O.counterPlans(MATCH, "JPN");
+  const rows = O.evaluatePlans(MATCH, plans, O.ARCHETYPES.mass);
+  assert.equal(rows.length, plans.length);
+  for (const r of rows) {
+    assert.ok(Number.isFinite(r.dMeanSat) && Number.isFinite(r.dBacklog) && Number.isFinite(r.dShareEff), r.id);
+    assert.ok(/JPN \d - BRA \d/.test(r.score), `score形式 ${r.score}`);
+    assert.equal(r.baseScore, "JPN 1 - BRA 2", "基準=記録スコア");
+  }
+  assert.ok(rows.some(r => Math.abs(r.dMeanSat) > 0.003),
+    `効果が計測可能: ${rows.map(r => r.dMeanSat).join(",")}`);
+  assert.deepEqual(rows, O.evaluatePlans(MATCH, plans, O.ARCHETYPES.mass), "決定論");
+});

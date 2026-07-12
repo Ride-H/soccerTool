@@ -91,9 +91,41 @@
     }
     return h || 1;
   };
-  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる
-  E.scenarioKey = (scenario) =>
-    `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}`;
+  // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる。
+  // opponentHt（#61 HT修正ハンディ）は「表示・ブレンドの変調」であり世界シード
+  //（scenarioHash→チェーン）には入れない。ただし位置・危険度が変わるため
+  // キャッシュ・キーには含めて衝突を防ぐ。
+  E.scenarioKey = (scenario) => {
+    const ht = scenario && scenario.opponentHt
+      ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
+      : "";
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}`;
+  };
+
+  // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
+  // 指定チームの「HT近傍のフェーズ切替」を、体制脆弱性に応じて遅延・鈍化させる。
+  // 飽和(backlog)は actual 世界の前半から算出（what-if 自身を参照しない — 再帰回避）。
+  const htCorrCache = new Map();
+  E.htCorrectionOf = (match, scenario, team) => {
+    const o = scenario && scenario.opponentHt;
+    if (!o || o.team !== team || !R.opponent) return null;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + team;
+    const hit = htCorrCache.get(key);
+    if (hit !== undefined) return hit;
+    const base = o.archetype && R.opponent.ARCHETYPES[o.archetype] ? R.opponent.ARCHETYPES[o.archetype] : {};
+    const setup = { ...base, ...o };
+    const prof = R.opponent.profile(setup);
+    const sat = R.opponent.htSaturation(match, E.actualScenario(match), setup);
+    const delayMin = clamp(((prof.scores.overall - 1) / 4) * 7 + sat.backlog * 1.5, 0, 10);
+    const out = {
+      delaySec: delayMin * 60,
+      blendSec: 45 * (1 + ((prof.scores.sway - 1) / 4) * 2),   // 45〜135s（浸透の鈍さ）
+      profile: prof,
+    };
+    if (htCorrCache.size > 64) htCorrCache.clear();
+    htCorrCache.set(key, out);
+    return out;
+  };
 
   // 布陣フェーズ（シナリオ上書き優先）
   E.phasesOf = (match, scenario, team) =>
@@ -215,7 +247,33 @@
   const P_OUT = 0.052;
   const chainCache = new Map();
 
+  // 基礎位置のメモ（#39）: separationAt / pressRankAt / defensiveLineAt / 本体が
+  // 同一 (scenario, t) で同じ選手の基礎位置を重複評価する（実測で ~38回/係数）。
+  // 純関数なのでメモは値を一切変えない（ゴールデンマスターがビット同一を保証）。
+  // 注意: lineComputing 中はライン同期/ランが無効化された「別の値」になるため
+  // キーに含めて分離する（混ぜると再帰ガードが壊れる）。
+  const basePosCache = new Map();
+  // シナリオ→短トークン（ホットパスで scenarioHash の再計算を避ける）
+  const scenTokMap = new WeakMap();
+  let scenTokSeq = 0;
+  const scenTok = (sc) => {
+    let tok = scenTokMap.get(sc);
+    if (tok === undefined) { tok = ++scenTokSeq; scenTokMap.set(sc, tok); }
+    return tok;
+  };
   const basePosOf = (match, scenario, team, no, slot, t) => {
+    // chainBuilding 中はラン(#30)が無効化された「別の値」— メモを迂回して混入を防ぐ
+    // （チェーン構築はシナリオ毎に1回きり・キャッシュ済みなのでメモ価値も低い）
+    if (chainBuilding) {
+      const half0 = E.halfOf(match, t);
+      return basePlayerPos(match, scenario, team, no, slot, t, {
+        half: half0, dir: match.dir[team][half0 === 1 ? "h1" : "h2"],
+        P: E.possessionAt(match, t), ballS: E.ballSlowAt(match, t),
+      });
+    }
+    const key = scenTok(scenario) + "|" + team + no + "|" + slot.id + "|" + t + "|" + (lineComputing ? 1 : 0);
+    const hit = basePosCache.get(key);
+    if (hit !== undefined) return hit;
     const half = E.halfOf(match, t);
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
     const bctx = {
@@ -223,7 +281,10 @@
       P: E.possessionAt(match, t),
       ballS: E.ballSlowAt(match, t),
     };
-    return basePlayerPos(match, scenario, team, no, slot, t, bctx);
+    const out = basePlayerPos(match, scenario, team, no, slot, t, bctx);
+    if (basePosCache.size > 120000) basePosCache.clear();
+    basePosCache.set(key, out);
+    return out;
   };
 
   /* ============ 協調ラインコントロール & オフサイド（#27・純関数・ガード付き） ============
@@ -1301,7 +1362,31 @@
       const d = disp.get(k) || { dx: 0, dy: 0 };
       d.dx += dx; d.dy += dy; disp.set(k, d);
     };
-    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+    // 空間ハッシュ（#39）: セル4m（> SEP_R）に登録し、近傍9セルの候補ペアだけ評価。
+    // 候補は (i,j) 昇順で処理 = 従来の全ペア走査と同じ加算順序（ビット同一）
+    const CELL = 4;
+    const grid = new Map();
+    for (let i = 0; i < pts.length; i++) {
+      const ck = ((pts[i].x / CELL) | 0) + ":" + ((pts[i].y / CELL) | 0);
+      (grid.get(ck) || grid.set(ck, []).get(ck)).push(i);
+    }
+    const candidates = [];
+    for (const [ck, idxs] of grid) {
+      const [cx, cy] = ck.split(":").map(Number);
+      for (const i of idxs) {
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+          const nb = grid.get((cx + ox) + ":" + (cy + oy));
+          if (!nb) continue;
+          for (const j of nb) if (j > i) candidates.push(i * 64 + j);
+        }
+      }
+    }
+    candidates.sort((a, b) => a - b);
+    let prev = -1;
+    for (const c of candidates) {
+      if (c === prev) continue;   // 重複除去（同一ペアが複数セル走査で出得る）
+      prev = c;
+      const i = (c / 64) | 0, j = c % 64;
       const a = pts[i], b = pts[j];
       let dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.hypot(dx, dy);
@@ -1349,13 +1434,18 @@
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
-      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド
+      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド。
+      // #61: opponentHt 指定チームのHT近傍切替は delay 秒ホールド後、blendSec かけて浸透
       let rosterPrev = null, prevShape = null, blendU = 1;
       const dtPhase = t - roster.phaseFrom;
-      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < 45) {
+      const htMod = E.htCorrectionOf(match, scenario, team);
+      const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
+      const phDelay = htNear ? htMod.delaySec : 0;
+      const phDur = htNear ? htMod.blendSec : 45;
+      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur) {
         rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
         prevShape = F.SHAPES[rosterPrev.shape];
-        blendU = N.smooth(clamp(dtPhase / 45));
+        blendU = N.smooth(clamp((dtPhase - phDelay) / phDur));
       }
       // 現在ピッチ上の11人
       for (const slot of shape) {
@@ -1525,7 +1615,7 @@
   E.clearCaches = () => {
     distCache.clear(); chainCache.clear(); trackCache.clear();
     restartCache.clear(); celeCache.clear(); panchorCache.clear(); pnetCache.clear();
-    rankCache.clear(); lineCache.clear(); sepCache.clear();
+    rankCache.clear(); lineCache.clear(); sepCache.clear(); basePosCache.clear();
     stateMemo = null;
   };
 })();

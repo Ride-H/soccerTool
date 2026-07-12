@@ -33,7 +33,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 175テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触）
+node --test rpdx/test/*.test.mjs    # 245テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -114,6 +114,56 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
   **コーナーの空中戦は勝者/敗者がジャンプ＆ヘッド**（#22）、近接ペアはソフト分離
 - 広告ボード・国旗・タイトルは試合メタから**データ駆動生成**（試合切替に追従）
 
+## 戦術フェーズ自動分類（#32）
+
+各時刻の局面を **set-piece / transition / build-up / progression / finishing** に決定論分類
+（保持チーム・前進度・奪取直後・リスタートからの決定木 — ヒューリスティック明示・非予測）。
+タイムライン上端の**フェーズ帯**で試合の構造が一目で分かり、チーム別のフェーズ配分・
+被プレス時間も集計（劣勢側=ビルドアップ/トランジション比が高い、が両試合で成立 — テスト固定）。
+API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
+
+**実効フォーメーション & 形メトリクス（#33）**: 宣言陣形ではなく「いま実際にどう並んでいるか」を中立に測定。
+凸包面積（コンパクトネス）・幅/縦・重心・実効ライン構成（深さギャップで3ライン分割）・ライン間距離・
+Voronoi占有率（4m格子近似）を各時刻で決定論算出。試合情報モーダルに現在時刻のスナップショット表を追加
+（守備側の日本は低ブロックで凸包 約827m²・ブラジルは攻撃時 約2146m²、というコンパクト差がモデル上で成立）。
+API: `RPDX.tactics.shapeMetrics / voronoiShare`（読み取り専用・位置と結果に不干渉）。
+
+## 相手分析体制の脆弱性プロファイラ（#59・opponent v1）
+
+「リアルタイム解析→ベンチ→選手」という**相手のフィードバック体制そのもの**の脆弱性
+（HT15分の意思決定）を、体制パラメータ（人数・伝達段数・ツール/属人依存）から決定論評価。
+3類型アーキタイプ（人海戦術型/AI・テック特化型/現場主義型）のHT時間配分（収集/会議/共有）と
+4軸スコア（情報遅延・意思決定ブレ・システム依存・**HT修正力の脆弱性**）を試合情報パネルに表示。
+**実在の連盟・チームへの断定ではなく**、宣言された仮定のモデル評価（パック未宣言なら実チームに帰属しない）。
+さらに**リアルタイム意思決定負荷**（#60）: 試合の情報フロー圧 IFL(t)（イベント密度×危険度変動×
+局面切替）と体制の処理能力から**前半の処理飽和度**・HT持ち込み情報量（backlog）・実質共有時間を算出
+（人海戦術型が最も飽和 — テスト固定）。選手側の**認知キャパ**（HT変更点数>3で過負荷）も判定。
+**HT修正力シミュレーション**（#61）: シナリオに `opponentHt: {team, archetype}` を指定すると、
+その相手のHT近傍の布陣修正が体制脆弱性に応じて**遅延（総合スコア+backlogで0〜10分）・鈍化**
+（浸透45〜135秒）する — 「意思決定の弱い相手」への後半プランを結果再構成つきで比較可能。
+既定OFF＝現行挙動と完全一致（ゴールデンマスターで保証）・世界シード（保持チェーン）は不変。
+**カウンタープラン提案**（#62）: 弱点タイプ→戦術テンプレ（二段可変=集計リセット / HT直前可変=編集時間の剥奪 /
+前線入替=ミスマッチ / 非定型立ち上がり=自動分類外し）を**実行可能な what-if シナリオ**として決定論生成し、
+相手の情報環境への影響（Δ飽和・Δbacklog・Δ実質共有）と自軍の結果再構成を actual 比で数値比較
+（`counterPlans / evaluatePlans` — 断定ではなくモデル上の比較）。
+API: `RPDX.opponent.profile / htBudget / ARCHETYPES / setupOf / iflAt / htSaturation / htCognitive / counterPlans / evaluatePlans`・`E.htCorrectionOf`
+
+## レイヤ・レジストリ（#41・拡張の正式な受け口）
+
+`RPDX.layers`（`src/layers.mjs`）は、輸入した解析レイヤ（danger / psy / duel / physio / filter / uq /
+tactics / opponent / scenlib）を `register / list / get` で一元管理する読み取り専用レジストリ。
+各レイヤの api 関数参照・依存トポロジ（deps）を宣言し、契約テストで readonly（compute 前後で世界状態が不変）を担保する。
+UI 自動配線と依存トポロジ順の実行は将来スコープ。
+
+## アクセシビリティ & 国際化（#42・v1・部分対応）
+
+- **a11y**: アイコン/短縮ボタン・メインcanvas（`role="img"`）・各モーダル（`role="dialog"`）に
+  `aria-label` を付与。構造安定 OK/警告のステータス帯は `role="status" aria-live="polite"` で読み上げ。
+  キーボード操作時のみ現れる高コントラストの可視フォーカス（`:focus-visible` 2px ブルー）。
+- **i18n**: `?lang=en` で静的クローム（約30語のボタン/パネル見出し）を英語化（`data-i18n` 属性 + 辞書）。
+  **動的な解析文言（フェーズ名・リスタート種別・危険度説明など）は日本語のまま=部分対応**。
+  残: 全文言の辞書化・スクリーンリーダーの動的読み上げ・WCAG コントラスト監査。
+
 ## 異分野輸入モジュール（v1.1）
 
 - **UQ（不確実性定量化）** `uq.mjs`: ゴール30秒前警報の TPR/FPR/Brier を全収録試合で評価し
@@ -167,6 +217,35 @@ KIKEN = 100 × clamp( (.18 SDI + .15 CPR + .13 PLV + .22 OVL + .20 TPA + .12 TRV
 - **交代規則は不可侵レイヤ**: 5人・3窓（HT非カウント）・再入場禁止・GK同士・常時GK1人 —
   手動もAI提案（TacticalSubAdvisor）も布陣エディタも必ずバリデータを通過
 - **決定論シナリオ** → 同じ交代・布陣プランは何度実行しても同じ結果（無限に再実行可能）
+- **プロパティベース・ハーネス**（#36）: シード付き生成器で交代シナリオ空間（2^n部分集合）を
+  決定論サンプルし、どの世界でも成立すべき不変量（11人×2/GK各1・支配率合計100%・決定論・
+  速度上限・スクラブ順序非依存・結果再構成の健全性）を自動検証。反例はシード番号つきで完全再現可能
+- **専門知ルール・オラクル**（#37）: 競技規則・定性知識のルール束（常時11人×2/GK各1・ボール場内・
+  チェーン駆動時の保持者密着・GKは自陣・各リスタートの規則位置・平均速度の現実域・支配率合計100%）を
+  actual と what-if の両世界でサンプル検証 — 実測なしでも「サッカーとして破綻していない」ことを常時保証
+- **ゴールデンマスター回帰**（#35）: 世界状態（座標・ボール・保持者・結果再構成）のハッシュを
+  スナップショットに固定し、意図しない挙動変化を CI で検出。意図的な変更は
+  `UPDATE_GOLDEN=1 node --test rpdx/test/golden.test.mjs` で更新し PR 差分としてレビュー
+
+## シナリオ・ライブラリ & バッチ・シミュレーション（#34）
+
+決定論の強みを運用へ: シナリオ（交代/布陣/微調整）を**最小表現で直列化**し、
+URL 深いリンク（`?scenario=<JSON>`）やファイルで共有・復元（規則検証つき）。
+**バッチ実行**で多数シナリオを一括評価（結果スコア・追加ゴール・危険度平均・首位フェーズ）:
+
+```bash
+node rpdx/tools/batch.mjs wc2026-r32-bra-jpn        # 交代取消の全変種を感度一覧（~5s）
+node rpdx/tools/batch.mjs <matchId> scenarios.json  # 自作シナリオ束の一括評価
+```
+
+交代分スイープ格子（`RPDX.scenlib.subMinuteGrid`）で「何分に代えるべきだったか」を面で比較できます。
+
+**決定論ポリシー探索（#45・research・v1）**: `RPDX.policy`（`src/policy.mjs`）は、決定論エンジンを
+「意思決定の探索」に使う研究レイヤ。`envSpec`（行動空間メタ＝利用可能な陣形・交代枠・分レンジ）・
+`objective`（決定論目的値＝結果再構成の得失点差＋小さな危険度差の項）・`gridSearch`（陣形×分の格子から
+validator 通過候補を生成し目的値で降順ランク）。**これはモデル上の探索であり、実試合の予測ではありません**
+——目的値は本ツールの結果再構成（SIM.outcome）と危険度場（D.curve）というモデル出力に対する順序付けです。
+残: 進化戦略・方策の外部学習インポート。
 
 ## 交代・布陣が「試合結果」を変える（What-if Outcome）
 
@@ -214,14 +293,29 @@ URLパラメータ: `?match=wc2026-r16-arg-egy&t=3510&cam=tactical&zone=JPN&fiel
 チーム強度からポゼッション・得点・危険度を決定論生成し、同じ3D/交代シム/D²-Fieldが動きます。
 API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 
+## 性能（#40 ベンチ & 予算）
+
+`node rpdx/tools/bench.mjs` が代表操作（チェーン構築・再生ループ・危険度曲線・結果再構成・
+生理集計・走行距離）を決定論ワークロードで計測。CI は主要4操作に**性能予算**を課し
+（並列実行の競合を見込んだ余裕設定・桁違いの退行のみ検出）、最適化の効果と退行を数値で管理します。
+**#38 Worker オフロード**: 危険度曲線の計算を **Blob Worker**（core scriptタグ＝DOM非依存の
+計算層をそのまま再評価・依存ゼロ維持）へ移し、メインスレッドのヒッチを排除。シナリオは
+直列化（#34）で受け渡し＝内容ベースhashで同一世界・同一結果。Worker不可・無応答2.5秒で
+従来のチャンク計算へ自動フォールバック（二重完了ガードつき・結果は決定論でどちらも同一）。
+**#39 高速化**: 基礎位置の per-t メモ（同一時刻の重複評価 ~38→~23回）＋相互分離の空間ハッシュ
+（加算順序保存）で、走行距離 −18%・生理集計 −32%・総計 −18% — **出力はビット同一**
+（ゴールデンマスターが保証・最適化中の値混入バグも2度検出した実績）。
+
 ## 構成
 
 ```
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
-             psy / duel / physio / filter / uq / generic
+             psy / duel / physio / filter / uq / tactics / opponent / scenlib / policy / layers / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   175テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
-             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline / pressing）
+rpdx/test/   245テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
+             pressing / golden / oracle / property）
+rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
 ```
