@@ -42,6 +42,16 @@
   };
   E.teamKeys = (match) => Object.keys(match.teams);
   E.oppOf = (match, team) => E.teamKeys(match).find(k => k !== team);
+
+  // #89: 選手能力値・名前のシナリオ級上書き（無ければ squad 由来・golden安全）
+  E.attrsOf = (match, scenario, team, no) => {
+    const p = match.teams[team].squad.find(q => q.no === no);
+    const base = p ? p.attrs : { pac: 75, sta: 75, def: 60, att: 60, tec: 60, aer: 60 };
+    const ov = scenario && scenario.attrOverrides && scenario.attrOverrides[team] && scenario.attrOverrides[team][no];
+    return ov ? { ...base, ...ov } : base;
+  };
+  E.nameOverrideOf = (match, scenario, team, no) =>
+    (scenario && scenario.nameOverrides && scenario.nameOverrides[team] && scenario.nameOverrides[team][no]) || null;
   // P>0 が指すチーム（既定 possessionPlus）に対する符号
   E.attackSign = (match, team) => (team === (match.possessionPlus || E.teamKeys(match)[0]) ? +1 : -1);
 
@@ -102,7 +112,21 @@
     // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
     const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
       ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
-    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}|${ea}`;
+    // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
+    let ao = "";
+    if (scenario && scenario.attrOverrides) {
+      for (const tm of Object.keys(scenario.attrOverrides).sort())
+        for (const no of Object.keys(scenario.attrOverrides[tm]).sort()) {
+          const o = scenario.attrOverrides[tm][no];
+          ao += tm + no + ":" + ["pac","sta","def","att","tec","aer"].map(k => o[k] ?? "").join(",") + ";";
+        }
+    }
+    let nm = "";
+    if (scenario && scenario.nameOverrides) {
+      for (const tm of Object.keys(scenario.nameOverrides).sort())
+        nm += tm + Object.keys(scenario.nameOverrides[tm]).sort().join(",") + "|";
+    }
+    return `${E.scenarioHash(scenario)}|${scenario && scenario.outcome ? scenario.outcome.sig : 0}|${ht}|${ea}|${ao}|${nm}`;
   };
 
   // #61: HT修正力ハンディ — scenario.opponentHt = {team, archetype?|staff/stages/toolShare/fieldShare}
@@ -971,8 +995,7 @@
     const pr = E.presenceOf(match, scenario, team, no);
     if (!pr || t < pr.from) return 0;
     const mins = (Math.min(t, pr.to) - pr.from) / 60;
-    const p = match.teams[team].squad.find(q => q.no === no);
-    const sta = p ? p.attrs.sta : 75;
+    const sta = E.attrsOf(match, scenario, team, no).sta;
     return clamp((mins / 95) * (1.45 - (sta / 100) * 0.75));
   };
 
@@ -1479,10 +1502,13 @@
           pos.y = lerp(sideY, pos.y, u);
           entering = 1 - u;
         }
+        const nmOv = E.nameOverrideOf(match, scenario, team, no);
         players.push({
-          team, no, name: p.name, ja: p.ja, label: p.label, pos2: p.pos,
+          team, no,
+          name: (nmOv && nmOv.name) || p.name, ja: (nmOv && (nmOv.ja || nmOv.name)) || p.ja,
+          label: (nmOv && nmOv.label) || p.label, pos2: p.pos,
           role: slot.role, slot: slot.id, x: pos.x, y: pos.y,
-          onPitch: true, entering, attrs: p.attrs, captain: false,
+          onPitch: true, entering, attrs: E.attrsOf(match, scenario, team, no), captain: false,
           hasBall: false,   // ボール吸着の後段で確定（アンカー再現中は立たない）
         });
       }

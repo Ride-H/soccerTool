@@ -969,9 +969,11 @@ self.onmessage = (e) => {
     $("#inspNum").textContent = p.no;
     $("#inspNum").style.background = isGK ? T.kit.gk : T.kit.shirt;
     $("#inspNum").style.color = isGK ? T.kit.gkNumber : T.kit.number;
-    $("#inspName").textContent = p.ja + (p.captain ? " ©" : "");
-    $("#inspSub").textContent = `${p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
-    const A = p.attrs;
+    const nmOv = E.nameOverrideOf(App.match, activeScenario(), team, no);
+    const dispJa = (nmOv && (nmOv.ja || nmOv.name)) || p.ja;
+    $("#inspName").textContent = dispJa + (p.captain ? " ©" : "") + (nmOv || E.attrsOf(App.match, activeScenario(), team, no) !== p.attrs ? "" : "");
+    $("#inspSub").textContent = `${(nmOv && nmOv.name) || p.name} · ${p.pos} · ${p.club} · ${p.caps}キャップ${p.goals ? ` ${p.goals}G` : ""}`;
+    const A = E.attrsOf(App.match, activeScenario(), team, no);
     $("#inspAttrs").innerHTML = [["速度", A.pac], ["持久", A.sta], ["守備", A.def], ["攻撃", A.att], ["技術", A.tec], ["空中", A.aer]]
       .map(([k, v]) => `<div class="attr"><span>${k}</span><div class="track"><div class="fill" style="width:${v}%;background:${seriesColor(team)}"></div></div><span class="num">${v}</span></div>`).join("");
     $("#inspector").classList.add("open");
@@ -986,7 +988,50 @@ self.onmessage = (e) => {
       $("#inspSpr").textContent = `${s.sprints}回 / ${Math.round(s.hsr)}m`;
     });
   };
-  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); buildRoster(); };
+  // #89: 能力値・名前の編集（シナリオ級上書き → 結果再計算）
+  const ATTR_KEYS = [["pac","速度"],["sta","持久"],["def","守備"],["att","攻撃"],["tec","技術"],["aer","空中"]];
+  const buildInspEdit = () => {
+    const sel = App.selected; if (!sel) return;
+    const A = E.attrsOf(App.match, activeScenario(), sel.team, sel.no);
+    const nm = E.nameOverrideOf(App.match, activeScenario(), sel.team, sel.no);
+    const p = App.match.teams[sel.team].squad.find(q => q.no === sel.no);
+    const rows = ATTR_KEYS.map(([k, lbl]) =>
+      `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
+       <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
+       <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    $("#inspEditForm").innerHTML =
+      `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
+      + rows
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
+         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+    $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
+      r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
+    $("#edApply").onclick = () => {
+      const sc = forkIfActual();
+      const ov = {};
+      $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r => ov[r.dataset.attr] = +r.value);
+      (sc.attrOverrides ??= {})[sel.team] ??= {}; sc.attrOverrides[sel.team][sel.no] = ov;
+      const newName = $("#edName").value.trim();
+      if (newName && newName !== p.ja) { (sc.nameOverrides ??= {})[sel.team] ??= {}; sc.nameOverrides[sel.team][sel.no] = { ja: newName, name: newName, label: newName }; }
+      refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+    $("#edReset").onclick = () => {
+      const sc = App.scenario;
+      if (sc && sc.attrOverrides && sc.attrOverrides[sel.team]) delete sc.attrOverrides[sel.team][sel.no];
+      if (sc && sc.nameOverrides && sc.nameOverrides[sel.team]) delete sc.nameOverrides[sel.team][sel.no];
+      if (sc) refreshScenario(sc);
+      $("#inspEditForm").style.display = "none";
+      selectPlayer(sel.team, sel.no);
+    };
+  };
+  $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
+    const f = $("#inspEditForm");
+    if (f.style.display === "none") { buildInspEdit(); f.style.display = "block"; }
+    else f.style.display = "none";
+  });
+  $("#inspClose").onclick = () => { App.selected = null; $("#inspector").classList.remove("open"); $("#inspEditForm").style.display = "none"; buildRoster(); };
 
   let lastInspect = 0;
   const updateInspector = (force) => {
