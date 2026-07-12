@@ -60,12 +60,12 @@
     for (let i = 0; i < atk.length; i++) {
       const p = atk[i], dx = cx - p.x, dy = cy - p.y;
       const s = influence(p);
-      sa += Math.exp(-(dx * dx + dy * dy) / (s * s));
+      sa += Math.exp(-(dx * dx + dy * dy) / (s * s)) * (p.dwAtk ?? 1);   // #90: att/tec 重み（未編集1.0）
     }
     for (let i = 0; i < def.length; i++) {
       const p = def[i], dx = cx - p.x, dy = cy - p.y;
       const s = influence(p);
-      sd += Math.exp(-(dx * dx + dy * dy) / (s * s));
+      sd += Math.exp(-(dx * dx + dy * dy) / (s * s)) * (p.dwDef ?? 1);   // #90: def 重み（未編集1.0）
     }
     return sa / (sa + sd + 1e-6);
   };

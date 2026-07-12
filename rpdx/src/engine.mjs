@@ -1503,12 +1503,18 @@
           entering = 1 - u;
         }
         const nmOv = E.nameOverrideOf(match, scenario, team, no);
+        const effA = E.attrsOf(match, scenario, team, no);
+        // #90: 危険度重み dw — 能力値の「上書き前からの差分」ベース（未編集=1.0で較正不変）。
+        // att/tec は攻撃支配、def は守備支配。pac は influence(絶対値)で別途（既に較正済み）。
+        const dAtk = clamp(((effA.att - p.attrs.att) + (effA.tec - p.attrs.tec)) / 2, -40, 40) / 100 * 0.6;
+        const dDef = clamp(effA.def - p.attrs.def, -40, 40) / 100 * 0.6;
         players.push({
           team, no,
           name: (nmOv && nmOv.name) || p.name, ja: (nmOv && (nmOv.ja || nmOv.name)) || p.ja,
           label: (nmOv && nmOv.label) || p.label, pos2: p.pos,
           role: slot.role, slot: slot.id, x: pos.x, y: pos.y,
-          onPitch: true, entering, attrs: E.attrsOf(match, scenario, team, no), captain: false,
+          onPitch: true, entering, attrs: effA, captain: false,
+          dwAtk: 1 + dAtk, dwDef: 1 + dDef,   // 未編集は 1.0（golden不変）
           hasBall: false,   // ボール吸着の後段で確定（アンカー再現中は立たない）
         });
       }
