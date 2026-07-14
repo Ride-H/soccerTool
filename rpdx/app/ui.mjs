@@ -1841,6 +1841,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   $("#coreGeom").onclick = () => setCore(true);
   $("#toggleL").onclick = () => $("#dockL").classList.toggle("shown");
   $("#toggleR").onclick = () => $("#dockR").classList.toggle("shown");
+  // #105: モバイルはビューバー/タイムラインを既定で畳み、⚙/📈 で開閉（ピッチ全体を基本に・下部は排他）
+  $("#viewToggle") && ($("#viewToggle").onclick = () => {
+    $("#viewbar").classList.toggle("open");
+    $("#timelineWrap").classList.remove("open");
+  });
+  $("#tlToggle") && ($("#tlToggle").onclick = () => {
+    const open = $("#timelineWrap").classList.toggle("open");
+    $("#viewbar").classList.remove("open");
+    if (open) fitTimeline();
+  });
 
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
