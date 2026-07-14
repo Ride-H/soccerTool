@@ -51,7 +51,7 @@ button, select, input, textarea { font-family: inherit; color: inherit; }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: var(--mono); }
 
-#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #gl:active { cursor: grabbing; }
 
 /* ---------- 汎用パネル ---------- */
@@ -170,6 +170,7 @@ button, select, input, textarea { font-family: inherit; color: inherit; }
 }
 #toggleL { left: 12px; display: none; }
 #toggleR { right: 12px; display: none; }
+#viewToggle, #tlToggle { display: none; }   /* #105: モバイルのみ表示（ビューバー/タイムライン開閉） */
 
 /* ---------- 選手リスト ---------- */
 .roster-tabs { display: flex; gap: 5px; margin-bottom: 9px; }
@@ -419,11 +420,61 @@ body.showkeys #keyhelp { display: block; }
   #inspector { right: 12px; bottom: 300px; }
 }
 @media (max-width: 860px) {
-  #dockL { transform: translateX(-346px); } #dockR { transform: translateX(336px); }
-  #dockL.shown { transform: none; } #dockR.shown { transform: none; }
-  #toggleL, #toggleR { display: flex; }
-  #viewbar { top: auto; bottom: 130px; }
-  #timelineWrap { bottom: 8px; left: 8px; right: 8px; }
+  /* ドック=全高ドロワー: 開いたら前面(z30)＋背景を暗転して読みやすく（設定・危険度・ロスターへ到達） */
+  .dock { z-index: 30; }
+  #dockL, #dockR { top: 8px; bottom: 8px; width: min(370px, 94vw); }
+  #dockL { left: 8px; transform: translateX(calc(-100% - 12px)); }
+  #dockR { right: 8px; transform: translateX(calc(100% + 12px)); }
+  #dockL.shown, #dockR.shown { transform: none; box-shadow: 0 0 0 100vmax rgba(3,6,12,.5); }
+  #toggleL, #toggleR { display: flex; z-index: 31; }   /* トグルはドロワーより前面（閉じられる） */
+  /* 下部タイムラインは短い帯に固定（中央まで来ない・折り返しは横スクロールへ） */
+  /* 危険度タイムライン=既定は畳む → 📈(左下) で開閉（開くと最大46vh・ピッチを基本に） */
+  #tlToggle { display: flex; top: auto; bottom: 8px; left: 8px; z-index: 31; }
+  #timelineWrap { display: none; left: 8px; right: 8px; bottom: 8px; max-height: 46vh; overflow: hidden; padding: 8px 10px 6px; }
+  #timelineWrap.open { display: block; }
+  #tlHead { flex-wrap: nowrap; overflow-x: auto; }
+  #tlHead .spacer { display: none; }
+  #tlCanvas { height: 92px; }
+  /* 選手リストの内部スクロールを解除し、ドックを1つのスクロールに（配置/交代へ到達可能に） */
+  .plist { max-height: none; }
+  /* スコアボード=小型化（支配率バーは省略して枠を縮小・ピッチを広く） */
+  #scoreboard { border-radius: 10px; max-width: 92vw; }
+  #scoreboard .team { padding: 3px 8px; font-size: 10px; gap: 5px; }
+  #scoreboard .team .flag { width: 16px; height: 11px; }
+  #scoreboard .mid { padding: 3px 10px; min-width: 74px; }
+  #scoreboard .score { font-size: 15px; }
+  #scoreboard .clock .t { font-size: 10px; }
+  #scoreboard .clock .half { font-size: 8.5px; }
+  #scoreboard .possbar, #scoreboard .possnum { display: none; }
+  /* ビューバー=既定は畳む（ピッチ全体優先）→ ⚙(右下) で開閉（開くと薄い横スクロール1行） */
+  #viewToggle { display: flex; top: auto; bottom: 8px; right: 8px; z-index: 31; }
+  #viewbar { display: none; transform: none; top: auto; bottom: 56px; left: 8px; right: 8px; width: auto; max-width: none;
+             flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; }
+  #viewbar.open { display: flex; }
+  #viewbar .btn { padding: 4px 10px; }
+  /* インスペクタ=下部シート（重ならない） */
+  #inspector { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 52vh; overflow-y: auto; z-index: 32; }
+}
+/* 横向き・低い画面高: 上部を間引き、帯をさらに圧縮して重なりを解消 */
+@media (max-width: 900px) and (max-height: 460px) {
+  #statusband { display: none; }
+  #scoreboard { top: 6px; }
+  #tlCanvas { height: 60px; }
+  #inspector { max-height: 82vh; }
+}
+/* #105: ドラッグ面はブラウザのスクロール/ズームに奪われないよう touch-action を無効化 */
+#fmPitch { touch-action: none; }
+/* #105: タッチ端末（hover 不可・coarse ポインタ）— hover 依存UIの可視化とタップ標的の拡大 */
+@media (hover: none) {
+  .prow .redit { opacity: 1; }              /* hover で出る編集ボタン（✎）を常時表示 */
+}
+@media (pointer: coarse) {
+  .btn { min-height: 34px; }
+  .sel, .numin { min-height: 32px; }
+  .prow { padding: 8px 6px; }
+  .prow .redit { width: 32px; height: 28px; opacity: 1; }
+  .dock-toggle { width: 44px; height: 44px; font-size: 16px; }
+  input[type="range"] { height: 30px; }
 }
 /* ---------- PSY 心理生理レイヤー ---------- */
 .momo-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
@@ -527,6 +578,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
+<button class="dock-toggle" id="viewToggle" aria-label="表示コントロールの開閉（toggle view controls）" title="カメラ・表示切替">⚙</button>
+<button class="dock-toggle" id="tlToggle" aria-label="危険度タイムラインの開閉（toggle danger timeline）" title="危険度の推移">📈</button>
 
 <!-- 左ドック: 選手・配置・交代・結果 -->
 <button class="dock-toggle" id="toggleL" aria-label="左パネルの開閉（toggle left panel）">≡</button>
@@ -729,7 +782,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
    ========================================================================= */
 (() => {
   const R = (globalThis.RPDX ??= {});
-  R.VERSION = "1.0.0";
+  R.VERSION = "1.1.0";
 })();
 
 
@@ -6907,13 +6960,45 @@ window.addEventListener("error", (e) => {
     // 入力
     const keys = new Set();
     let dragging = 0, lastX = 0, lastY = 0, moved = 0;
+    // #105: マルチタッチ（2本指ピンチ=ズーム / 2本指パン）。1本指/マウスは従来どおり。
+    const activePts = new Map();     // pointerId → {x,y}
+    let pinchDist = 0, pinchMx = 0, pinchMy = 0, pinching = false;
+    const twoPts = () => { const v = [...activePts.values()]; return [v[0], v[1]]; };
     canvas.addEventListener("pointerdown", (e) => {
       if (api.editMode) return;        // #82: 編集モード中はカメラ操作を抑止（UI側がドラッグを持つ）
-      dragging = e.button === 2 || e.shiftKey ? 2 : 1;
-      lastX = e.clientX; lastY = e.clientY; moved = 0;
+      activePts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       canvas.setPointerCapture(e.pointerId);
+      if (activePts.size >= 2) {
+        const [p1, p2] = twoPts();
+        pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        pinchMx = (p1.x + p2.x) / 2; pinchMy = (p1.y + p2.y) / 2;
+        pinching = true; dragging = 0;    // 2本指開始: 単一ドラッグを解除
+      } else {
+        dragging = e.button === 2 || e.shiftKey ? 2 : 1;
+        lastX = e.clientX; lastY = e.clientY; moved = 0;
+      }
     });
     canvas.addEventListener("pointermove", (e) => {
+      if (!activePts.has(e.pointerId)) return;
+      activePts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // 2本指: ピンチ=ズーム + 中点移動=パン（fly 以外）
+      if (pinching && activePts.size >= 2) {
+        if (cam.mode !== "fly") {
+          const [p1, p2] = twoPts();
+          const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+          const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+          cam.anim = null;
+          if (pinchDist > 0 && d > 0) cam.dist = clamp(cam.dist * (pinchDist / d), 9, 200);
+          const s = cam.dist * 0.0016;
+          const dx = mx - pinchMx, dy = my - pinchMy;
+          const cx = Math.cos(cam.theta), sx = Math.sin(cam.theta);
+          cam.target[0] = clamp(cam.target[0] + (-dx * sx + dy * cx) * s, -60, 60);
+          cam.target[2] = clamp(cam.target[2] + (dx * cx + dy * sx) * s, -45, 45);
+          cam.followBall = false;
+          pinchDist = d; pinchMx = mx; pinchMy = my;
+        }
+        return;
+      }
       if (!dragging) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
@@ -6938,7 +7023,18 @@ window.addEventListener("error", (e) => {
         cam.phi = clamp(cam.phi + dy * 0.004, 0.06, 1.52);
       }
     });
-    canvas.addEventListener("pointerup", () => { dragging = 0; });
+    const endPtr = (e) => {
+      activePts.delete(e.pointerId);
+      if (activePts.size < 2) pinching = false;
+      if (activePts.size === 1) {
+        const [p] = [...activePts.values()];
+        lastX = p.x; lastY = p.y; dragging = 1; moved = 0;   // 残った指で旋回継続（ジャンプ防止）
+      } else if (activePts.size === 0) {
+        dragging = 0;
+      }
+    };
+    canvas.addEventListener("pointerup", endPtr);
+    canvas.addEventListener("pointercancel", endPtr);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
@@ -7828,7 +7924,8 @@ window.addEventListener("error", (e) => {
   let dWorker = null, dwSeq = 0, dwFailed = false;
   const dwCbs = new Map();
   const workerCurve = (match, sc, opts, onDone) => {
-    if (dwFailed || typeof Worker === "undefined") return false;
+    // file:// では Blob Worker が origin=null で拒否される環境があるため最初から使わない（メインスレッド計算へ）
+    if (dwFailed || typeof Worker === "undefined" || location.protocol === "file:") return false;
     try {
       if (!dWorker) {
         const core = document.getElementById("rpdx-core");
@@ -7943,7 +8040,23 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
-    renderer = R.render3d.create($("#gl"), App.match);
+    try {
+      renderer = R.render3d.create($("#gl"), App.match);
+    } catch (err) {
+      // WebGL2 未対応環境（iOS の Files/Quick Look プレビュー等）: 固まらせず原因と導線を表示
+      const l = $("#loading");
+      if (l) {
+        l.style.display = "flex";
+        l.innerHTML =
+          '<div style="max-width:330px;text-align:center;padding:22px;color:#e6ecf8;font:14px/1.75 system-ui,-apple-system,sans-serif">' +
+          '<div style="font-size:30px;font-weight:200;letter-spacing:.22em;margin-bottom:14px">RPD<span style="color:#E7CD96">–X</span></div>' +
+          '<b>3D表示（WebGL2）を初期化できませんでした。</b><br>' +
+          'この開き方（iOS の「ファイル」プレビュー等）は 3D に対応していません。<br><br>' +
+          '<b>Safari で URL から</b>開いてください。オフライン常用は「ホーム画面に追加」を推奨。' +
+          '<div style="color:#7f8ea6;margin-top:12px;font-size:11px;font-family:monospace">' + String(err && err.message || err) + '</div></div>';
+      }
+      return;
+    }
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
     window.addEventListener("resize", fit);
@@ -7999,6 +8112,11 @@ self.onmessage = (e) => {
         $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
+    // 保険: どんな環境（file:// 等で曲線計算が詰まる等）でもローディングで固まらないよう強制解除
+    setTimeout(() => {
+      const l = $("#loading");
+      if (l && l.style.display !== "none") { l.style.display = "none"; App.playing = urlq.get("play") !== "0"; }
+    }, 4500);
     // 事前計算の進捗をローディングにも反映
     const origStatus = $("#curveStatus");
     const obs = new MutationObserver(() => {
@@ -9539,6 +9657,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   $("#coreGeom").onclick = () => setCore(true);
   $("#toggleL").onclick = () => $("#dockL").classList.toggle("shown");
   $("#toggleR").onclick = () => $("#dockR").classList.toggle("shown");
+  // #105: モバイルはビューバー/タイムラインを既定で畳み、⚙/📈 で開閉（ピッチ全体を基本に・下部は排他）
+  $("#viewToggle") && ($("#viewToggle").onclick = () => {
+    $("#viewbar").classList.toggle("open");
+    $("#timelineWrap").classList.remove("open");
+  });
+  $("#tlToggle") && ($("#tlToggle").onclick = () => {
+    const open = $("#timelineWrap").classList.toggle("open");
+    $("#viewbar").classList.remove("open");
+    if (open) fitTimeline();
+  });
 
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;

@@ -130,7 +130,8 @@
   let dWorker = null, dwSeq = 0, dwFailed = false;
   const dwCbs = new Map();
   const workerCurve = (match, sc, opts, onDone) => {
-    if (dwFailed || typeof Worker === "undefined") return false;
+    // file:// では Blob Worker が origin=null で拒否される環境があるため最初から使わない（メインスレッド計算へ）
+    if (dwFailed || typeof Worker === "undefined" || location.protocol === "file:") return false;
     try {
       if (!dWorker) {
         const core = document.getElementById("rpdx-core");
@@ -245,7 +246,23 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
-    renderer = R.render3d.create($("#gl"), App.match);
+    try {
+      renderer = R.render3d.create($("#gl"), App.match);
+    } catch (err) {
+      // WebGL2 未対応環境（iOS の Files/Quick Look プレビュー等）: 固まらせず原因と導線を表示
+      const l = $("#loading");
+      if (l) {
+        l.style.display = "flex";
+        l.innerHTML =
+          '<div style="max-width:330px;text-align:center;padding:22px;color:#e6ecf8;font:14px/1.75 system-ui,-apple-system,sans-serif">' +
+          '<div style="font-size:30px;font-weight:200;letter-spacing:.22em;margin-bottom:14px">RPD<span style="color:#E7CD96">–X</span></div>' +
+          '<b>3D表示（WebGL2）を初期化できませんでした。</b><br>' +
+          'この開き方（iOS の「ファイル」プレビュー等）は 3D に対応していません。<br><br>' +
+          '<b>Safari で URL から</b>開いてください。オフライン常用は「ホーム画面に追加」を推奨。' +
+          '<div style="color:#7f8ea6;margin-top:12px;font-size:11px;font-family:monospace">' + String(err && err.message || err) + '</div></div>';
+      }
+      return;
+    }
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
     window.addEventListener("resize", fit);
@@ -301,6 +318,11 @@ self.onmessage = (e) => {
         $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
+    // 保険: どんな環境（file:// 等で曲線計算が詰まる等）でもローディングで固まらないよう強制解除
+    setTimeout(() => {
+      const l = $("#loading");
+      if (l && l.style.display !== "none") { l.style.display = "none"; App.playing = urlq.get("play") !== "0"; }
+    }, 4500);
     // 事前計算の進捗をローディングにも反映
     const origStatus = $("#curveStatus");
     const obs = new MutationObserver(() => {
@@ -1841,6 +1863,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   $("#coreGeom").onclick = () => setCore(true);
   $("#toggleL").onclick = () => $("#dockL").classList.toggle("shown");
   $("#toggleR").onclick = () => $("#dockR").classList.toggle("shown");
+  // #105: モバイルはビューバー/タイムラインを既定で畳み、⚙/📈 で開閉（ピッチ全体を基本に・下部は排他）
+  $("#viewToggle") && ($("#viewToggle").onclick = () => {
+    $("#viewbar").classList.toggle("open");
+    $("#timelineWrap").classList.remove("open");
+  });
+  $("#tlToggle") && ($("#tlToggle").onclick = () => {
+    const open = $("#timelineWrap").classList.toggle("open");
+    $("#viewbar").classList.remove("open");
+    if (open) fitTimeline();
+  });
 
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
