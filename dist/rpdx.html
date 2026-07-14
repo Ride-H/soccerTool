@@ -7924,7 +7924,8 @@ window.addEventListener("error", (e) => {
   let dWorker = null, dwSeq = 0, dwFailed = false;
   const dwCbs = new Map();
   const workerCurve = (match, sc, opts, onDone) => {
-    if (dwFailed || typeof Worker === "undefined") return false;
+    // file:// では Blob Worker が origin=null で拒否される環境があるため最初から使わない（メインスレッド計算へ）
+    if (dwFailed || typeof Worker === "undefined" || location.protocol === "file:") return false;
     try {
       if (!dWorker) {
         const core = document.getElementById("rpdx-core");
@@ -8095,6 +8096,11 @@ self.onmessage = (e) => {
         $("#btnPlay").textContent = App.playing ? "❚❚ " + t("停止") : "▶ " + t("再生");
       }, 250);
     });
+    // 保険: どんな環境（file:// 等で曲線計算が詰まる等）でもローディングで固まらないよう強制解除
+    setTimeout(() => {
+      const l = $("#loading");
+      if (l && l.style.display !== "none") { l.style.display = "none"; App.playing = urlq.get("play") !== "0"; }
+    }, 4500);
     // 事前計算の進捗をローディングにも反映
     const origStatus = $("#curveStatus");
     const obs = new MutationObserver(() => {
