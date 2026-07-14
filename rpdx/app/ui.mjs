@@ -246,7 +246,23 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
-    renderer = R.render3d.create($("#gl"), App.match);
+    try {
+      renderer = R.render3d.create($("#gl"), App.match);
+    } catch (err) {
+      // WebGL2 未対応環境（iOS の Files/Quick Look プレビュー等）: 固まらせず原因と導線を表示
+      const l = $("#loading");
+      if (l) {
+        l.style.display = "flex";
+        l.innerHTML =
+          '<div style="max-width:330px;text-align:center;padding:22px;color:#e6ecf8;font:14px/1.75 system-ui,-apple-system,sans-serif">' +
+          '<div style="font-size:30px;font-weight:200;letter-spacing:.22em;margin-bottom:14px">RPD<span style="color:#E7CD96">–X</span></div>' +
+          '<b>3D表示（WebGL2）を初期化できませんでした。</b><br>' +
+          'この開き方（iOS の「ファイル」プレビュー等）は 3D に対応していません。<br><br>' +
+          '<b>Safari で URL から</b>開いてください。オフライン常用は「ホーム画面に追加」を推奨。' +
+          '<div style="color:#7f8ea6;margin-top:12px;font-size:11px;font-family:monospace">' + String(err && err.message || err) + '</div></div>';
+      }
+      return;
+    }
     App.rosterTab = teamOrder()[1] || teamOrder()[0]; // 既定: 日本
     const fit = () => { renderer.resize(); fitTimeline(); fitEditor(); fitPsy(); };
     window.addEventListener("resize", fit);
