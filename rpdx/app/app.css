@@ -44,7 +44,7 @@ button, select, input, textarea { font-family: inherit; color: inherit; }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: var(--mono); }
 
-#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #gl:active { cursor: grabbing; }
 
 /* ---------- 汎用パネル ---------- */
@@ -417,6 +417,21 @@ body.showkeys #keyhelp { display: block; }
   #toggleL, #toggleR { display: flex; }
   #viewbar { top: auto; bottom: 130px; }
   #timelineWrap { bottom: 8px; left: 8px; right: 8px; }
+}
+/* #105: ドラッグ面はブラウザのスクロール/ズームに奪われないよう touch-action を無効化 */
+#fmPitch { touch-action: none; }
+/* #105: タッチ端末（hover 不可・coarse ポインタ）— hover 依存UIの可視化とタップ標的の拡大 */
+@media (hover: none) {
+  .prow .redit { opacity: 1; }              /* hover で出る編集ボタン（✎）を常時表示 */
+}
+@media (pointer: coarse) {
+  .btn { min-height: 34px; }
+  .sel, .numin { min-height: 32px; }
+  .prow { padding: 8px 6px; }
+  .prow .redit { width: 32px; height: 28px; opacity: 1; }
+  .dock-toggle { width: 44px; height: 44px; font-size: 16px; }
+  input[type="range"] { height: 30px; }
+  #dockL, #dockR { width: min(360px, 92vw); }   /* 狭幅端末で読みやすく */
 }
 /* ---------- PSY 心理生理レイヤー ---------- */
 .momo-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }

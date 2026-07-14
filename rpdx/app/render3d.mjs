@@ -614,13 +614,45 @@
     // 入力
     const keys = new Set();
     let dragging = 0, lastX = 0, lastY = 0, moved = 0;
+    // #105: マルチタッチ（2本指ピンチ=ズーム / 2本指パン）。1本指/マウスは従来どおり。
+    const activePts = new Map();     // pointerId → {x,y}
+    let pinchDist = 0, pinchMx = 0, pinchMy = 0, pinching = false;
+    const twoPts = () => { const v = [...activePts.values()]; return [v[0], v[1]]; };
     canvas.addEventListener("pointerdown", (e) => {
       if (api.editMode) return;        // #82: 編集モード中はカメラ操作を抑止（UI側がドラッグを持つ）
-      dragging = e.button === 2 || e.shiftKey ? 2 : 1;
-      lastX = e.clientX; lastY = e.clientY; moved = 0;
+      activePts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       canvas.setPointerCapture(e.pointerId);
+      if (activePts.size >= 2) {
+        const [p1, p2] = twoPts();
+        pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        pinchMx = (p1.x + p2.x) / 2; pinchMy = (p1.y + p2.y) / 2;
+        pinching = true; dragging = 0;    // 2本指開始: 単一ドラッグを解除
+      } else {
+        dragging = e.button === 2 || e.shiftKey ? 2 : 1;
+        lastX = e.clientX; lastY = e.clientY; moved = 0;
+      }
     });
     canvas.addEventListener("pointermove", (e) => {
+      if (!activePts.has(e.pointerId)) return;
+      activePts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // 2本指: ピンチ=ズーム + 中点移動=パン（fly 以外）
+      if (pinching && activePts.size >= 2) {
+        if (cam.mode !== "fly") {
+          const [p1, p2] = twoPts();
+          const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+          const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+          cam.anim = null;
+          if (pinchDist > 0 && d > 0) cam.dist = clamp(cam.dist * (pinchDist / d), 9, 200);
+          const s = cam.dist * 0.0016;
+          const dx = mx - pinchMx, dy = my - pinchMy;
+          const cx = Math.cos(cam.theta), sx = Math.sin(cam.theta);
+          cam.target[0] = clamp(cam.target[0] + (-dx * sx + dy * cx) * s, -60, 60);
+          cam.target[2] = clamp(cam.target[2] + (dx * cx + dy * sx) * s, -45, 45);
+          cam.followBall = false;
+          pinchDist = d; pinchMx = mx; pinchMy = my;
+        }
+        return;
+      }
       if (!dragging) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
@@ -645,7 +677,18 @@
         cam.phi = clamp(cam.phi + dy * 0.004, 0.06, 1.52);
       }
     });
-    canvas.addEventListener("pointerup", () => { dragging = 0; });
+    const endPtr = (e) => {
+      activePts.delete(e.pointerId);
+      if (activePts.size < 2) pinching = false;
+      if (activePts.size === 1) {
+        const [p] = [...activePts.values()];
+        lastX = p.x; lastY = p.y; dragging = 1; moved = 0;   // 残った指で旋回継続（ジャンプ防止）
+      } else if (activePts.size === 0) {
+        dragging = 0;
+      }
+    };
+    canvas.addEventListener("pointerup", endPtr);
+    canvas.addEventListener("pointercancel", endPtr);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
