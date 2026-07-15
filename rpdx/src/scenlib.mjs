@@ -24,6 +24,12 @@
     if (scenario.lineup) o.u = scenario.lineup;
     if (scenario.tweaks) o.w = scenario.tweaks;
     if (scenario.opponentHt) o.h = scenario.opponentHt;
+    if (scenario.outages) {                                   // #81: 退場 [t,no,kind,reshape?]
+      const g = {};
+      for (const [k, arr] of Object.entries(scenario.outages))
+        if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
+      if (Object.keys(g).length) o.g = g;
+    }
     return JSON.stringify(o);
   };
 
@@ -36,6 +42,11 @@
     }
     const sc = S.createScenario(match, o.l || "imported", { subs, lineup: o.u || null, tweaks: o.w || null });
     if (o.h) sc.opponentHt = o.h;
+    if (o.g) {                                                // #81: 退場の復元
+      sc.outages = {};
+      for (const [k, arr] of Object.entries(o.g))
+        sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
+    }
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -147,6 +158,7 @@
       ov.editAnchors = scenario.editAnchors;
       if (scenario.editFrom != null) ov.editFrom = scenario.editFrom;
     }
+    if (scenario.outages) ov.outages = scenario.outages;      // #81
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
@@ -212,6 +224,14 @@
     if (Array.isArray(ov.editAnchors) && ov.editAnchors.length) {
       sc.editAnchors = ov.editAnchors.filter(a => a && keySet.has(a.team));
       sc.editFrom = ov.editFrom != null ? ov.editFrom : ov.editAnchors[0].t;
+    }
+    // #81: 退場（未知チームは無視・検証は validateScenario 側）
+    if (ov.outages && typeof ov.outages === "object") {
+      const g = {};
+      for (const [tm, arr] of Object.entries(ov.outages))
+        if (keySet.has(tm) && Array.isArray(arr) && arr.length)
+          g[tm] = arr.map(x => ({ t: +x.t, no: +x.no, kind: x.kind || "red-card", ...(x.reshape ? { reshape: x.reshape } : {}) }));
+      if (Object.keys(g).length) sc.outages = g;
     }
 
     const validation = S.validateScenario(match, sc);

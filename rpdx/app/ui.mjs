@@ -511,7 +511,8 @@ self.onmessage = (e) => {
   /* --------------------------- 配置エディタ --------------------------- */
   const buildEditorStatic = () => {
     const sel = $("#fmShape");
-    sel.innerHTML = Object.keys(F.SHAPES).map(k =>
+    // #81: 10人シェイプ（10_*）は退場リシェイプ専用 — 手動の陣形変更（11人前提）からは除外
+    sel.innerHTML = Object.keys(F.SHAPES).filter(k => !k.startsWith("10_")).map(k =>
       `<option value="${k}">${F.SHAPE_LABELS?.[k] || k}</option>`).join("");
   };
   const fitEditor = () => {
@@ -819,16 +820,26 @@ self.onmessage = (e) => {
           `<span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:20px;height:16px;font-size:9.5px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center">${k[0]}</span>` +
           `<span style="flex:1">${o?.ja ?? s.out} → <b>${n?.ja ?? s.in}</b></span>` });
       }
+      // #81: 退場（数的不利）行 — 赤カードで明示・✕で取り消し
+      for (let i = 0; i < ((sc.outages && sc.outages[k]) || []).length; i++) {
+        const og = sc.outages[k][i];
+        const p = T.squad.find(q => q.no === og.no);
+        rows.push({ t: og.t, k, i, outage: true, html: `<span class="min num">${S.tToLabel(App.match, og.t)}</span>` +
+          `<span style="width:14px;height:18px;background:#C33;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(255,255,255,.25)" title="退場"></span>` +
+          `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
+      }
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
         btn.onclick = () => {
-          const [k, i] = btn.dataset.del.split(":");
-          const r = S.withoutSub(App.match, App.scenario, k, +i);
+          const [kind, k, i] = btn.dataset.del.split(":");
+          const r = kind === "o"
+            ? S.withoutOutage(App.match, App.scenario, k, +i)
+            : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };
       });
@@ -1048,7 +1059,18 @@ self.onmessage = (e) => {
     }
     // ステータス帯
     const stCls = STATUS[worst.status];
-    $("#sbText").innerHTML = `<span class="chip ${stCls}">${worst.status}</span> ` +
+    // #81: 数的状況バッジ（10 vs 11 等）— outages 発生中のみ表示
+    let numBadge = "";
+    {
+      const sc = activeScenario();
+      if (sc.outages) {
+        const [a, b] = teamOrder();
+        const na = Object.keys(E.rosterAt(App.match, sc, a, App.t).assign).length;
+        const nb = Object.keys(E.rosterAt(App.match, sc, b, App.t).assign).length;
+        if (na !== nb) numBadge = `<span class="chip warn" title="数的不利（what-if）">${na} vs ${nb}</span> `;
+      }
+    }
+    $("#sbText").innerHTML = numBadge + `<span class="chip ${stCls}">${worst.status}</span> ` +
       (worst.status === "OK"
         ? "構造安定 — D²-Field 平常域"
         : `${App.match.teams[worst.team].name}の攻撃脅威 ${Math.round(worst.total)} — ${worst.status === "CRITICAL" ? "失点危険域" : "警戒域"}`);
@@ -1107,11 +1129,20 @@ self.onmessage = (e) => {
       `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
        <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
        <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    // #81: 退場（数的不利 what-if）— 在場中・非GKのみ・現在時刻で発生
+    const pres = E.presenceOf(App.match, activeScenario(), sel.team, sel.no);
+    const canDismiss = p.pos !== "GK" && pres && App.t >= pres.from && App.t < pres.to;
     $("#inspEditForm").innerHTML =
       `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
       + rows
-      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
-         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>`
+      + (canDismiss ? `<div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+           <button class="btn danger" id="edDismiss" title="この時刻に退場（what-if）— チームは10人に">🟥 ${S.tToLabel(App.match, App.t)} 退場</button>
+           <select class="sel" id="edDismissShape" title="10人リシェイプ" style="flex:1">
+             <option value="">自動 (${F.SHAPE_LABELS[F.tenManShapeFor(E.rosterAt(App.match, activeScenario(), sel.team, App.t).shape)]})</option>
+             ${["10_441","10_432","10_531"].map(k => `<option value="${k}">${F.SHAPE_LABELS[k]}</option>`).join("")}
+           </select></div>` : "")
+      + `<div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
     $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
       r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
     $("#edApply").onclick = () => {
@@ -1133,6 +1164,18 @@ self.onmessage = (e) => {
       $("#inspEditForm").style.display = "none";
       selectPlayer(sel.team, sel.no);
     };
+    // #81: 退場 what-if の適用
+    $("#edDismiss") && ($("#edDismiss").onclick = () => {
+      const sc = forkIfActual();
+      const reshape = $("#edDismissShape").value || undefined;
+      const r = S.withOutage(App.match, sc, sel.team, { t: App.t, no: sel.no, kind: "red-card", ...(reshape ? { reshape } : {}) });
+      if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+      refreshScenario(r.scenario);
+      const T = App.match.teams[sel.team];
+      toast(`🟥 ${p.ja} 退場 — ${T.name}は10人（${r.dropped ? `後続の交代${r.dropped}件を取り下げ・` : ""}what-if）`, "#E8473B");
+      $("#inspEditForm").style.display = "none";
+      $("#inspector").classList.remove("open");
+    });
   };
   $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
     const f = $("#inspEditForm");

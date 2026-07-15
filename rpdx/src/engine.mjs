@@ -99,6 +99,13 @@
         }
       }
     }
+    // #81: 退場は在場人員＝世界（チェーン/位置）を変える → 世界シードに含める。
+    //   未指定なら混合ゼロ＝従来ハッシュ不変（golden安全）。
+    if (scenario.outages) {
+      for (const tm of Object.keys(scenario.outages).sort())
+        for (const o of scenario.outages[tm] || [])
+          mix(N.seedOf(tm + (o.kind || "red-card") + (o.reshape || "")) ^ (o.t * 17 + o.no * 523));
+    }
     return h || 1;
   };
   // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる。
@@ -161,25 +168,82 @@
   E.tweakOf = (scenario, team, slotId) =>
     (scenario && scenario.tweaks && scenario.tweaks[team] && scenario.tweaks[team][slotId]) || null;
 
-  // ある時刻のスロット割当を解決（フェーズ + 交代スワップ）
+  // #81: 数的不利（退場/交代枠なし負傷）— team別 sorted リスト
+  E.outagesOf = (match, scenario, team) =>
+    ((scenario && scenario.outages && scenario.outages[team]) || []);
+
+  // #81: 退場後の10人リシェイプ（役割適合の貪欲再割当・決定論・メモ化）
+  //   subs.withFormation と同じ採点式（共有 F.tagsOfPos）。GKは常にGKスロットへ。
+  const outageReshapeCache = new WeakMap();   // scenario → Map(key → {assign, shape})
+  const reshapeToTen = (match, scenario, team, assign11, fromShape, outage, subsApplied) => {
+    let m = outageReshapeCache.get(scenario);
+    if (!m) { m = new Map(); outageReshapeCache.set(scenario, m); }
+    const shapeId = outage.reshape || F.tenManShapeFor(fromShape);
+    const key = `${team}|${outage.t}|${outage.no}|${shapeId}|${fromShape}|${subsApplied}`;
+    const hit = m.get(key);
+    if (hit) return hit;
+    const T = match.teams[team];
+    const slots = F.SHAPES[shapeId];
+    const fromSlots = F.SHAPES[fromShape];
+    const pool = [];
+    for (const [slotId, no] of Object.entries(assign11)) {
+      if (no === outage.no) continue;                      // 退場者を除外 → 10人
+      const cur = fromSlots.find(s => s.id === slotId);
+      const p = T.squad.find(q => q.no === no);
+      pool.push({ no, tags: cur ? cur.tags : F.tagsOfPos(p), p });
+    }
+    const out = {};
+    for (const slot of slots) {
+      let best = null, bestScore = -1;
+      for (const c of pool) {
+        const isGKp = c.p.pos === "GK";
+        if ((slot.role === "GK") !== isGKp) continue;
+        const aff = Math.max(F.roleAffinity(slot.tags, c.tags), F.roleAffinity(slot.tags, F.tagsOfPos(c.p)));
+        const attr = slot.role === "ST" || slot.role === "W" || slot.role === "AM"
+          ? c.p.attrs.att : slot.role === "CB" || slot.role === "DM" ? c.p.attrs.def : (c.p.attrs.sta + c.p.attrs.tec) / 2;
+        const sc = aff * 100 + attr * 0.3;
+        if (sc > bestScore) { bestScore = sc; best = c; }
+      }
+      if (!best) best = pool[0];
+      if (best) { out[slot.id] = best.no; pool.splice(pool.indexOf(best), 1); }
+    }
+    const res = { assign: out, shape: shapeId };
+    m.set(key, res);
+    return res;
+  };
+
+  // ある時刻のスロット割当を解決（フェーズ + 交代スワップ + #81 退場リシェイプ）
   E.rosterAt = (match, scenario, team, t) => {
     const phases = E.phasesOf(match, scenario, team);
     let phase = phases[0];
     for (const ph of phases) if (ph.from <= t) phase = ph;
-    const assign = { ...phase.assign };
+    let assign = { ...phase.assign };
     // フェーズ開始前の交代を反映（新フェーズの assign はスタメン番号基準のため
     // 既に OUT した選手を IN 選手へ差し替える）
     const allSubs = (scenario.subs[team] || []).slice().sort((a, b) => a.t - b.t);
     const entered = {};
+    let subsApplied = 0;
     for (const s of allSubs) {
       if (s.t > t) break;
+      subsApplied++;
       for (const slot in assign) if (assign[slot] === s.out) {
         assign[slot] = s.in;
         if (s.t > phase.from) entered[s.in] = s.t;
         break;
       }
     }
-    return { assign, shape: phase.shape, phaseFrom: phase.from, entered };
+    let shape = phase.shape, phaseFrom = phase.from, outage = null;
+    // #81: 発生済み退場を適用（v1: チーム毎1件）— 10人シェイプへ決定論リシェイプ
+    for (const o of E.outagesOf(match, scenario, team)) {
+      if (o.t > t) break;
+      if (!Object.values(assign).includes(o.no)) continue;   // 既に不在（検証で防止済み）
+      const r = reshapeToTen(match, scenario, team, assign, shape, o, subsApplied);
+      assign = { ...r.assign };
+      shape = r.shape;
+      phaseFrom = Math.max(phaseFrom, o.t);                  // 切替ブレンドの起点
+      outage = o;
+    }
+    return { assign, shape, phaseFrom, entered, outage };
   };
 
   // 選手の在場区間（分数計算・入退場アニメ・妥当性検証に使用）
@@ -193,16 +257,32 @@
       if (s.in === no) on = s.t;
       if (s.out === no) off = s.t;
     }
+    // #81: 退場/交代なし負傷はそこで在場終了（交代より早ければ優先）
+    for (const o of E.outagesOf(match, scenario, team))
+      if (o.no === no && (off == null || o.t < off)) off = o.t;
     if (on == null) return null;
     return { from: on, to: off ?? range.t1 };
   };
 
   /* --------------------- ポゼッション波形 P(t) ∈ [-1,1] --------------------- */
   // P>0: possessionPlus チームの攻勢。KPスプライン + 小ノイズ（帯域制限）
-  E.possessionAt = (match, t) => {
+  E.possessionAt = (match, t, scenario) => {
     const base = N.spline(match.possessionKP, t)[0];
     const n = 0.10 * N.vnoise1(N.seedOf(match.meta.id + "poss"), t, 37);
-    return clamp(base + n, -1, 1);
+    let p = base + n;
+    // #81: 数的不利の保持シフト — 退場チームから相手側へ（2分ランプで浸透・決定論）。
+    //   scenario 未指定/outages 無しは従来値と完全一致（golden安全）。
+    if (scenario && scenario.outages) {
+      for (const tm of Object.keys(scenario.outages)) {
+        for (const o of scenario.outages[tm] || []) {
+          if (t <= o.t) continue;
+          const u = N.smooth(clamp((t - o.t) / 120));
+          const sign = tm === match.possessionPlus ? -1 : +1;   // 退場側の保持を減らす
+          p += sign * 0.28 * u;
+        }
+      }
+    }
+    return clamp(p, -1, 1);
   };
 
   /* ------------------- アンカー（シナリオ実効） ------------------- */
@@ -297,7 +377,7 @@
       const half0 = E.halfOf(match, t);
       return basePlayerPos(match, scenario, team, no, slot, t, {
         half: half0, dir: match.dir[team][half0 === 1 ? "h1" : "h2"],
-        P: E.possessionAt(match, t), ballS: E.ballSlowAt(match, t),
+        P: E.possessionAt(match, t, scenario), ballS: E.ballSlowAt(match, t),
       });
     }
     const key = scenTok(scenario) + "|" + team + no + "|" + slot.id + "|" + t + "|" + (lineComputing ? 1 : 0);
@@ -307,7 +387,7 @@
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
     const bctx = {
       half, dir,
-      P: E.possessionAt(match, t),
+      P: E.possessionAt(match, t, scenario),
       ballS: E.ballSlowAt(match, t),
     };
     const out = basePlayerPos(match, scenario, team, no, slot, t, bctx);
@@ -474,7 +554,7 @@
     let forceRef = null;    // コーナー後の受け手参照点（ゴール前 = クロスの落下点）
     const shareGain = match.possessionShareGain ?? 0.385;  // パック毎の較正ノブ
     while (t < range.t1 - 1) {
-      const P = E.possessionAt(match, t);
+      const P = E.possessionAt(match, t, scenario);
       const share = clamp(0.5 + P * shareGain, 0.07, 0.93); // 実測支配率へ較正（定常分布）
       const u = N.hash2(seed, idx * 17 + 3);
       // 持続性マルコフ: 独立抽選だと1本ごとに敵味方が入れ替わって見える（実測で平均1.4本）。
@@ -1443,7 +1523,7 @@
     const memoKey = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + t;
     if (stateMemo && stateMemo.key === memoKey) return stateMemo.st;
     const half = E.halfOf(match, t);
-    const P = E.possessionAt(match, t);
+    const P = E.possessionAt(match, t, scenario);
     const ball = E.ballAt(match, scenario, t);
     const ballS = E.ballSlowAt(match, t);
     const carrier = E.carrierAt(match, scenario, t);
@@ -1533,6 +1613,21 @@
           });
         }
       }
+      // #81: 退場（レッド/交代なし負傷）も同じ動線でピッチを去る
+      for (const o of E.outagesOf(match, scenario, team)) {
+        if (o.t <= t && t - o.t < 30) {
+          const u = N.smooth(clamp((t - o.t) / 30));
+          const last = E.stateFrozenPos(match, scenario, team, o.no, o.t);
+          const p = match.teams[team].squad.find(q => q.no === o.no);
+          if (!p) continue;
+          players.push({
+            team, no: o.no, name: p.name, ja: p.ja, label: p.label, pos2: p.pos,
+            role: "OUT", slot: null,
+            x: lerp(last.x, 0, u * 0.8), y: lerp(last.y, -(HALF_H + 2.5), u),
+            onPitch: false, leaving: u, attrs: p.attrs, captain: false, dismissed: true,
+          });
+        }
+      }
       // キャプテンマーク
       const order = match.teams[team].captainOrder || [];
       for (const cno of order) {
@@ -1619,7 +1714,7 @@
       carrierPos = basePosOf(match, scenario, carrier.team, carrier.no, carrier.seg.slot, tt);
     }
     const ctx = {
-      half, dir, P: E.possessionAt(match, tt),
+      half, dir, P: E.possessionAt(match, tt, scenario),
       ballS: E.ballSlowAt(match, tt), ball: E.ballAt(match, scenario, tt),
       carrier, carrierPos,
       pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos),

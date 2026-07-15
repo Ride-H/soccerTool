@@ -81,7 +81,66 @@
     }
     return { ok: errors.length === 0, errors, info };
   };
-  S.validateScenario = (match, scenario) => S.validatePlan(match, scenario.subs, scenario.lineup);
+  // #81: outages（退場/交代枠なし負傷）の検証 — その時点で在場・非GK・チーム毎に1件（v1）・
+  //   退場後にその選手を OUT 指定する交代は不可。actual/未指定シナリオは従来どおり厳密11人。
+  const validateOutages = (match, scenario, errors) => {
+    const outs = scenario.outages;
+    if (!outs) return;
+    const range = E.playedRange(match);
+    for (const team of Object.keys(outs)) {
+      const T = match.teams[team];
+      if (!T) { errors.push(`[outage] 未知チーム ${team}`); continue; }
+      const list = outs[team] || [];
+      if (list.length > 1) errors.push(`[${T.name}] 数的不利は v1 ではチーム毎に1件まで`);
+      for (const o of list) {
+        const p = T.squad.find(q => q.no === o.no);
+        if (!p) { errors.push(`[${T.name}] #${o.no} はスカッド外（退場指定不可）`); continue; }
+        if (p.pos === "GK") { errors.push(`[${T.name}] GKの退場は v1 非対応（${p.ja}）`); continue; }
+        if (o.t < range.t0 || o.t > range.t1) errors.push(`[${T.name}] ${p.ja} の退場時刻がタイムライン外`);
+        // その時点で在場か（スタメン or 投入済み・未交代退出）— subs のみで判定（outage 自身は除く）
+        const starters = new Set(Object.values(((scenario.lineup && scenario.lineup[team]) || T).phases[0].assign));
+        let on = starters.has(o.no) ? range.t0 : null, off = null;
+        for (const s of (scenario.subs[team] || [])) {
+          if (s.in === o.no) on = s.t;
+          if (s.out === o.no) off = s.t;
+        }
+        if (on == null || on > o.t || (off != null && off <= o.t))
+          errors.push(`[${T.name}] ${p.ja} は退場時刻にピッチ上にいない`);
+        // 退場後の交代で OUT 指定は不可（既にいない）
+        for (const s of (scenario.subs[team] || []))
+          if (s.out === o.no && s.t > o.t) errors.push(`[${T.name}] ${p.ja} は退場済み — 以降の交代OUT不可`);
+        if (o.reshape && !F.SHAPES[o.reshape]) errors.push(`[${T.name}] 未知の10人シェイプ ${o.reshape}`);
+      }
+    }
+  };
+  S.validateScenario = (match, scenario) => {
+    const v = S.validatePlan(match, scenario.subs, scenario.lineup);
+    validateOutages(match, scenario, v.errors);
+    v.ok = v.errors.length === 0;
+    return v;
+  };
+
+  // #81: 不変編集 — 退場/負傷（交代なし離脱）の追加・削除
+  S.withOutage = (match, scenario, team, outage /* {t,no,kind,reshape?} */) => {
+    const next = S.fork(match, scenario);
+    const o = { kind: "red-card", ...outage };
+    // 退場者をその後 OUT する交代は自動で取り下げ（現実にも起こり得ない・件数を返す）
+    const beforeN = next.subs[team].length;
+    next.subs[team] = next.subs[team].filter(s => !(s.out === o.no && s.t > o.t));
+    const dropped = beforeN - next.subs[team].length;
+    if (!next.outages) next.outages = {};
+    next.outages[team] = [...(next.outages[team] || []), o].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next), dropped };
+  };
+  S.withoutOutage = (match, scenario, team, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.outages && next.outages[team]) {
+      next.outages[team] = next.outages[team].filter((_, i) => i !== idx);
+      if (!next.outages[team].length) delete next.outages[team];
+      if (!Object.keys(next.outages).length) delete next.outages;
+    }
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
 
   /* --------------------------- シナリオ管理 --------------------------- */
   let seq = 0;
@@ -107,11 +166,17 @@
     const srcSubs = base.subs || base;   // 旧署名（subs直渡し）互換
     const subs = {};
     for (const k of E.teamKeys(match)) subs[k] = (srcSubs[k] || []).map(s => ({ ...s }));
-    return {
+    const sc = {
       id: `sim-${++seq}`, label: label || `シナリオ ${seq}`, actual: false,
       subs, lineup: cloneLineup(base.lineup), tweaks: cloneTweaks(base.tweaks),
       outcome: null,   // sim.mjs が決定論付与
     };
+    // #81: 数的不利（退場/交代枠なし負傷）— team別 [{t,no,kind,reshape?}]。未指定は付与しない（golden安全）
+    if (base.outages) {
+      sc.outages = {};
+      for (const k of Object.keys(base.outages)) sc.outages[k] = base.outages[k].map(o => ({ ...o }));
+    }
+    return sc;
   };
   S.fromActual = (match, label) => {
     const subs = {};
@@ -149,6 +214,8 @@
   // min 以降の既存フェーズは破棄（そこからはユーザーの指揮）。min<=1 は初期陣形を差替。
   S.withFormation = (match, scenario, team, min, shape) => {
     if (!F.SHAPES[shape]) return { scenario, validation: { ok: false, errors: [`未知の陣形 ${shape}`], info: {} } };
+    // #81: 手動の陣形変更は11人シェイプのみ（10_* は退場リシェイプ専用）
+    if (F.SHAPES[shape].length !== 11) return { scenario, validation: { ok: false, errors: [`${shape} は11人シェイプではありません`], info: {} } };
     const next = S.fork(match, scenario);
     const lu = ensureLineup(match, next, team);
     const t = Math.max(0, S.minuteToT(match, min));
@@ -321,12 +388,8 @@
     return { suggestions: top, context: { needDef, needAtk, oppDanger, ownDanger, diff, remaining } };
   };
 
-  const tagsOfPos = (p) => {
-    if (p.pos === "GK") return ["GK"];
-    if (p.pos === "DF") return p.attrs.pac >= 76 ? ["CB", "FB", "WB"] : ["CB", "FB"];
-    if (p.pos === "MF") return p.attrs.att >= 80 ? ["CM", "AM", "W"] : ["CM", "DM", "WB"];
-    return p.attrs.pac >= 85 ? ["ST", "W"] : ["ST"];
-  };
+  // #81 で実体を formations.tagsOfPos へ共有化（engine の10人再割当でも使用）— 挙動は同一
+  const tagsOfPos = (p) => F.tagsOfPos(p);
   S.tagsOfPos = tagsOfPos;
 
   const buildReason = (oc, b, needDef, needAtk, diff) => {
