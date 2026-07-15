@@ -161,7 +161,8 @@
   const altShapesOf = (match, team) => {
     const F = R.formations;
     const cur = match.teams[team].phases[0].shape;
-    return Object.keys(F.SHAPES).filter(s => s !== cur).sort();
+    // #81: 10人シェイプ（10_*）は退場リシェイプ専用 — 11人の可変候補から除外
+    return Object.keys(F.SHAPES).filter(s => s !== cur && !s.startsWith("10_")).sort();
   };
 
   // 生成: [{id, label, desc, exploits, scenario, validation}]
