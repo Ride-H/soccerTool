@@ -113,11 +113,44 @@
       }
     }
   };
+  // #80: 外的失点（仮説）の検証 — kind 既知・時刻内・チーム毎≤2（v1）
+  const SHOCK_KINDS = ["ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];
+  const validateShockGoals = (match, scenario, errors) => {
+    const list = scenario.shockGoals;
+    if (!list) return;
+    const range = E.playedRange(match);
+    const perTeam = {};
+    for (const sg of list) {
+      const T = match.teams[sg.team];
+      if (!T) { errors.push(`[shock] 未知チーム ${sg.team}`); continue; }
+      if (!SHOCK_KINDS.includes(sg.kind)) errors.push(`[${T.name}] 未知の外的失点種別 ${sg.kind}`);
+      if (sg.t < range.t0 + 30 || sg.t > range.t1 - 30) errors.push(`[${T.name}] 外的失点の時刻がタイムライン外`);
+      perTeam[sg.team] = (perTeam[sg.team] || 0) + 1;
+      if (perTeam[sg.team] > 2) errors.push(`[${T.name}] 外的失点は v1 ではチーム毎2件まで`);
+    }
+  };
+  S.SHOCK_KINDS = SHOCK_KINDS;
   S.validateScenario = (match, scenario) => {
     const v = S.validatePlan(match, scenario.subs, scenario.lineup);
     validateOutages(match, scenario, v.errors);
+    validateShockGoals(match, scenario, v.errors);
     v.ok = v.errors.length === 0;
     return v;
+  };
+
+  // #80: 不変編集 — 外的失点（仮説）の注入・削除
+  S.withShockGoal = (match, scenario, shock /* {t,team,kind} */) => {
+    const next = S.fork(match, scenario);
+    next.shockGoals = [...(next.shockGoals || []), { kind: "deflection", ...shock }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  S.withoutShockGoal = (match, scenario, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.shockGoals) {
+      next.shockGoals = next.shockGoals.filter((_, i) => i !== idx);
+      if (!next.shockGoals.length) delete next.shockGoals;
+    }
+    return { scenario: next, validation: S.validateScenario(match, next) };
   };
 
   // #81: 不変編集 — 退場/負傷（交代なし離脱）の追加・削除
@@ -176,6 +209,8 @@
       sc.outages = {};
       for (const k of Object.keys(base.outages)) sc.outages[k] = base.outages[k].map(o => ({ ...o }));
     }
+    // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
+    if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
     return sc;
   };
   S.fromActual = (match, label) => {
