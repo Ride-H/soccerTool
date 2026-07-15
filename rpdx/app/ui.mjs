@@ -1609,6 +1609,9 @@ self.onmessage = (e) => {
         return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
         <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
       })()}
+      <h4>守備構造 v1（#117 — モデル推定・読み取り専用）</h4>
+      <div id="defStructBox"><button class="btn" id="btnDefStruct">計算して表示（現在のシナリオ・数秒）</button>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">被CPR/被PLV/被OVL/被TRV（相手に許した量）と非保持時ブロック（GK除外・ボール相対）。実測ではなくモデル推定上の観察です。</div></div>
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
@@ -1621,6 +1624,27 @@ self.onmessage = (e) => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
     });
+    // #117: 守備構造 v1 — オンデマンド計算（シナリオ追従・重い走査はクリック時のみ）
+    const dbtn = $("#btnDefStruct");
+    if (dbtn) dbtn.onclick = () => {
+      dbtn.disabled = true; dbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const T2 = globalThis.RPDX.tactics, sc = activeScenario();
+        const prof = T2.defenseProfile(m, sc);
+        const rows = teamOrder().map(k => {
+          const c = prof.conceded[k];
+          const blk = T2.defenseBlock(m, sc, k) || {};
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>
+            <td>${c.CPR}</td><td>${c.PLV}</td><td>${c.OVL}</td><td>${c.TRV}</td><td>${c.total}</td>
+            <td>${blk.lineHeight ?? "—"}</td><td>${blk.width ?? "—"}×${blk.depth ?? "—"}</td><td>${blk.slideGap ?? "—"}</td><td>${blk.centralClosure ?? "—"}</td></tr>`;
+        }).join("");
+        $("#defStructBox").innerHTML = `
+          <table class="stat-table" style="font-size:11px">
+            <tr><td class="k"></td><td>被CPR</td><td>被PLV</td><td>被OVL</td><td>被TRV</td><td>被KIKEN</td><td>ライン高m</td><td>幅×縦m</td><td>スライド差m</td><td>中央閉鎖</td></tr>
+            ${rows}</table>
+          <div style="color:var(--muted);font-size:11px;margin-top:2px">被○○=相手に許した量（小さいほど消せている）。ブロックは非保持時のみ・GK除外。中央閉鎖=ボール→自ゴール中央3レーンの遮断率（def編集で変化=#106接続）。モデル推定上の観察であり実測・断定ではありません。</div>`;
+      }, 30);
+    };
   };
 
   const buildModelModal = () => {
