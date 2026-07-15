@@ -19,11 +19,11 @@ test("#19 uq: Wilson区間 — 閉形式の基本性質（単調・被覆・n増
 
 test("#19 uq: 全収録試合の警報評価 — TPR=100%・FPR低・スキル正（区間つき断定の実体）", () => {
   const r = UQ.evaluate(Object.values(MATCHES));
-  assert.equal(r.tp, 8, "8ゴール全て検知");
+  assert.equal(r.tp, 10, "10ゴール全て検知");
   assert.equal(r.fn, 0);
   assert.ok(r.fpr.p <= 0.10, `FPR ${r.fpr.p}`);
   assert.ok(r.skill > 0, `スキル ${r.skill}`);
-  assert.ok(r.tpr.lo > 0.7, "TPR下限も高い（n=8のWilson下限）");
+  assert.ok(r.tpr.lo > 0.7, "TPR下限も高い（n=10のWilson下限）");
   // 決定論
   const r2 = UQ.evaluate(Object.values(MATCHES));
   assert.deepEqual(

@@ -24,6 +24,18 @@
    "ball": "da200c1c",
    "carrier": "6ea305e8",
    "score": "ARG:4,EGY:2"
+  },
+  "wc2026-sf-fra-esp|actual": {
+   "pos": "edc08f21",
+   "ball": "d0a2c3a5",
+   "carrier": "939052d8",
+   "score": "FRA:0,ESP:2"
+  },
+  "wc2026-sf-fra-esp|whatif-cancel-last-sub": {
+   "pos": "df6f2ff4",
+   "ball": "5624917b",
+   "carrier": "07bd57c1",
+   "score": "FRA:0,ESP:2"
   }
  }
 }
