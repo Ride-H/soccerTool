@@ -155,8 +155,13 @@
     for (const p of def) { const d = Math.hypot(p.x - ball.x, p.y - ball.y); if (d < dnDef) { dnDef = d; presser = p; } }
 
     // --- CPR: 保持者の圧迫余裕 × ボール地点脅威 ---
-    const freedom = 1 - Math.exp(-(dnDef * dnDef) / 49);
-    const CPR = D.threatAt(ball.x, ball.y, dir) * freedom * hasBall;
+    // #106: 守備者の def は実効距離（dwDef>1 = 同じ距離でも圧が強い）、保持者の att/tec は脅威係数。
+    //   dw は #90 と同じ差分ベース（未編集=1.0）→ 収録パックはビット不変（較正保護）。
+    const dwP = Math.min(1.24, Math.max(0.76, (presser && presser.dwDef) || 1));
+    const dnEff = dnDef / dwP;
+    const freedom = 1 - Math.exp(-(dnEff * dnEff) / 49);
+    const CPR = D.threatAt(ball.x, ball.y, dir) * freedom * hasBall
+      * Math.min(1.24, Math.max(0.76, (carrier && carrier.dwAtk) || 1));
 
     // --- PLV: パスレーン開通（ボール → 各受け手） ---
     let plv1 = 0, plv2 = 0, plvTarget = null;
@@ -169,14 +174,20 @@
       for (const d of def) {
         const u = clamp(((d.x - ball.x) * lx + (d.y - ball.y) * ly) / (len * len));
         const px = ball.x + u * lx, py = ball.y + u * ly;
-        const dd = Math.hypot(d.x - px, d.y - py);
+        // #106: def が高い守備者はレーン・シャドウが広い（実効距離・未編集=1.0）
+        const dd = Math.hypot(d.x - px, d.y - py) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
         lane *= 1 - Math.exp(-(dd * dd) / 9);
         if (lane < 0.02) break;
       }
       let dRec = 1e9;
-      for (const d of def) { const dd = Math.hypot(d.x - rec.x, d.y - rec.y); if (dd < dRec) dRec = dd; }
+      for (const d of def) {
+        const dd = Math.hypot(d.x - rec.x, d.y - rec.y) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
+        if (dd < dRec) dRec = dd;
+      }
       const recFree = 1 - Math.exp(-(dRec * dRec) / 36);
-      const v = lane * D.threatAt(rec.x, rec.y, dir) * (0.4 + 0.6 * recFree);
+      // #106: 受け手の att/tec は「同じ位置でも脅威が大きい」係数（未編集=1.0）
+      const v = lane * D.threatAt(rec.x, rec.y, dir) * (0.4 + 0.6 * recFree)
+        * Math.min(1.24, Math.max(0.76, rec.dwAtk || 1));
       if (v > plv1) { plv2 = plv1; plv1 = v; plvTarget = rec; }
       else if (v > plv2) plv2 = v;
     }
@@ -195,14 +206,29 @@
       return { team: p.team, no: p.no, label: p.label, val: v };
     }).sort((a, b) => b.val - a.val);
 
+    // --- #106: GK 抑制係数 — 守備側GKの def/aer の**上書き差分**（未編集=1.0・±約16%有界）
+    //   収録パックの危険度・OOS・golden は不変（#90 と同じ較正保護の設計）。
+    let gkF = 1;
+    {
+      const gk = state.players.find(q => q.onPitch && q.team !== atkTeam && q.role === "GK");
+      if (gk) {
+        const base = match.teams[gk.team].squad.find(q => q.no === gk.no);
+        if (base && base.attrs) {
+          const dlt = Math.max(-40, Math.min(40,
+            ((gk.attrs.def - base.attrs.def) + (gk.attrs.aer - base.attrs.aer)) / 2)) / 100 * 0.4;
+          gkF = 1 / (1 + dlt);
+        }
+      }
+    }
+
     // 瞬時4モジュールのみの暫定合成（時間系は indexAt が付与）
     const W = D.WEIGHTS;
     const instW = W.SDI + W.CPR + W.PLV + W.OVL;
     const instRaw = (W.SDI * SDI + W.CPR * CPR + W.PLV * PLV + W.OVL * OVL) / instW;
-    const total = clamp(Math.pow(clamp(instRaw), D.GAMMA) * D.GAIN) * 100;
+    const total = clamp(Math.pow(clamp(instRaw), D.GAMMA) * D.GAIN * gkF) * 100;
 
     return {
-      total, raw: { SDI, CPR, PLV, OVL },
+      total, gkF, raw: { SDI, CPR, PLV, OVL },
       mods: { SDI: SDI * 100, CPR: CPR * 100, PLV: PLV * 100, OVL: OVL * 100 },
       hasBall, carrier: carrier ? carrier.no : null, presser: presser ? presser.no : null,
       plvTarget: plvTarget ? plvTarget.no : null, contrib,
@@ -302,7 +328,8 @@
       const r = inst[k].raw;
       const raw = W.SDI * r.SDI + W.CPR * r.CPR + W.PLV * r.PLV + W.OVL * r.OVL
         + W.TPA * tpa[k] + W.TRV * trv[k];
-      const total = clamp(Math.pow(clamp(raw), D.GAMMA) * D.GAIN) * 100;
+      const total = clamp(Math.pow(clamp(raw), D.GAMMA) * D.GAIN * (inst[k].gkF || 1)) * 100;   // #106
+
       out[k] = {
         ...inst[k],
         total,
