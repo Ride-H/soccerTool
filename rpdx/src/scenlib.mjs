@@ -10,6 +10,7 @@
 (() => {
   const R = (globalThis.RPDX ??= {});
   const SCN = (R.scenlib = {});
+  const F = R.formations;
 
   /* ---- 直列化（最小表現・決定論） ---- */
   SCN.serialize = (scenario) => {
@@ -30,6 +31,8 @@
         if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
       if (Object.keys(g).length) o.g = g;
     }
+    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点 [t,team,kind]
+      o.q = scenario.shockGoals.map(x => [x.t, x.team, x.kind || "deflection"]);
     return JSON.stringify(o);
   };
 
@@ -47,6 +50,7 @@
       for (const [k, arr] of Object.entries(o.g))
         sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
     }
+    if (o.q) sc.shockGoals = o.q.map(([t, team, kind]) => ({ t, team, kind: kind || "deflection" }));  // #80
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -159,6 +163,7 @@
       if (scenario.editFrom != null) ov.editFrom = scenario.editFrom;
     }
     if (scenario.outages) ov.outages = scenario.outages;      // #81
+    if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
@@ -225,6 +230,10 @@
       sc.editAnchors = ov.editAnchors.filter(a => a && keySet.has(a.team));
       sc.editFrom = ov.editFrom != null ? ov.editFrom : ov.editAnchors[0].t;
     }
+    // #80: 外的失点（未知チームは無視・検証は validateScenario 側）
+    if (Array.isArray(ov.shockGoals) && ov.shockGoals.length)
+      sc.shockGoals = ov.shockGoals.filter(x => x && keySet.has(x.team))
+        .map(x => ({ t: +x.t, team: x.team, kind: x.kind || "deflection" }));
     // #81: 退場（未知チームは無視・検証は validateScenario 側）
     if (ov.outages && typeof ov.outages === "object") {
       const g = {};
@@ -237,6 +246,75 @@
     const validation = S.validateScenario(match, sc);
     const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
     return { scenario: sc, validation, frame, match: o.match || null };
+  };
+
+  /* ---- #80(B): 巻き返しシナリオ・ビルダー ----
+     ビハインド中のチームに対し、回復プラン候補（攻撃的シフト/攻撃的交代/複合）を
+     決定論生成し、目的関数 = 10·Δ(得点差) + Δ攻撃危険度% − max(0, Δ被危険度%) で降順ランク。
+     断定ではなくモデル上の比較（#62 と同型・#34 バッチ互換の entries を返す）。 */
+  SCN.recoveryPlans = (match, baseScenario) => {
+    const E = R.engine, S = R.subs, SIM = R.sim;
+    const base = baseScenario && !baseScenario.actual ? baseScenario : null;
+    const mk = () => S.fork(match, base || S.fromActual(match, "巻き返し"));
+    // 現況スコアとビハインド側の特定（base の outcome 世界）
+    const ocBase = SIM.outcome(match, mk());
+    const keys = E.teamKeys(match);
+    const score = ocBase ? ocBase.score : null;
+    if (!score) return { trailer: null, plans: [] };
+    const [a, b] = keys;
+    const trailer = score[a] < score[b] ? a : score[b] < score[a] ? b : null;
+    if (!trailer) return { trailer: null, plans: [] };
+    // トリガ: 最終ビハインド区間の開始（そこから巻き返しに入るのが最も時間を使える）
+    const evs = (ocBase.events || []).filter(e => e.type === "goal");
+    let trig = 0, diff = 0, inBehind = false;
+    for (const g of evs) {
+      diff += g.team === trailer ? 1 : -1;
+      if (diff < 0 && !inBehind) { trig = g.t; inBehind = true; }
+      if (diff >= 0) inBehind = false;
+    }
+    const min0 = Math.min(85, Math.max(2, S.tToMinute(match, trig) + 1));
+    const baseDiff = score[trailer] - score[E.oppOf(match, trailer)];
+    const baseDelta = ocBase.teamDelta || {};
+    const cur = E.rosterAt(match, mk(), trailer, S.minuteToT(match, min0)).shape;
+    const atkShape = ["343", "3421", "433", "4231", "442"].find(sh => sh !== cur) || "442";
+
+    const cands = [];
+    { // 1) 攻撃的シフト
+      const r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) cands.push({ id: "attack-shift", label: `攻撃的シフト ${F.SHAPE_LABELS?.[atkShape] || atkShape}（${min0}'）`, scenario: r.scenario });
+    }
+    { // 2) 攻撃的交代（アドバイザ最上位）
+      const scx = mk();
+      const adv = S.advise(match, scx, S.minuteToT(match, min0), trailer, {});
+      const sug = adv && adv.suggestions && adv.suggestions[0];
+      if (sug) {
+        const r = S.withSub(match, scx, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+        if (r.validation.ok) cands.push({ id: "attack-sub", label: `攻撃的交代 ${sug.outJa}→${sug.inJa}（${min0}'）`, scenario: r.scenario });
+      }
+    }
+    { // 3) 複合（シフト+交代）
+      let r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) {
+        const adv = S.advise(match, r.scenario, S.minuteToT(match, min0), trailer, {});
+        const sug = adv && adv.suggestions && adv.suggestions[0];
+        if (sug) {
+          const r2 = S.withSub(match, r.scenario, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+          if (r2.validation.ok) r = r2;
+        }
+        cands.push({ id: "combined", label: `複合（シフト+交代・${min0}'）`, scenario: r.scenario });
+      }
+    }
+    const opp = E.oppOf(match, trailer);
+    const plans = cands.map(c => {
+      const oc = SIM.outcome(match, c.scenario);
+      const d = oc.score[trailer] - oc.score[opp];
+      const atk = ((oc.teamDelta[trailer]?.deltaPct || 0) - (baseDelta[trailer]?.deltaPct || 0)) / 10;
+      const risk = Math.max(0, ((oc.teamDelta[opp]?.deltaPct || 0) - (baseDelta[opp]?.deltaPct || 0)) / 10);
+      const objective = +(10 * (d - baseDiff) + atk - risk).toFixed(2);
+      return { ...c, validation: { ok: true, errors: [] }, objective,
+        score: oc.score, scoreDiff: d, atkGainPct: Math.round(atk * 10), riskPct: Math.round(risk * 10) };
+    }).sort((x, y) => y.objective - x.objective);
+    return { trailer, trigger: trig, minute: min0, baseScore: score, plans };
   };
 
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */

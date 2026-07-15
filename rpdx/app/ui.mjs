@@ -348,6 +348,7 @@ self.onmessage = (e) => {
     buildKikenTiles();
     buildPsyPanel();
     buildMatchSel();
+    buildShockTeamSel();
     // #92: 未較正（汎用推定）試合は明示。収録実試合（calibrated未設定）では非表示。
     const cc = $("#calibChip");
     if (cc) cc.style.display = App.match.meta.calibrated === false ? "" : "none";
@@ -742,6 +743,20 @@ self.onmessage = (e) => {
     toast("実試合データに戻しました", "#94A2BD");
   };
 
+  // #80: 外的失点（仮定）の注入
+  const buildShockTeamSel = () => {
+    const sel = $("#shockTeam");
+    if (sel) sel.innerHTML = teamOrder().map(k => `<option value="${k}">${App.match.teams[k].name}</option>`).join("");
+  };
+  $("#shockAdd") && ($("#shockAdd").onclick = () => {
+    const team = $("#shockTeam").value, min = +$("#shockMin").value, kind = $("#shockKind").value;
+    const sc = forkIfActual();
+    const r = S.withShockGoal(App.match, sc, { t: S.minuteToT(App.match, min), team, kind });
+    if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+    refreshScenario(r.scenario);
+    toast(`⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+  });
+
   $("#btnAdvise").onclick = () => {
     const sc = activeScenario();
     const adv = S.advise(App.match, sc, App.t, App.rosterTab, { includeGK: App.options.includeGK });
@@ -829,16 +844,26 @@ self.onmessage = (e) => {
           `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
       }
     }
+    // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
+    const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
+      "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
+    for (let i = 0; i < (sc.shockGoals || []).length; i++) {
+      const sg = sc.shockGoals[i];
+      const T = App.match.teams[sg.team];
+      rows.push({ t: sg.t, k: sg.team, i, shock: true, html: `<span class="min num">${S.tToLabel(App.match, sg.t)}</span>` +
+        `<span title="外的失点（仮定）">⚡</span>` +
+        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に仮定ゴール（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
+    }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
         btn.onclick = () => {
           const [kind, k, i] = btn.dataset.del.split(":");
-          const r = kind === "o"
-            ? S.withoutOutage(App.match, App.scenario, k, +i)
+          const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
+            : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
             : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };
@@ -868,9 +893,10 @@ self.onmessage = (e) => {
     }
     for (const g of oc.added) {
       const T = App.match.teams[g.team];
-      const p = T.squad.find(q => q.no === g.no);
+      const p = g.no != null ? T.squad.find(q => q.no === g.no) : null;
+      const who = g.shock ? `<b>仮定ゴール</b>（得点者は特定しない）` : `<b>${p?.ja ?? g.no}</b> のゴール`;
       evRows.push(`<div class="ev add"><span class="min">${g.min}</span>
-        <span>${T.name} <b>${p?.ja ?? g.no}</b> のゴール<br><span class="why">${g.detail}</span></span></div>`);
+        <span>${T.name} ${who}${g.shock ? " ⚡" : ""}<br><span class="why">${g.detail}</span></span></div>`);
     }
     body.innerHTML = `
       <div class="scoreline">
@@ -889,7 +915,33 @@ self.onmessage = (e) => {
       </div>
       <div class="hint">決定論 — 同じシナリオは常に同じ結果。判定は危険度プロセス曲線（20人・GK除外）に基づく。<br>
       これは「起こり得た未来」の<b>予測ではなく</b>、モデル規則による決定論的<b>再構成</b>です。
-      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>`;
+      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>
+      ${oc.score[a] !== oc.score[b] ? `<div style="margin-top:8px"><button class="btn gold" id="btnRecovery">巻き返し案を比較（ビハインド側・モデル比較）</button></div><div id="recoveryBox"></div>` : ""}`;
+    // #80(B): 巻き返しシナリオ・ビルダー
+    const rbtn = $("#btnRecovery");
+    if (rbtn) rbtn.onclick = () => {
+      rbtn.disabled = true; rbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const res = globalThis.RPDX.scenlib.recoveryPlans(App.match, App.scenario);
+        const box = $("#recoveryBox");
+        if (!res.trailer || !res.plans.length) { box.innerHTML = `<div class="hint">有効な巻き返し候補がありません</div>`; rbtn.style.display = "none"; return; }
+        const [ta, tb] = teamOrder();
+        box.innerHTML = res.plans.map((pl, i) => `
+          <div class="suggestion">
+            <div class="head"><span class="eyebrow">#${i + 1}</span> ${pl.label}
+              <span class="num" style="margin-left:auto">${pl.score[ta]}–${pl.score[tb]}</span>
+              <button class="btn" style="margin-left:8px;padding:3px 9px" data-rec="${i}">適用</button></div>
+            <div class="why">目的関数 ${pl.objective}（Δ攻撃 ${pl.atkGainPct >= 0 ? "+" : ""}${pl.atkGainPct}% / 被リスク +${pl.riskPct}%）— 断定ではなくモデル上の比較</div>
+          </div>`).join("");
+        box.querySelectorAll("[data-rec]").forEach(bn => bn.onclick = () => {
+          const pl = res.plans[+bn.dataset.rec];
+          pl.scenario.label = pl.label;
+          refreshScenario(pl.scenario);
+          toast(`巻き返し案を適用 — ${pl.label}`, GOLD);
+        });
+        rbtn.style.display = "none";
+      }, 30);
+    };
   };
 
   /* --------------------------- D²ダッシュボード --------------------------- */
