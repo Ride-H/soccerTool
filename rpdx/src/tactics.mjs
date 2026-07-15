@@ -257,6 +257,109 @@
     };
   };
 
+  /* ============ #117: 守備構造解析 v1（読み取り専用・golden安全） ============
+     v1a 守備側帰属ビュー: 相手の危険度モジュール平均を「守備側が何を許したか」として再集計。
+     v1b 守備ブロック読み出し: 非保持時・GK除外・ボール相対のライン高さ/幅/縦/スライド/中央閉鎖度。
+     いずれもモデル推定上の観察（実測ではない・実在チームの断定ではない）。 */
+
+  const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));   // #117 局所
+
+  // v1a: 被CPR/被PLV/被OVL/被TRV/被Total の試合平均（K の値 = K が相手に許した量）
+  const defProfCache = new Map();
+  T.defenseProfile = (match, scenario, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const step = opts.step || 90;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + step;
+    if (defProfCache.has(key)) return defProfCache.get(key);
+    const D = R.danger;
+    const range = E.playedRange(match);
+    const keys = E.teamKeys(match);
+    const acc = {};
+    for (const k of keys) acc[k] = { CPR: 0, PLV: 0, OVL: 0, TRV: 0, total: 0 };
+    let n = 0;
+    for (let t = range.t0 + 60; t < range.t1; t += step) {
+      const ix = D.indexAt(match, scenario, t);
+      for (const k of keys) {
+        const opp = E.oppOf(match, k);
+        const m = ix[opp].mods;                       // 相手の攻撃モジュール = k が許した量
+        acc[k].CPR += m.CPR; acc[k].PLV += m.PLV; acc[k].OVL += m.OVL; acc[k].TRV += m.TRV;
+        acc[k].total += ix[opp].total;
+      }
+      n++;
+    }
+    const out = { samples: n, conceded: {} };
+    for (const k of keys) {
+      out.conceded[k] = {};
+      for (const f of Object.keys(acc[k])) out.conceded[k][f] = +(acc[k][f] / n).toFixed(2);
+    }
+    if (defProfCache.size > 24) defProfCache.clear();
+    defProfCache.set(key, out);
+    return out;
+  };
+
+  // v1b: 守備ブロック（非保持時のみ・GK除外・ボール相対）— 単一時刻
+  T.defenseBlockAt = (match, scenario, team, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const c = E.carrierAt(match, scenario, t);
+    if (!c || c.mode !== "hold" || c.team === team) return null;   // 非保持時のみ
+    const st = E.stateAt(match, scenario, t);
+    const out = st.players.filter(p => p.onPitch && p.team === team && p.role !== "GK");
+    if (out.length < 7) return null;
+    const half = t < match.time.h2.start ? "h1" : "h2";
+    const dir = match.dir[team][half];                              // 攻撃方向
+    const ownGoalX = -dir * 52.5;
+    // 最終ライン: 自ゴールに近い順の外野4人の平均x（#27の合意ラインと同思想の軽量版）
+    const byDepth = [...out].sort((a, b) => (a.x - b.x) * dir - (b.x - a.x) * dir);
+    const deep4 = [...out].sort((a, b) => Math.abs(a.x - ownGoalX) - Math.abs(b.x - ownGoalX)).slice(0, 4);
+    const lineX = deep4.reduce((a, p) => a + p.x, 0) / deep4.length;
+    const lineHeight = Math.abs(lineX - ownGoalX);
+    // ブロック幅/縦（外野の広がり）と重心
+    const xs = out.map(p => p.x), ys = out.map(p => p.y);
+    const width = Math.max(...ys) - Math.min(...ys);
+    const depth = Math.max(...xs) - Math.min(...xs);
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    // スライド追従: ブロック重心 y がボール y（減衰0.55）にどれだけ付いているか
+    const ball = st.ball;
+    const slideGap = Math.abs(cy - ball.y * 0.55);
+    // 中央レーン閉鎖度: ボール→自ゴールの中央3レーン（y=中心±6）の遮断率（PLVレーン式の逆読み・dwDef反映=#106）
+    let closure = 0;
+    for (const oy of [-6, 0, 6]) {
+      const gx = ownGoalX, gy2 = clamp(ball.y * 0.25 + oy, -30, 30);
+      const lx = gx - ball.x, ly = gy2 - ball.y;
+      const len = Math.hypot(lx, ly) || 1;
+      let lane = 1;
+      for (const d of out) {
+        const u = clamp(((d.x - ball.x) * lx + (d.y - ball.y) * ly) / (len * len));
+        const px = ball.x + u * lx, py = ball.y + u * ly;
+        const dd = Math.hypot(d.x - px, d.y - py) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
+        lane *= 1 - Math.exp(-(dd * dd) / 9);
+        if (lane < 0.02) break;
+      }
+      closure += (1 - lane) / 3;
+    }
+    return { t, lineHeight: +lineHeight.toFixed(1), width: +width.toFixed(1), depth: +depth.toFixed(1),
+      slideGap: +slideGap.toFixed(1), centralClosure: +closure.toFixed(3), byDepthFirst: byDepth[0]?.no };
+  };
+
+  // v1b 集計: 非保持サンプルの平均（試合 or 区間）
+  T.defenseBlock = (match, scenario, team, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const range = E.playedRange(match);
+    const t0 = opts.t0 ?? range.t0 + 60, t1 = opts.t1 ?? range.t1, step = opts.step || 45;
+    const acc = { lineHeight: 0, width: 0, depth: 0, slideGap: 0, centralClosure: 0 };
+    let n = 0;
+    for (let t = t0; t < t1; t += step) {
+      const b = T.defenseBlockAt(match, scenario, team, t);
+      if (!b) continue;
+      for (const f of Object.keys(acc)) acc[f] += b[f];
+      n++;
+    }
+    if (!n) return null;
+    const out = { samples: n };
+    for (const f of Object.keys(acc)) out[f] = +(acc[f] / n).toFixed(2);
+    return out;
+  };
+
   // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]
   T.phaseStrip = (match, scenario, n = 240) => {
     scenario = scenario || E.actualScenario(match);

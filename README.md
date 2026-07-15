@@ -35,7 +35,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 
 ```bash
 node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
-node --test rpdx/test/*.test.mjs    # 351テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
+node --test rpdx/test/*.test.mjs    # 357テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
 ```
 
 ## 検証済み実データ（2026-07-03 照合）
@@ -138,6 +138,15 @@ API: `RPDX.tactics.phaseAt / phaseShares / phaseStrip`
 Voronoi占有率（4m格子近似）を各時刻で決定論算出。試合情報モーダルに現在時刻のスナップショット表を追加
 （守備側の日本は低ブロックで凸包 約827m²・ブラジルは攻撃時 約2146m²、というコンパクト差がモデル上で成立）。
 API: `RPDX.tactics.shapeMetrics / voronoiShare`（読み取り専用・位置と結果に不干渉）。
+
+**守備構造解析 v1（#117）**: 攻撃側視点だけでなく**守備の構造**を読み出す2段構成（読み取り専用・golden不変）。
+- **守備側帰属ビュー**（`T.defenseProfile`）: 相手の危険度モジュール平均を「守備側が何を許したか」として再集計
+  （被CPR・被PLV・被OVL・被TRV・被KIKEN）。例: FRA-ESP ではスペインの被TRV 1.08 vs フランス 2.08
+  ＝カウンターを半分に抑えた「レスト・ディフェンスの実体」が数値化される。
+- **守備ブロック読み出し**（`T.defenseBlock / defenseBlockAt`）: **非保持時のみ・GK除外・ボール相対**で
+  ライン高さ・ブロック幅×縦・スライド追従差・**中央レーン閉鎖度**（PLVレーン式の逆読み・def編集=#106が効く）を算出。
+  例: BRA-JPN では日本の低ブロック（ライン高 14.9m・縦 36m）とブラジル（30.6m・60m）が明確に判別される。
+- UI: 試合情報モーダル「守備構造 v1」（オンデマンド計算・シナリオ追従）。実測ではなくモデル推定上の観察と明示。
 
 ## 相手分析体制の脆弱性プロファイラ（#59・opponent v1）
 
@@ -417,7 +426,7 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / policy / layers / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   351テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+rpdx/test/   357テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
              argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
