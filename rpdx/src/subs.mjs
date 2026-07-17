@@ -211,6 +211,26 @@
     }
     // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
     if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
+    // #89/#83/#61: シナリオ級拡張も fork で引き継ぐ（従来は脱落＝交代等の追加編集で能力値上書きが消えるバグ）
+    if (base.attrOverrides) {
+      sc.attrOverrides = {};
+      for (const k of Object.keys(base.attrOverrides)) {
+        sc.attrOverrides[k] = {};
+        for (const no of Object.keys(base.attrOverrides[k])) sc.attrOverrides[k][no] = { ...base.attrOverrides[k][no] };
+      }
+    }
+    if (base.nameOverrides) {
+      sc.nameOverrides = {};
+      for (const k of Object.keys(base.nameOverrides)) {
+        sc.nameOverrides[k] = {};
+        for (const no of Object.keys(base.nameOverrides[k])) sc.nameOverrides[k][no] = { ...base.nameOverrides[k][no] };
+      }
+    }
+    if (base.editAnchors && base.editAnchors.length) {
+      sc.editAnchors = base.editAnchors.map(a2 => ({ ...a2 }));
+      if (base.editFrom != null) sc.editFrom = base.editFrom;
+    }
+    if (base.opponentHt) sc.opponentHt = { ...base.opponentHt };
     return sc;
   };
   S.fromActual = (match, label) => {

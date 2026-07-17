@@ -199,6 +199,18 @@
     if (!T) return { ok: false, error: "チームが見つかりません" };
     const p = T.squad.find(q => q.no === no);
     if (!p) return { ok: false, error: "選手が見つかりません" };
+    // 先に全検証（部分適用を防ぐ — 番号重複で名前だけ変わる等を排除）
+    if (patch.no != null && Math.trunc(patch.no) !== no) {
+      const cand = Math.trunc(patch.no);
+      if (!(cand >= 1 && cand <= 99)) return { ok: false, error: "背番号は 1〜99" };
+      if (T.squad.some(q => q.no === cand)) return { ok: false, error: "背番号が重複しています" };
+    }
+    if (patch.pos != null && String(patch.pos) !== p.pos && !["GK", "DF", "MF", "FW"].includes(String(patch.pos)))
+      return { ok: false, error: "ポジションは GK/DF/MF/FW" };
+    if (patch.pos === "GK" && p.pos !== "GK") { /* スワップは下で処理 */ }
+    else if (p.pos === "GK" && patch.pos != null && patch.pos !== "GK"
+      && T.squad.filter(q => q.pos === "GK").length <= 1)
+      return { ok: false, error: "各チームに GK が1人必要です（先に別の選手を GK にしてください）" };
     if (patch.name != null) {
       const nm = String(patch.name).trim();
       if (nm) { p.ja = nm; p.name = nm; p.label = nm.slice(0, 6); }
@@ -237,6 +249,7 @@
       for (const ph of T.phases) for (const s of Object.keys(ph.assign)) if (ph.assign[s] === no) ph.assign[s] = newNo;
       if (T.captainOrder) T.captainOrder = T.captainOrder.map(n => (n === no ? newNo : n));
       for (const s of (match.subsActual[team] || [])) { if (s.out === no) s.out = newNo; if (s.in === no) s.in = newNo; }
+      for (const ev of (match.events || [])) if (ev.team === team && ev.no === no) ev.no = newNo;
     }
     return { ok: true, newNo };
   };

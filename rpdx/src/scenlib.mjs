@@ -165,6 +165,26 @@
     if (scenario.outages) ov.outages = scenario.outages;      // #81
     if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
+    // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
+    //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
+    //   収録実試合（較正済み）は同梱しない＝公式記録・golden の非改変を構成的に保証。
+    if (match.meta.calibrated === false) {
+      const teamCfg = (k) => {
+        const T = match.teams[k];
+        return {
+          code: T.code, name: T.name, nameEn: T.nameEn, coach: T.coach,
+          formation: T.phases[0].shape, color: T.color, colorDeep: T.colorDeep,
+          kit: T.kit, captainOrder: T.captainOrder, xi: { ...T.phases[0].assign },
+          squad: T.squad.map(p => ({ no: p.no, pos: p.pos, name: p.name, ja: p.ja, label: p.label, attrs: { ...p.attrs } })),
+        };
+      };
+      const [ha, aw] = match.teamOrder;
+      bundle.customMatch = {
+        seed: match.meta.id.replace(/^custom-/, ""),
+        competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        home: teamCfg(ha), away: teamCfg(aw),
+      };
+    }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
   };
