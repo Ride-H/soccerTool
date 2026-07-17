@@ -131,9 +131,31 @@
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
-    sc.editAnchors = editAnchors;
-    sc.editFrom = frame.t;
-    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+    // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
+    //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
+    const MERGE_WIN = 25;
+    const prev = sc.editAnchors || [];
+    const kept = prev.filter(a =>
+      !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
+    const replaced = prev.length - kept.length;
+    sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
+    sc.editFrom = sc.editAnchors.length
+      ? Math.min(...sc.editAnchors.map(a => a.t))
+      : frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc),
+      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+  };
+
+  // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
+  SCN.withoutEditGroup = (match, scenario, t) => {
+    const S = R.subs;
+    const next = S.fork(match, scenario);
+    const before = (next.editAnchors || []).length;
+    next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
+    const removed = before - next.editAnchors.length;
+    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
+    else { delete next.editAnchors; delete next.editFrom; }
+    return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
   /* ---- #91: ロスター/シナリオ/フレームの JSON 往復（統合スキーマ・取込→反映→書出） ----

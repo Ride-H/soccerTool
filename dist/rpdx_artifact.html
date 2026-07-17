@@ -2099,9 +2099,19 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
-    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
-      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    // #83/#123: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    //   多重編集でも衝突しないよう全アンカー(t/team/no/x/y/σ)の決定論ハッシュ（tソート済み前提）。
+    let ea = "";
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) {
+      let hh = 9;
+      for (const a of scenario.editAnchors) {
+        hh = (Math.imul(hh, 31) + (Math.round(a.t * 7)
+          ^ N.seedOf(a.team) ^ ((a.no | 0) * 977)
+          ^ (Math.round(a.x * 13 + a.y * 7) | 0)
+          ^ (Math.round((a.sigma || 0) * 11) | 0))) | 0;
+      }
+      ea = "e" + (scenario.editFrom ?? "") + ":" + scenario.editAnchors.length + ":" + (hh >>> 0).toString(36);
+    }
     // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
     let ao = "";
     if (scenario && scenario.attrOverrides) {
@@ -2289,14 +2299,17 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
-    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
-    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
-    if (chainBuilding) return base;
+    // #83/#123: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）。
+    //   編集アンカーは**最後に**連結する＝記録イベント/チェーン由来アンカーと同時刻でも
+    //   編集が最終適用され「編集した配置を通過」が厳密に成立する（適用は step5 の逐次lerp）。
+    const edits = scenario && scenario.editAnchors && scenario.editAnchors.length ? scenario.editAnchors : null;
+    if (chainBuilding) return edits ? base.concat(edits) : base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
     // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
     const chain = buildChain(match, scenario);
-    const list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    let list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    if (edits) list = list.concat(edits);
     panchorCache.set(key, list);
     return list;
   };
@@ -3293,10 +3306,27 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
   // 最終位置 = 基礎位置 + ボール文脈調整（GK追従・プレッシング）
   // 調整はすべて lerp ブレンド + 平滑ゲートで速度上限を保つ
+  // #123: 編集アンカーの最終強制 — ユーザー編集は明示的意図なので、記録ゴール再現の
+  //   希釈・行動レイヤ（プレス/ラン/分離）を含む**全ての上流変位より最後に**適用し、
+  //   窓中心では編集座標そのものを通過させる。scenario.editAnchors 限定＝収録世界・golden不変。
+  const editHoldOf = (scenario, team, no, t) => {
+    const list = scenario && scenario.editAnchors;
+    if (!list || !list.length) return null;
+    let best = null;
+    for (const a of list) {
+      if (a.team !== team || a.no !== no) continue;
+      const sg = a.sigma ?? 6;
+      const g = N.gauss(t, a.t, sg);
+      if (!best || g > best.w) best = { w: g, x: a.x, y: a.y };
+    }
+    return best && best.w > 0.01 ? best : null;
+  };
+
   const playerPos = (match, scenario, team, no, slot, t, ctx) => {
     const bctx = { half: ctx.half, dir: ctx.dir, P: ctx.P, ballS: ctx.ballS };
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
     const ball = ctx.ball;
+
 
     // GK: 実ボール角へ微補正（#31・base の角度圧縮を実ボールで研ぐ・帯域内）
     // ※深度は base（平滑ボール基準）に委ねる。シュートは GK を置き去りにし得るため
@@ -3361,6 +3391,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
     x = clamp(x, -HALF_W + 0.4, HALF_W - 0.4);
     y = clamp(y, -HALF_H + 0.4, HALF_H - 0.4);
+    // #123: 編集アンカーの最終強制（w=1 で編集座標を厳密通過 — 全上流より優先）
+    const eh = editHoldOf(scenario, team, no, t);
+    if (eh) { x = lerp(x, eh.x, eh.w); y = lerp(y, eh.y, eh.w); }
     return { x, y };
   };
 
@@ -6479,9 +6512,31 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
-    sc.editAnchors = editAnchors;
-    sc.editFrom = frame.t;
-    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+    // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
+    //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
+    const MERGE_WIN = 25;
+    const prev = sc.editAnchors || [];
+    const kept = prev.filter(a =>
+      !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
+    const replaced = prev.length - kept.length;
+    sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
+    sc.editFrom = sc.editAnchors.length
+      ? Math.min(...sc.editAnchors.map(a => a.t))
+      : frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc),
+      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+  };
+
+  // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
+  SCN.withoutEditGroup = (match, scenario, t) => {
+    const S = R.subs;
+    const next = S.fork(match, scenario);
+    const before = (next.editAnchors || []).length;
+    next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
+    const removed = before - next.editAnchors.length;
+    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
+    else { delete next.editAnchors; delete next.editFrom; }
+    return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
   /* ---- #91: ロスター/シナリオ/フレームの JSON 往復（統合スキーマ・取込→反映→書出） ----
@@ -9505,6 +9560,20 @@ self.onmessage = (e) => {
           `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
       }
     }
+    // #123: 配置編集の履歴行 — 時刻グループごとに表示・✕で該当時刻のみ取り消し
+    {
+      const groups = new Map();
+      for (const a of (sc.editAnchors || [])) {
+        const gk = Math.round(a.t);
+        if (!groups.has(gk)) groups.set(gk, 0);
+        groups.set(gk, groups.get(gk) + 1);
+      }
+      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
+          `<span title="配置編集">✏</span>` +
+          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+      }
+    }
     // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
     const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
       "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
@@ -9517,7 +9586,7 @@ self.onmessage = (e) => {
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
@@ -9525,6 +9594,7 @@ self.onmessage = (e) => {
           const [kind, k, i] = btn.dataset.del.split(":");
           const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
             : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
             : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };

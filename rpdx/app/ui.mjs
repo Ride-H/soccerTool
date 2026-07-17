@@ -852,6 +852,20 @@ self.onmessage = (e) => {
           `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
       }
     }
+    // #123: 配置編集の履歴行 — 時刻グループごとに表示・✕で該当時刻のみ取り消し
+    {
+      const groups = new Map();
+      for (const a of (sc.editAnchors || [])) {
+        const gk = Math.round(a.t);
+        if (!groups.has(gk)) groups.set(gk, 0);
+        groups.set(gk, groups.get(gk) + 1);
+      }
+      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
+          `<span title="配置編集">✏</span>` +
+          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+      }
+    }
     // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
     const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
       "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
@@ -864,7 +878,7 @@ self.onmessage = (e) => {
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
@@ -872,6 +886,7 @@ self.onmessage = (e) => {
           const [kind, k, i] = btn.dataset.del.split(":");
           const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
             : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
             : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };
