@@ -43,7 +43,7 @@
     },
     AR_SUB_SELF: +16,      // 自分の投入直後
     // #80: 外的失点（仮説）の心理増幅 — 理不尽な失点ほどスイングが大きい
-    SHOCK_W: { "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
+    SHOCK_W: { "manual": 1.0, "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
                "own-goal": 1.4, "deflection": 1.25, "set-piece": 1.15 },
     AR_TAU: 240,           // 覚醒インパルス減衰[s]
     AR_BASE: 48,

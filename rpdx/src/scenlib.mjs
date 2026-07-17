@@ -31,8 +31,12 @@
         if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
       if (Object.keys(g).length) o.g = g;
     }
-    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点 [t,team,kind]
+    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点/スコア修正 [t,team,kind]
       o.q = scenario.shockGoals.map(x => [x.t, x.team, x.kind || "deflection"]);
+    if (scenario.editBall && scenario.editBall.length)        // #127: ボール編集 [t,x,y]
+      o.eb = scenario.editBall.map(b2 => [b2.t, b2.x, b2.y]);
+    if (scenario.removeGoals && scenario.removeGoals.length)  // #128: 減点 [team,t]
+      o.rg = scenario.removeGoals.map(r2 => [r2.team, r2.t]);
     return JSON.stringify(o);
   };
 
@@ -51,6 +55,8 @@
         sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
     }
     if (o.q) sc.shockGoals = o.q.map(([t, team, kind]) => ({ t, team, kind: kind || "deflection" }));  // #80
+    if (o.eb) sc.editBall = o.eb.map(([t, x, y]) => ({ t, x, y }));                                     // #127
+    if (o.rg) sc.removeGoals = o.rg.map(([team, t]) => ({ team, t }));                                  // #128
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -131,6 +137,19 @@
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
+    // #127: ボール差分 → scenario.editBall へ蓄積マージ（±25s は最新置換・#50 経路で速度安全）
+    let ballMoved = 0;
+    {
+      const nb = E.ballAt(match, base, frame.t);
+      const fb = frame.ball;
+      if (fb && nb && Math.hypot(fb.x - nb.x, fb.y - nb.y) > 0.5) {
+        const prevB = sc.editBall || [];
+        sc.editBall = prevB.filter(a2 => Math.abs(a2.t - frame.t) > 25)
+          .concat([{ t: frame.t, x: +fb.x.toFixed(2), y: +fb.y.toFixed(2) }])
+          .sort((x2, y2) => x2.t - y2.t);
+        ballMoved = 1;
+      }
+    }
     // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
     //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
     const MERGE_WIN = 25;
@@ -139,22 +158,25 @@
       !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
     const replaced = prev.length - kept.length;
     sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
-    sc.editFrom = sc.editAnchors.length
-      ? Math.min(...sc.editAnchors.map(a => a.t))
-      : frame.t;
+    const allTs = sc.editAnchors.map(a => a.t).concat((sc.editBall || []).map(b2 => b2.t));
+    sc.editFrom = allTs.length ? Math.min(...allTs) : frame.t;
+    if (!sc.editAnchors.length) delete sc.editAnchors;
     return { scenario: sc, validation: S.validateScenario(match, sc),
-      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+      moved: editAnchors.length, ballMoved, replaced, total: (sc.editAnchors || []).length };
   };
 
   // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
   SCN.withoutEditGroup = (match, scenario, t) => {
     const S = R.subs;
     const next = S.fork(match, scenario);
-    const before = (next.editAnchors || []).length;
+    const before = (next.editAnchors || []).length + (next.editBall || []).length;
     next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
-    const removed = before - next.editAnchors.length;
-    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
-    else { delete next.editAnchors; delete next.editFrom; }
+    if (next.editBall) next.editBall = next.editBall.filter(b2 => Math.abs(b2.t - t) > 0.5);   // #127
+    const removed = before - next.editAnchors.length - (next.editBall || []).length;
+    const ts = next.editAnchors.map(a => a.t).concat((next.editBall || []).map(b2 => b2.t));
+    if (!next.editAnchors.length) delete next.editAnchors;
+    if (next.editBall && !next.editBall.length) delete next.editBall;
+    if (ts.length) next.editFrom = Math.min(...ts); else delete next.editFrom;
     return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
@@ -186,6 +208,8 @@
     }
     if (scenario.outages) ov.outages = scenario.outages;      // #81
     if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
+    if (scenario.editBall && scenario.editBall.length) ov.editBall = scenario.editBall;          // #127
+    if (scenario.removeGoals && scenario.removeGoals.length) ov.removeGoals = scenario.removeGoals; // #128
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
     // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
     //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
@@ -276,6 +300,11 @@
     if (Array.isArray(ov.shockGoals) && ov.shockGoals.length)
       sc.shockGoals = ov.shockGoals.filter(x => x && keySet.has(x.team))
         .map(x => ({ t: +x.t, team: x.team, kind: x.kind || "deflection" }));
+    // #127/#128: ボール編集・減点
+    if (Array.isArray(ov.editBall) && ov.editBall.length)
+      sc.editBall = ov.editBall.map(b2 => ({ t: +b2.t, x: +b2.x, y: +b2.y }));
+    if (Array.isArray(ov.removeGoals) && ov.removeGoals.length)
+      sc.removeGoals = ov.removeGoals.filter(r2 => r2 && keySet.has(r2.team)).map(r2 => ({ team: r2.team, t: +r2.t }));
     // #81: 退場（未知チームは無視・検証は validateScenario 側）
     if (ov.outages && typeof ov.outages === "object") {
       const g = {};

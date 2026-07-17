@@ -114,7 +114,7 @@
     }
   };
   // #80: 外的失点（仮説）の検証 — kind 既知・時刻内・チーム毎≤2（v1）
-  const SHOCK_KINDS = ["ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];
+  const SHOCK_KINDS = ["manual", "ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];   // #128: manual=手動記帳
   const validateShockGoals = (match, scenario, errors) => {
     const list = scenario.shockGoals;
     if (!list) return;
@@ -126,7 +126,23 @@
       if (!SHOCK_KINDS.includes(sg.kind)) errors.push(`[${T.name}] 未知の外的失点種別 ${sg.kind}`);
       if (sg.t < range.t0 + 30 || sg.t > range.t1 - 30) errors.push(`[${T.name}] 外的失点の時刻がタイムライン外`);
       perTeam[sg.team] = (perTeam[sg.team] || 0) + 1;
-      if (perTeam[sg.team] > 2) errors.push(`[${T.name}] 外的失点は v1 ではチーム毎2件まで`);
+      if (perTeam[sg.team] > 5) errors.push(`[${T.name}] スコア修正（追加）はチーム毎5件まで`);
+    }
+  };
+  // #128: 減点（記録/生成ゴールの手動取消）の検証 — 対象ゴール実在・チーム毎5件まで・重複不可
+  const validateRemoveGoals = (match, scenario, errors) => {
+    const list = scenario.removeGoals;
+    if (!list) return;
+    const perTeam = {}, used = new Set();
+    for (const rg of list) {
+      const T = match.teams[rg.team];
+      if (!T) { errors.push(`[remove] 未知チーム ${rg.team}`); continue; }
+      const hit = match.events.find(ev => ev.type === "goal" && ev.team === rg.team && Math.abs(ev.t - rg.t) <= 60);
+      if (!hit) { errors.push(`[${T.name}] 指定時刻±60秒に取消対象のゴールがありません`); continue; }
+      if (used.has(hit.t)) errors.push(`[${T.name}] 同じゴールを重複して取消指定`);
+      used.add(hit.t);
+      perTeam[rg.team] = (perTeam[rg.team] || 0) + 1;
+      if (perTeam[rg.team] > 5) errors.push(`[${T.name}] スコア修正（減点）はチーム毎5件まで`);
     }
   };
   S.SHOCK_KINDS = SHOCK_KINDS;
@@ -134,6 +150,7 @@
     const v = S.validatePlan(match, scenario.subs, scenario.lineup);
     validateOutages(match, scenario, v.errors);
     validateShockGoals(match, scenario, v.errors);
+    validateRemoveGoals(match, scenario, v.errors);
     v.ok = v.errors.length === 0;
     return v;
   };
@@ -142,6 +159,20 @@
   S.withShockGoal = (match, scenario, shock /* {t,team,kind} */) => {
     const next = S.fork(match, scenario);
     next.shockGoals = [...(next.shockGoals || []), { kind: "deflection", ...shock }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  // #128: 減点の追加・削除
+  S.withRemoveGoal = (match, scenario, rg /* {team,t} */) => {
+    const next = S.fork(match, scenario);
+    next.removeGoals = [...(next.removeGoals || []), { team: rg.team, t: rg.t }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  S.withoutRemoveGoal = (match, scenario, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.removeGoals) {
+      next.removeGoals = next.removeGoals.filter((_, i) => i !== idx);
+      if (!next.removeGoals.length) delete next.removeGoals;
+    }
     return { scenario: next, validation: S.validateScenario(match, next) };
   };
   S.withoutShockGoal = (match, scenario, idx) => {
@@ -209,8 +240,11 @@
       sc.outages = {};
       for (const k of Object.keys(base.outages)) sc.outages[k] = base.outages[k].map(o => ({ ...o }));
     }
-    // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
+    // #80: 外的失点/スコア修正 [{t,team,kind}] — 未指定は付与しない（golden安全）
     if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
+    // #128: 減点 / #127: ボール編集
+    if (base.removeGoals) sc.removeGoals = base.removeGoals.map(g => ({ ...g }));
+    if (base.editBall) sc.editBall = base.editBall.map(b2 => ({ ...b2 }));
     // #89/#83/#61: シナリオ級拡張も fork で引き継ぐ（従来は脱落＝交代等の追加編集で能力値上書きが消えるバグ）
     if (base.attrOverrides) {
       sc.attrOverrides = {};
