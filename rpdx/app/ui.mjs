@@ -246,6 +246,14 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
+    // #91残: ?data= バンドルに customMatch があれば起動試合をそれで確定（レンダラ生成前）
+    if (urlq.has("data")) {
+      try {
+        const ob = JSON.parse(decodeURIComponent(urlq.get("data")));
+        if (ob && ob.customMatch) App.match = G.createMatch(ob.customMatch);
+        else if (ob && ob.match && R.data.MATCHES[ob.match]) App.match = R.data.MATCHES[ob.match];
+      } catch { /* 後段の適用処理が拒否する */ }
+    }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
     } catch (err) {
@@ -1071,9 +1079,12 @@ self.onmessage = (e) => {
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
     });
-    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    const inReg = ids.includes(App.match.meta.id) || App.match === templateMatchCache;
+    if (!inReg) opts.push(`<option value="__cur__" selected>📄 取込カスタム（${App.match.teams[App.match.teamOrder[0]].name}×${App.match.teams[App.match.teamOrder[1]].name}）</option>`);
+    opts.push(`<option value="${TPL_ID}"${isTpl && inReg ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
     sel.innerHTML = opts.join("");
     sel.onchange = () => {
+      if (sel.value === "__cur__") return;   // 現在の取込カスタム（何もしない）
       const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
@@ -1764,7 +1775,18 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
   const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
   const applyBundle = (text, src) => {
-    const r = R.scenlib.parseBundle(App.match, text);
+    // #91残: バンドルは自己完結 — customMatch があれば未較正試合を完全再構築してから適用。
+    //   収録試合IDのバンドルなら該当試合へ自動切替（別試合へ誤適用しない）。
+    let obj = text;
+    try { obj = typeof text === "string" ? JSON.parse(text) : text; }
+    catch (e) { bMsg("⚠ JSON 解析に失敗: " + (e && e.message), true); return false; }
+    if (obj && obj.customMatch) {
+      try { setMatch(G.createMatch(obj.customMatch)); }
+      catch (e) { bMsg("⚠ カスタム試合の再構築に失敗: " + (e && e.message), true); return false; }
+    } else if (obj && obj.match && R.data.MATCHES[obj.match] && obj.match !== App.match.meta.id) {
+      setMatch(R.data.MATCHES[obj.match]);
+    }
+    const r = R.scenlib.parseBundle(App.match, obj);
     if (r.error) { bMsg("⚠ " + r.error, true); return false; }
     if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
     refreshScenario(r.scenario);

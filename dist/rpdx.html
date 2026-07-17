@@ -4468,6 +4468,26 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     }
     // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
     if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
+    // #89/#83/#61: シナリオ級拡張も fork で引き継ぐ（従来は脱落＝交代等の追加編集で能力値上書きが消えるバグ）
+    if (base.attrOverrides) {
+      sc.attrOverrides = {};
+      for (const k of Object.keys(base.attrOverrides)) {
+        sc.attrOverrides[k] = {};
+        for (const no of Object.keys(base.attrOverrides[k])) sc.attrOverrides[k][no] = { ...base.attrOverrides[k][no] };
+      }
+    }
+    if (base.nameOverrides) {
+      sc.nameOverrides = {};
+      for (const k of Object.keys(base.nameOverrides)) {
+        sc.nameOverrides[k] = {};
+        for (const no of Object.keys(base.nameOverrides[k])) sc.nameOverrides[k][no] = { ...base.nameOverrides[k][no] };
+      }
+    }
+    if (base.editAnchors && base.editAnchors.length) {
+      sc.editAnchors = base.editAnchors.map(a2 => ({ ...a2 }));
+      if (base.editFrom != null) sc.editFrom = base.editFrom;
+    }
+    if (base.opponentHt) sc.opponentHt = { ...base.opponentHt };
     return sc;
   };
   S.fromActual = (match, label) => {
@@ -6499,6 +6519,26 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (scenario.outages) ov.outages = scenario.outages;      // #81
     if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
+    // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
+    //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
+    //   収録実試合（較正済み）は同梱しない＝公式記録・golden の非改変を構成的に保証。
+    if (match.meta.calibrated === false) {
+      const teamCfg = (k) => {
+        const T = match.teams[k];
+        return {
+          code: T.code, name: T.name, nameEn: T.nameEn, coach: T.coach,
+          formation: T.phases[0].shape, color: T.color, colorDeep: T.colorDeep,
+          kit: T.kit, captainOrder: T.captainOrder, xi: { ...T.phases[0].assign },
+          squad: T.squad.map(p => ({ no: p.no, pos: p.pos, name: p.name, ja: p.ja, label: p.label, attrs: { ...p.attrs } })),
+        };
+      };
+      const [ha, aw] = match.teamOrder;
+      bundle.customMatch = {
+        seed: match.meta.id.replace(/^custom-/, ""),
+        competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        home: teamCfg(ha), away: teamCfg(aw),
+      };
+    }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
   };
@@ -7080,6 +7120,18 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (!T) return { ok: false, error: "チームが見つかりません" };
     const p = T.squad.find(q => q.no === no);
     if (!p) return { ok: false, error: "選手が見つかりません" };
+    // 先に全検証（部分適用を防ぐ — 番号重複で名前だけ変わる等を排除）
+    if (patch.no != null && Math.trunc(patch.no) !== no) {
+      const cand = Math.trunc(patch.no);
+      if (!(cand >= 1 && cand <= 99)) return { ok: false, error: "背番号は 1〜99" };
+      if (T.squad.some(q => q.no === cand)) return { ok: false, error: "背番号が重複しています" };
+    }
+    if (patch.pos != null && String(patch.pos) !== p.pos && !["GK", "DF", "MF", "FW"].includes(String(patch.pos)))
+      return { ok: false, error: "ポジションは GK/DF/MF/FW" };
+    if (patch.pos === "GK" && p.pos !== "GK") { /* スワップは下で処理 */ }
+    else if (p.pos === "GK" && patch.pos != null && patch.pos !== "GK"
+      && T.squad.filter(q => q.pos === "GK").length <= 1)
+      return { ok: false, error: "各チームに GK が1人必要です（先に別の選手を GK にしてください）" };
     if (patch.name != null) {
       const nm = String(patch.name).trim();
       if (nm) { p.ja = nm; p.name = nm; p.label = nm.slice(0, 6); }
@@ -7118,6 +7170,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       for (const ph of T.phases) for (const s of Object.keys(ph.assign)) if (ph.assign[s] === no) ph.assign[s] = newNo;
       if (T.captainOrder) T.captainOrder = T.captainOrder.map(n => (n === no ? newNo : n));
       for (const s of (match.subsActual[team] || [])) { if (s.out === no) s.out = newNo; if (s.in === no) s.in = newNo; }
+      for (const ev of (match.events || [])) if (ev.team === team && ev.no === no) ev.no = newNo;
     }
     return { ok: true, newNo };
   };
@@ -8852,6 +8905,14 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
+    // #91残: ?data= バンドルに customMatch があれば起動試合をそれで確定（レンダラ生成前）
+    if (urlq.has("data")) {
+      try {
+        const ob = JSON.parse(decodeURIComponent(urlq.get("data")));
+        if (ob && ob.customMatch) App.match = G.createMatch(ob.customMatch);
+        else if (ob && ob.match && R.data.MATCHES[ob.match]) App.match = R.data.MATCHES[ob.match];
+      } catch { /* 後段の適用処理が拒否する */ }
+    }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
     } catch (err) {
@@ -9677,9 +9738,12 @@ self.onmessage = (e) => {
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
     });
-    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    const inReg = ids.includes(App.match.meta.id) || App.match === templateMatchCache;
+    if (!inReg) opts.push(`<option value="__cur__" selected>📄 取込カスタム（${App.match.teams[App.match.teamOrder[0]].name}×${App.match.teams[App.match.teamOrder[1]].name}）</option>`);
+    opts.push(`<option value="${TPL_ID}"${isTpl && inReg ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
     sel.innerHTML = opts.join("");
     sel.onchange = () => {
+      if (sel.value === "__cur__") return;   // 現在の取込カスタム（何もしない）
       const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
@@ -10370,7 +10434,18 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
   const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
   const applyBundle = (text, src) => {
-    const r = R.scenlib.parseBundle(App.match, text);
+    // #91残: バンドルは自己完結 — customMatch があれば未較正試合を完全再構築してから適用。
+    //   収録試合IDのバンドルなら該当試合へ自動切替（別試合へ誤適用しない）。
+    let obj = text;
+    try { obj = typeof text === "string" ? JSON.parse(text) : text; }
+    catch (e) { bMsg("⚠ JSON 解析に失敗: " + (e && e.message), true); return false; }
+    if (obj && obj.customMatch) {
+      try { setMatch(G.createMatch(obj.customMatch)); }
+      catch (e) { bMsg("⚠ カスタム試合の再構築に失敗: " + (e && e.message), true); return false; }
+    } else if (obj && obj.match && R.data.MATCHES[obj.match] && obj.match !== App.match.meta.id) {
+      setMatch(R.data.MATCHES[obj.match]);
+    }
+    const r = R.scenlib.parseBundle(App.match, obj);
     if (r.error) { bMsg("⚠ " + r.error, true); return false; }
     if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
     refreshScenario(r.scenario);
