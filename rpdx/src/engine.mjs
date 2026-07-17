@@ -116,9 +116,19 @@
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
-    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
-      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    // #83/#123: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    //   多重編集でも衝突しないよう全アンカー(t/team/no/x/y/σ)の決定論ハッシュ（tソート済み前提）。
+    let ea = "";
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) {
+      let hh = 9;
+      for (const a of scenario.editAnchors) {
+        hh = (Math.imul(hh, 31) + (Math.round(a.t * 7)
+          ^ N.seedOf(a.team) ^ ((a.no | 0) * 977)
+          ^ (Math.round(a.x * 13 + a.y * 7) | 0)
+          ^ (Math.round((a.sigma || 0) * 11) | 0))) | 0;
+      }
+      ea = "e" + (scenario.editFrom ?? "") + ":" + scenario.editAnchors.length + ":" + (hh >>> 0).toString(36);
+    }
     // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
     let ao = "";
     if (scenario && scenario.attrOverrides) {
@@ -306,14 +316,17 @@
     let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
-    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
-    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
-    if (chainBuilding) return base;
+    // #83/#123: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）。
+    //   編集アンカーは**最後に**連結する＝記録イベント/チェーン由来アンカーと同時刻でも
+    //   編集が最終適用され「編集した配置を通過」が厳密に成立する（適用は step5 の逐次lerp）。
+    const edits = scenario && scenario.editAnchors && scenario.editAnchors.length ? scenario.editAnchors : null;
+    if (chainBuilding) return edits ? base.concat(edits) : base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
     // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
     const chain = buildChain(match, scenario);
-    const list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    let list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    if (edits) list = list.concat(edits);
     panchorCache.set(key, list);
     return list;
   };
@@ -1310,10 +1323,27 @@
 
   // 最終位置 = 基礎位置 + ボール文脈調整（GK追従・プレッシング）
   // 調整はすべて lerp ブレンド + 平滑ゲートで速度上限を保つ
+  // #123: 編集アンカーの最終強制 — ユーザー編集は明示的意図なので、記録ゴール再現の
+  //   希釈・行動レイヤ（プレス/ラン/分離）を含む**全ての上流変位より最後に**適用し、
+  //   窓中心では編集座標そのものを通過させる。scenario.editAnchors 限定＝収録世界・golden不変。
+  const editHoldOf = (scenario, team, no, t) => {
+    const list = scenario && scenario.editAnchors;
+    if (!list || !list.length) return null;
+    let best = null;
+    for (const a of list) {
+      if (a.team !== team || a.no !== no) continue;
+      const sg = a.sigma ?? 6;
+      const g = N.gauss(t, a.t, sg);
+      if (!best || g > best.w) best = { w: g, x: a.x, y: a.y };
+    }
+    return best && best.w > 0.01 ? best : null;
+  };
+
   const playerPos = (match, scenario, team, no, slot, t, ctx) => {
     const bctx = { half: ctx.half, dir: ctx.dir, P: ctx.P, ballS: ctx.ballS };
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
     const ball = ctx.ball;
+
 
     // GK: 実ボール角へ微補正（#31・base の角度圧縮を実ボールで研ぐ・帯域内）
     // ※深度は base（平滑ボール基準）に委ねる。シュートは GK を置き去りにし得るため
@@ -1378,6 +1408,9 @@
 
     x = clamp(x, -HALF_W + 0.4, HALF_W - 0.4);
     y = clamp(y, -HALF_H + 0.4, HALF_H - 0.4);
+    // #123: 編集アンカーの最終強制（w=1 で編集座標を厳密通過 — 全上流より優先）
+    const eh = editHoldOf(scenario, team, no, t);
+    if (eh) { x = lerp(x, eh.x, eh.w); y = lerp(y, eh.y, eh.w); }
     return { x, y };
   };
 
