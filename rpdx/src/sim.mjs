@@ -99,6 +99,9 @@
     const keptGoalTs = match.events
       .filter(e => e.type === "goal" && !removed.some(r => r.ev === e))
       .map(e => e.t);
+    // #80: 外的失点（仮説）— 追加ゴール候補の近傍(±90s)回避リストに先に含める
+    const shocks = (scenario.shockGoals || []).slice().sort((x, y) => x.t - y.t);
+    for (const sg of shocks) keptGoalTs.push(sg.t);
     const teamDelta = {};
     keys.forEach((team, ti) => {
       let gainI = 0, actI = 0, scenI = 0;
@@ -181,6 +184,39 @@
       });
     });
 
+    /* --- 2b) #80 外的失点の注入 — 危険度に依存しない仮説ゴール ---
+       責任ある表現（不可侵）: これは仮説的 what-if であり、実試合・実審判に
+       この事象があったという断定ではない（収録記録は不変）。得点者個人は特定しない。 */
+    const SHOCK_LABEL = {
+      "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し",
+      "deflection": "デフレクション", "keeper-error": "GKミス",
+      "set-piece": "セットピースの混戦", "own-goal": "オウンゴール",
+    };
+    shocks.forEach((sg, si) => {
+      const team = sg.team;
+      if (!match.teams[team] || !teamDelta[team]) return;      // 検証済み前提の防御
+      const t = Math.round(clamp(sg.t, range.t0 + 60, range.t1 - 60));
+      const half = E.halfOf(match, t);
+      const d = match.dir[team][half === 1 ? "h1" : "h2"];
+      const gy = (N.hash2(sHash, si * 733 + 11) * 2 - 1) * 2.6;
+      const label = R.subs ? R.subs.tToLabel(match, t) : `${Math.ceil(t / 60)}'`;
+      added.push({
+        t, type: "goal", team, no: null, assist: null, sim: true,
+        shock: true, kind: sg.kind || "deflection",
+        min: label,
+        label: `GOAL〔仮定〕 ${SHOCK_LABEL[sg.kind] || "外的要因"} — ${match.teams[team].name}`,
+        detail: "仮説的な外的失点の注入（what-if）。実試合・実審判にこの事象があったという断定ではありません（記録は不変・得点者個人は特定しません）。",
+      });
+      ballAnchors.push(
+        { t: t - 7, x: d * 26, y: gy * 3.5 },
+        { t: t - 1.2, x: d * 42, y: gy * 2.0 },
+        { t: t, x: d * 52.2, y: gy, hold: 4 },
+        { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 6 },
+      );
+      teamDelta[team].shock = (teamDelta[team].shock || 0) + 1;
+    });
+    added.sort((x, y) => x.t - y.t);
+
     /* --- 3) イベント再構成 + スコア --- */
     const events = match.events
       .filter(ev => !removed.some(r => r.ev === ev))
@@ -194,7 +230,7 @@
     let sig = 0;
     const mix = (v) => { sig = (Math.imul(sig, 31) + v) | 0; };
     for (const r of removed) mix(r.ev.t | 0);
-    for (const a of added) mix(a.t * 7 + a.no * 131 + N.seedOf(a.team));
+    for (const a of added) mix(a.t * 7 + (a.no ?? 0) * 131 + N.seedOf(a.team) + (a.shock ? N.seedOf("shock:" + (a.kind || "")) : 0));
     if (removed.length + added.length > 0 && sig === 0) sig = 1;
 
     return {

@@ -92,3 +92,58 @@ test("#91 serializeBundle は空シナリオでも最小・整形JSON", () => {
   assert.equal(o.match, MATCH.meta.id);
   assert.ok(o.overrides && typeof o.overrides === "object", "overrides キーは常設");
 });
+
+
+test("#91残: fork連鎖で attr/name/editAnchors/opponentHt が引き継がれる（消えるバグの回帰）", () => {
+  let sc = S.createScenario(MATCH, "chain", E.actualScenario(MATCH));
+  sc.attrOverrides = { BRA: { 9: { pac: 40 } } };
+  sc.nameOverrides = { BRA: { 9: { ja: "X", name: "X", label: "X" } } };
+  sc.editAnchors = [{ t: 1000, team: "BRA", no: 9, x: 0, y: 0, sigma: 5 }];
+  sc.editFrom = 1000;
+  sc.opponentHt = { team: "JPN", archetype: "manpower" };
+  const forked = S.withSub(MATCH, sc, "JPN", { t: 3000, out: 11, in: 8 }).scenario;
+  assert.deepEqual(forked.attrOverrides, sc.attrOverrides);
+  assert.deepEqual(forked.nameOverrides, sc.nameOverrides);
+  assert.deepEqual(forked.editAnchors, sc.editAnchors);
+  assert.equal(forked.editFrom, 1000);
+  assert.deepEqual(forked.opponentHt, sc.opponentHt);
+});
+
+test("#91残: 未較正試合は customMatch 同梱 → 再構築でロスター編集が完全復元", () => {
+  const G = RPDX.generic;
+  const m = G.templateMatch();
+  assert.ok(G.editEntry(m, "TMA", 9, { name: "山田太郎", no: 23 }).ok);
+  assert.ok(G.editEntry(m, "TMA", 5, { pos: "MF", name: "佐藤" }).ok);
+  const sc = S.fromActual(m, "plan");
+  sc.attrOverrides = { TMA: { 23: { pac: 88 } } };
+  const json = SCN.serializeBundle(m, sc, null);
+  const b = JSON.parse(json);
+  assert.ok(b.customMatch, "customMatch 同梱");
+  const m2 = G.createMatch(b.customMatch);
+  assert.equal(m2.teams.TMA.squad.find(p => p.no === 23).ja, "山田太郎");
+  assert.equal(m2.teams.TMA.squad.find(p => p.no === 5).pos, "MF");
+  const r = SCN.parseBundle(m2, b);
+  assert.ok(r.validation.ok);
+  assert.equal(E.attrsOf(m2, r.scenario, "TMA", 23).pac, 88, "上書きが新背番号に整合");
+  // 決定論: 再構築2回で同一スカッド
+  assert.deepEqual(G.createMatch(b.customMatch).teams.TMA.squad, m2.teams.TMA.squad);
+  // 収録実試合は customMatch を同梱しない（記録・golden保護）
+  const jb = JSON.parse(SCN.serializeBundle(MATCH, S.fromActual(MATCH, "x"), null));
+  assert.ok(!("customMatch" in jb));
+});
+
+test("#92b残: editEntry はアトミック（重複番号拒否時に名前も不変）・イベント番号追随", () => {
+  const G = RPDX.generic;
+  const m = G.templateMatch();
+  const before = m.teams.TMA.squad.find(p => p.no === 9).ja;
+  const r = G.editEntry(m, "TMA", 9, { name: "山田", no: 14 });   // 14は既存 → 全体拒否
+  assert.ok(!r.ok);
+  assert.equal(m.teams.TMA.squad.find(p => p.no === 9).ja, before, "名前も適用されない");
+  // 得点者の改番はイベントに追随
+  const g = m.events.find(e => e.type === "goal");
+  if (g) {
+    const old = g.no, team = g.team;
+    assert.ok(G.editEntry(m, team, old, { no: 77 }).ok);
+    assert.ok(m.events.filter(e => e.type === "goal" && e.team === team).some(e => e.no === 77));
+  }
+});

@@ -246,6 +246,14 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
+    // #91残: ?data= バンドルに customMatch があれば起動試合をそれで確定（レンダラ生成前）
+    if (urlq.has("data")) {
+      try {
+        const ob = JSON.parse(decodeURIComponent(urlq.get("data")));
+        if (ob && ob.customMatch) App.match = G.createMatch(ob.customMatch);
+        else if (ob && ob.match && R.data.MATCHES[ob.match]) App.match = R.data.MATCHES[ob.match];
+      } catch { /* 後段の適用処理が拒否する */ }
+    }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
     } catch (err) {
@@ -348,6 +356,7 @@ self.onmessage = (e) => {
     buildKikenTiles();
     buildPsyPanel();
     buildMatchSel();
+    buildShockTeamSel();
     // #92: 未較正（汎用推定）試合は明示。収録実試合（calibrated未設定）では非表示。
     const cc = $("#calibChip");
     if (cc) cc.style.display = App.match.meta.calibrated === false ? "" : "none";
@@ -511,7 +520,8 @@ self.onmessage = (e) => {
   /* --------------------------- 配置エディタ --------------------------- */
   const buildEditorStatic = () => {
     const sel = $("#fmShape");
-    sel.innerHTML = Object.keys(F.SHAPES).map(k =>
+    // #81: 10人シェイプ（10_*）は退場リシェイプ専用 — 手動の陣形変更（11人前提）からは除外
+    sel.innerHTML = Object.keys(F.SHAPES).filter(k => !k.startsWith("10_")).map(k =>
       `<option value="${k}">${F.SHAPE_LABELS?.[k] || k}</option>`).join("");
   };
   const fitEditor = () => {
@@ -741,6 +751,20 @@ self.onmessage = (e) => {
     toast("実試合データに戻しました", "#94A2BD");
   };
 
+  // #80: 外的失点（仮定）の注入
+  const buildShockTeamSel = () => {
+    const sel = $("#shockTeam");
+    if (sel) sel.innerHTML = teamOrder().map(k => `<option value="${k}">${App.match.teams[k].name}</option>`).join("");
+  };
+  $("#shockAdd") && ($("#shockAdd").onclick = () => {
+    const team = $("#shockTeam").value, min = +$("#shockMin").value, kind = $("#shockKind").value;
+    const sc = forkIfActual();
+    const r = S.withShockGoal(App.match, sc, { t: S.minuteToT(App.match, min), team, kind });
+    if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+    refreshScenario(r.scenario);
+    toast(`⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+  });
+
   $("#btnAdvise").onclick = () => {
     const sc = activeScenario();
     const adv = S.advise(App.match, sc, App.t, App.rosterTab, { includeGK: App.options.includeGK });
@@ -819,16 +843,51 @@ self.onmessage = (e) => {
           `<span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:20px;height:16px;font-size:9.5px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center">${k[0]}</span>` +
           `<span style="flex:1">${o?.ja ?? s.out} → <b>${n?.ja ?? s.in}</b></span>` });
       }
+      // #81: 退場（数的不利）行 — 赤カードで明示・✕で取り消し
+      for (let i = 0; i < ((sc.outages && sc.outages[k]) || []).length; i++) {
+        const og = sc.outages[k][i];
+        const p = T.squad.find(q => q.no === og.no);
+        rows.push({ t: og.t, k, i, outage: true, html: `<span class="min num">${S.tToLabel(App.match, og.t)}</span>` +
+          `<span style="width:14px;height:18px;background:#C33;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(255,255,255,.25)" title="退場"></span>` +
+          `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
+      }
+    }
+    // #123: 配置編集の履歴行 — 時刻グループごとに表示・✕で該当時刻のみ取り消し
+    {
+      const groups = new Map();
+      for (const a of (sc.editAnchors || [])) {
+        const gk = Math.round(a.t);
+        if (!groups.has(gk)) groups.set(gk, 0);
+        groups.set(gk, groups.get(gk) + 1);
+      }
+      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
+          `<span title="配置編集">✏</span>` +
+          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+      }
+    }
+    // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
+    const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
+      "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
+    for (let i = 0; i < (sc.shockGoals || []).length; i++) {
+      const sg = sc.shockGoals[i];
+      const T = App.match.teams[sg.team];
+      rows.push({ t: sg.t, k: sg.team, i, shock: true, html: `<span class="min num">${S.tToLabel(App.match, sg.t)}</span>` +
+        `<span title="外的失点（仮定）">⚡</span>` +
+        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に仮定ゴール（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
         btn.onclick = () => {
-          const [k, i] = btn.dataset.del.split(":");
-          const r = S.withoutSub(App.match, App.scenario, k, +i);
+          const [kind, k, i] = btn.dataset.del.split(":");
+          const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
+            : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
+            : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };
       });
@@ -857,9 +916,10 @@ self.onmessage = (e) => {
     }
     for (const g of oc.added) {
       const T = App.match.teams[g.team];
-      const p = T.squad.find(q => q.no === g.no);
+      const p = g.no != null ? T.squad.find(q => q.no === g.no) : null;
+      const who = g.shock ? `<b>仮定ゴール</b>（得点者は特定しない）` : `<b>${p?.ja ?? g.no}</b> のゴール`;
       evRows.push(`<div class="ev add"><span class="min">${g.min}</span>
-        <span>${T.name} <b>${p?.ja ?? g.no}</b> のゴール<br><span class="why">${g.detail}</span></span></div>`);
+        <span>${T.name} ${who}${g.shock ? " ⚡" : ""}<br><span class="why">${g.detail}</span></span></div>`);
     }
     body.innerHTML = `
       <div class="scoreline">
@@ -878,7 +938,33 @@ self.onmessage = (e) => {
       </div>
       <div class="hint">決定論 — 同じシナリオは常に同じ結果。判定は危険度プロセス曲線（20人・GK除外）に基づく。<br>
       これは「起こり得た未来」の<b>予測ではなく</b>、モデル規則による決定論的<b>再構成</b>です。
-      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>`;
+      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>
+      ${oc.score[a] !== oc.score[b] ? `<div style="margin-top:8px"><button class="btn gold" id="btnRecovery">巻き返し案を比較（ビハインド側・モデル比較）</button></div><div id="recoveryBox"></div>` : ""}`;
+    // #80(B): 巻き返しシナリオ・ビルダー
+    const rbtn = $("#btnRecovery");
+    if (rbtn) rbtn.onclick = () => {
+      rbtn.disabled = true; rbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const res = globalThis.RPDX.scenlib.recoveryPlans(App.match, App.scenario);
+        const box = $("#recoveryBox");
+        if (!res.trailer || !res.plans.length) { box.innerHTML = `<div class="hint">有効な巻き返し候補がありません</div>`; rbtn.style.display = "none"; return; }
+        const [ta, tb] = teamOrder();
+        box.innerHTML = res.plans.map((pl, i) => `
+          <div class="suggestion">
+            <div class="head"><span class="eyebrow">#${i + 1}</span> ${pl.label}
+              <span class="num" style="margin-left:auto">${pl.score[ta]}–${pl.score[tb]}</span>
+              <button class="btn" style="margin-left:8px;padding:3px 9px" data-rec="${i}">適用</button></div>
+            <div class="why">目的関数 ${pl.objective}（Δ攻撃 ${pl.atkGainPct >= 0 ? "+" : ""}${pl.atkGainPct}% / 被リスク +${pl.riskPct}%）— 断定ではなくモデル上の比較</div>
+          </div>`).join("");
+        box.querySelectorAll("[data-rec]").forEach(bn => bn.onclick = () => {
+          const pl = res.plans[+bn.dataset.rec];
+          pl.scenario.label = pl.label;
+          refreshScenario(pl.scenario);
+          toast(`巻き返し案を適用 — ${pl.label}`, GOLD);
+        });
+        rbtn.style.display = "none";
+      }, 30);
+    };
   };
 
   /* --------------------------- D²ダッシュボード --------------------------- */
@@ -1008,9 +1094,12 @@ self.onmessage = (e) => {
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
     });
-    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    const inReg = ids.includes(App.match.meta.id) || App.match === templateMatchCache;
+    if (!inReg) opts.push(`<option value="__cur__" selected>📄 取込カスタム（${App.match.teams[App.match.teamOrder[0]].name}×${App.match.teams[App.match.teamOrder[1]].name}）</option>`);
+    opts.push(`<option value="${TPL_ID}"${isTpl && inReg ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
     sel.innerHTML = opts.join("");
     sel.onchange = () => {
+      if (sel.value === "__cur__") return;   // 現在の取込カスタム（何もしない）
       const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
@@ -1048,7 +1137,18 @@ self.onmessage = (e) => {
     }
     // ステータス帯
     const stCls = STATUS[worst.status];
-    $("#sbText").innerHTML = `<span class="chip ${stCls}">${worst.status}</span> ` +
+    // #81: 数的状況バッジ（10 vs 11 等）— outages 発生中のみ表示
+    let numBadge = "";
+    {
+      const sc = activeScenario();
+      if (sc.outages) {
+        const [a, b] = teamOrder();
+        const na = Object.keys(E.rosterAt(App.match, sc, a, App.t).assign).length;
+        const nb = Object.keys(E.rosterAt(App.match, sc, b, App.t).assign).length;
+        if (na !== nb) numBadge = `<span class="chip warn" title="数的不利（what-if）">${na} vs ${nb}</span> `;
+      }
+    }
+    $("#sbText").innerHTML = numBadge + `<span class="chip ${stCls}">${worst.status}</span> ` +
       (worst.status === "OK"
         ? "構造安定 — D²-Field 平常域"
         : `${App.match.teams[worst.team].name}の攻撃脅威 ${Math.round(worst.total)} — ${worst.status === "CRITICAL" ? "失点危険域" : "警戒域"}`);
@@ -1107,11 +1207,20 @@ self.onmessage = (e) => {
       `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
        <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
        <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    // #81: 退場（数的不利 what-if）— 在場中・非GKのみ・現在時刻で発生
+    const pres = E.presenceOf(App.match, activeScenario(), sel.team, sel.no);
+    const canDismiss = p.pos !== "GK" && pres && App.t >= pres.from && App.t < pres.to;
     $("#inspEditForm").innerHTML =
       `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
       + rows
-      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
-         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>`
+      + (canDismiss ? `<div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+           <button class="btn danger" id="edDismiss" title="この時刻に退場（what-if）— チームは10人に">🟥 ${S.tToLabel(App.match, App.t)} 退場</button>
+           <select class="sel" id="edDismissShape" title="10人リシェイプ" style="flex:1">
+             <option value="">自動 (${F.SHAPE_LABELS[F.tenManShapeFor(E.rosterAt(App.match, activeScenario(), sel.team, App.t).shape)]})</option>
+             ${["10_441","10_432","10_531"].map(k => `<option value="${k}">${F.SHAPE_LABELS[k]}</option>`).join("")}
+           </select></div>` : "")
+      + `<div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
     $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
       r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
     $("#edApply").onclick = () => {
@@ -1133,6 +1242,18 @@ self.onmessage = (e) => {
       $("#inspEditForm").style.display = "none";
       selectPlayer(sel.team, sel.no);
     };
+    // #81: 退場 what-if の適用
+    $("#edDismiss") && ($("#edDismiss").onclick = () => {
+      const sc = forkIfActual();
+      const reshape = $("#edDismissShape").value || undefined;
+      const r = S.withOutage(App.match, sc, sel.team, { t: App.t, no: sel.no, kind: "red-card", ...(reshape ? { reshape } : {}) });
+      if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+      refreshScenario(r.scenario);
+      const T = App.match.teams[sel.team];
+      toast(`🟥 ${p.ja} 退場 — ${T.name}は10人（${r.dropped ? `後続の交代${r.dropped}件を取り下げ・` : ""}what-if）`, "#E8473B");
+      $("#inspEditForm").style.display = "none";
+      $("#inspector").classList.remove("open");
+    });
   };
   $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
     const f = $("#inspEditForm");
@@ -1514,6 +1635,9 @@ self.onmessage = (e) => {
         return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
         <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
       })()}
+      <h4>守備構造 v1（#117 — モデル推定・読み取り専用）</h4>
+      <div id="defStructBox"><button class="btn" id="btnDefStruct">計算して表示（現在のシナリオ・数秒）</button>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">被CPR/被PLV/被OVL/被TRV（相手に許した量）と非保持時ブロック（GK除外・ボール相対）。実測ではなくモデル推定上の観察です。</div></div>
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
@@ -1526,6 +1650,27 @@ self.onmessage = (e) => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
     });
+    // #117: 守備構造 v1 — オンデマンド計算（シナリオ追従・重い走査はクリック時のみ）
+    const dbtn = $("#btnDefStruct");
+    if (dbtn) dbtn.onclick = () => {
+      dbtn.disabled = true; dbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const T2 = globalThis.RPDX.tactics, sc = activeScenario();
+        const prof = T2.defenseProfile(m, sc);
+        const rows = teamOrder().map(k => {
+          const c = prof.conceded[k];
+          const blk = T2.defenseBlock(m, sc, k) || {};
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>
+            <td>${c.CPR}</td><td>${c.PLV}</td><td>${c.OVL}</td><td>${c.TRV}</td><td>${c.total}</td>
+            <td>${blk.lineHeight ?? "—"}</td><td>${blk.width ?? "—"}×${blk.depth ?? "—"}</td><td>${blk.slideGap ?? "—"}</td><td>${blk.centralClosure ?? "—"}</td></tr>`;
+        }).join("");
+        $("#defStructBox").innerHTML = `
+          <table class="stat-table" style="font-size:11px">
+            <tr><td class="k"></td><td>被CPR</td><td>被PLV</td><td>被OVL</td><td>被TRV</td><td>被KIKEN</td><td>ライン高m</td><td>幅×縦m</td><td>スライド差m</td><td>中央閉鎖</td></tr>
+            ${rows}</table>
+          <div style="color:var(--muted);font-size:11px;margin-top:2px">被○○=相手に許した量（小さいほど消せている）。ブロックは非保持時のみ・GK除外。中央閉鎖=ボール→自ゴール中央3レーンの遮断率（def編集で変化=#106接続）。モデル推定上の観察であり実測・断定ではありません。</div>`;
+      }, 30);
+    };
   };
 
   const buildModelModal = () => {
@@ -1645,7 +1790,18 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
   const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
   const applyBundle = (text, src) => {
-    const r = R.scenlib.parseBundle(App.match, text);
+    // #91残: バンドルは自己完結 — customMatch があれば未較正試合を完全再構築してから適用。
+    //   収録試合IDのバンドルなら該当試合へ自動切替（別試合へ誤適用しない）。
+    let obj = text;
+    try { obj = typeof text === "string" ? JSON.parse(text) : text; }
+    catch (e) { bMsg("⚠ JSON 解析に失敗: " + (e && e.message), true); return false; }
+    if (obj && obj.customMatch) {
+      try { setMatch(G.createMatch(obj.customMatch)); }
+      catch (e) { bMsg("⚠ カスタム試合の再構築に失敗: " + (e && e.message), true); return false; }
+    } else if (obj && obj.match && R.data.MATCHES[obj.match] && obj.match !== App.match.meta.id) {
+      setMatch(R.data.MATCHES[obj.match]);
+    }
+    const r = R.scenlib.parseBundle(App.match, obj);
     if (r.error) { bMsg("⚠ " + r.error, true); return false; }
     if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
     refreshScenario(r.scenario);

@@ -625,6 +625,21 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     </div>
     <div id="subErrors"></div>
     <div id="subList"></div>
+    <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:5px" aria-label="外的失点の注入（inject hypothetical goal）">
+      <span class="eyebrow" style="width:100%">外的失点（仮定）— SHOCK</span>
+      <select id="shockTeam" class="sel" aria-label="失点するチーム（conceding team scores AGAINST — 得点側を選択）" style="max-width:96px"></select>
+      <input type="number" id="shockMin" class="num numin" min="2" max="100" value="60" aria-label="分（minute）" style="width:52px">
+      <select id="shockKind" class="sel" aria-label="種別（kind）" style="flex:1;min-width:110px">
+        <option value="ref-penalty">誤審PK</option>
+        <option value="ref-offside-missed">オフサイド見逃し</option>
+        <option value="deflection">デフレクション</option>
+        <option value="keeper-error">GKミス</option>
+        <option value="set-piece">セットピース混戦</option>
+        <option value="own-goal">オウンゴール</option>
+      </select>
+      <button class="btn" id="shockAdd" aria-label="外的失点を注入（inject）">注入</button>
+      <div class="hint" style="width:100%">仮説の what-if — 実試合・実審判への断定ではありません（記録・得点者個人は不変/非特定）</div>
+    </div>
     <div class="row" style="margin-top:9px">
       <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>
       <button class="btn danger" id="btnReset" data-i18n="実試合に戻す">実試合に戻す</button>
@@ -782,7 +797,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
    ========================================================================= */
 (() => {
   const R = (globalThis.RPDX ??= {});
-  R.VERSION = "1.1.1";
+  R.VERSION = "1.2.0";
 })();
 
 
@@ -1010,11 +1025,63 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       s("RS",  "ST", 0.63, -0.13, 0.44, -0.10, 0.83,-0.14, ["ST"]),
       s("LS",  "ST", 0.63,  0.13, 0.44,  0.10, 0.83, 0.14, ["ST","AM"]),
     ],
+    // ---- #81: 10人シェイプ（数的不利・退場後の再構築用）----
+    // 全体にコンパクト（ブロック圧縮・ライン低め）にチューニング
+    "10_441": [
+      s("GK",  "GK", 0.045, 0,    0.035,0,     0.09, 0,    ["GK"]),
+      s("RB",  "FB", 0.18, -0.58, 0.11, -0.50, 0.38,-0.64, ["FB","WB"]),
+      s("RCB", "CB", 0.14, -0.20, 0.09, -0.18, 0.28,-0.21, ["CB"]),
+      s("LCB", "CB", 0.14,  0.20, 0.09,  0.18, 0.28, 0.21, ["CB"]),
+      s("LB",  "FB", 0.18,  0.58, 0.11,  0.50, 0.38, 0.64, ["FB","WB"]),
+      s("RM",  "W",  0.38, -0.55, 0.24, -0.46, 0.58,-0.60, ["W","CM"]),
+      s("RCM", "CM", 0.34, -0.16, 0.22, -0.14, 0.50,-0.18, ["CM","DM"]),
+      s("LCM", "CM", 0.34,  0.16, 0.22,  0.14, 0.50, 0.18, ["CM","DM"]),
+      s("LM",  "W",  0.38,  0.55, 0.24,  0.46, 0.58, 0.60, ["W","CM"]),
+      s("ST",  "ST", 0.60,  0,    0.42,  0,    0.82, 0,    ["ST"]),
+    ],
+    "10_432": [
+      s("GK",  "GK", 0.045, 0,    0.035,0,     0.09, 0,    ["GK"]),
+      s("RB",  "FB", 0.18, -0.58, 0.11, -0.50, 0.40,-0.64, ["FB","WB"]),
+      s("RCB", "CB", 0.14, -0.20, 0.09, -0.18, 0.28,-0.21, ["CB"]),
+      s("LCB", "CB", 0.14,  0.20, 0.09,  0.18, 0.28, 0.21, ["CB"]),
+      s("LB",  "FB", 0.18,  0.58, 0.11,  0.50, 0.40, 0.64, ["FB","WB"]),
+      s("RCM", "CM", 0.36, -0.28, 0.23, -0.24, 0.54,-0.31, ["CM","DM"]),
+      s("CM",  "DM", 0.32,  0,    0.21,  0,    0.46, 0,    ["DM","CM"]),
+      s("LCM", "CM", 0.36,  0.28, 0.23,  0.24, 0.54, 0.31, ["CM","AM"]),
+      s("RS",  "ST", 0.58, -0.14, 0.40, -0.11, 0.80,-0.15, ["ST","W"]),
+      s("LS",  "ST", 0.58,  0.14, 0.40,  0.11, 0.80, 0.15, ["ST","AM"]),
+    ],
+    "10_531": [
+      s("GK",  "GK", 0.045, 0,    0.035,0,     0.09, 0,    ["GK"]),
+      s("RWB", "WB", 0.22, -0.72, 0.10, -0.62, 0.44,-0.78, ["WB","FB"]),
+      s("RCB", "CB", 0.14, -0.34, 0.09, -0.29, 0.25,-0.35, ["CB"]),
+      s("CB",  "CB", 0.12,  0,    0.08,  0,    0.22, 0,    ["CB"]),
+      s("LCB", "CB", 0.14,  0.34, 0.09,  0.29, 0.25, 0.35, ["CB"]),
+      s("LWB", "WB", 0.22,  0.72, 0.10,  0.62, 0.44, 0.78, ["WB","FB"]),
+      s("RCM", "CM", 0.36, -0.24, 0.23, -0.20, 0.52,-0.27, ["CM","DM"]),
+      s("CM",  "DM", 0.32,  0,    0.21,  0,    0.46, 0,    ["DM","CM"]),
+      s("LCM", "CM", 0.36,  0.24, 0.23,  0.20, 0.52, 0.27, ["CM","AM"]),
+      s("ST",  "ST", 0.58,  0,    0.40,  0,    0.80, 0,    ["ST"]),
+    ],
   };
   F.SHAPE_LABELS = {
     "343": "3-4-3", "433": "4-3-3", "4231": "4-2-3-1", "442": "4-4-2",
     "352": "3-5-2", "4141": "4-1-4-1", "3421": "3-4-2-1", "532": "5-3-2",
     "4132": "4-1-3-2",
+    "10_441": "4-4-1 (10人)", "10_432": "4-3-2 (10人)", "10_531": "5-3-1 (10人)",
+  };
+
+  // #81: 11人シェイプ → 既定の10人シェイプ（退場時の自動リシェイプ先）
+  //   バック3/5系 → 5-3-1（撤退ブロック）/ バック4系 → 4-4-1
+  F.tenManShapeFor = (shape) =>
+    ({ "343": "10_531", "3421": "10_531", "352": "10_531", "532": "10_531" }[shape] || "10_441");
+
+  // #81: pos+能力値 → 役割タグ（subs.tagsOfPos の実体を共有化 — engine の再割当でも使用）
+  F.tagsOfPos = (p) => {
+    if (p.pos === "GK") return ["GK"];
+    if (p.pos === "DF") return p.attrs.pac >= 76 ? ["CB", "FB", "WB"] : ["CB", "FB"];
+    if (p.pos === "MF") return p.attrs.att >= 80 ? ["CM", "AM", "W"] : ["CM", "DM", "WB"];
+    return p.attrs.pac >= 85 ? ["ST", "W"] : ["ST"];
   };
 
   // 役割類似度（交代適合・引力重みで使用）
@@ -2021,6 +2088,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         }
       }
     }
+    // #81: 退場は在場人員＝世界（チェーン/位置）を変える → 世界シードに含める。
+    //   未指定なら混合ゼロ＝従来ハッシュ不変（golden安全）。
+    if (scenario.outages) {
+      for (const tm of Object.keys(scenario.outages).sort())
+        for (const o of scenario.outages[tm] || [])
+          mix(N.seedOf(tm + (o.kind || "red-card") + (o.reshape || "")) ^ (o.t * 17 + o.no * 523));
+    }
     return h || 1;
   };
   // キャッシュ・キー: outcome の有無で世界（アンカー/イベント）が変わる。
@@ -2031,9 +2105,19 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const ht = scenario && scenario.opponentHt
       ? `${scenario.opponentHt.team}:${scenario.opponentHt.archetype || ""}:${scenario.opponentHt.staff || 0}:${scenario.opponentHt.stages || 0}`
       : "";
-    // #83: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
-    const ea = scenario && scenario.editAnchors && scenario.editAnchors.length
-      ? "e" + scenario.editFrom + ":" + scenario.editAnchors.length + ":" + Math.round((scenario.editAnchors[0].x + scenario.editAnchors[0].y) * 10) : "";
+    // #83/#123: editAnchors はキャッシュ・キーに含める（位置が変わる）。世界シードには入れない。
+    //   多重編集でも衝突しないよう全アンカー(t/team/no/x/y/σ)の決定論ハッシュ（tソート済み前提）。
+    let ea = "";
+    if (scenario && scenario.editAnchors && scenario.editAnchors.length) {
+      let hh = 9;
+      for (const a of scenario.editAnchors) {
+        hh = (Math.imul(hh, 31) + (Math.round(a.t * 7)
+          ^ N.seedOf(a.team) ^ ((a.no | 0) * 977)
+          ^ (Math.round(a.x * 13 + a.y * 7) | 0)
+          ^ (Math.round((a.sigma || 0) * 11) | 0))) | 0;
+      }
+      ea = "e" + (scenario.editFrom ?? "") + ":" + scenario.editAnchors.length + ":" + (hh >>> 0).toString(36);
+    }
     // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
     let ao = "";
     if (scenario && scenario.attrOverrides) {
@@ -2083,25 +2167,82 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   E.tweakOf = (scenario, team, slotId) =>
     (scenario && scenario.tweaks && scenario.tweaks[team] && scenario.tweaks[team][slotId]) || null;
 
-  // ある時刻のスロット割当を解決（フェーズ + 交代スワップ）
+  // #81: 数的不利（退場/交代枠なし負傷）— team別 sorted リスト
+  E.outagesOf = (match, scenario, team) =>
+    ((scenario && scenario.outages && scenario.outages[team]) || []);
+
+  // #81: 退場後の10人リシェイプ（役割適合の貪欲再割当・決定論・メモ化）
+  //   subs.withFormation と同じ採点式（共有 F.tagsOfPos）。GKは常にGKスロットへ。
+  const outageReshapeCache = new WeakMap();   // scenario → Map(key → {assign, shape})
+  const reshapeToTen = (match, scenario, team, assign11, fromShape, outage, subsApplied) => {
+    let m = outageReshapeCache.get(scenario);
+    if (!m) { m = new Map(); outageReshapeCache.set(scenario, m); }
+    const shapeId = outage.reshape || F.tenManShapeFor(fromShape);
+    const key = `${team}|${outage.t}|${outage.no}|${shapeId}|${fromShape}|${subsApplied}`;
+    const hit = m.get(key);
+    if (hit) return hit;
+    const T = match.teams[team];
+    const slots = F.SHAPES[shapeId];
+    const fromSlots = F.SHAPES[fromShape];
+    const pool = [];
+    for (const [slotId, no] of Object.entries(assign11)) {
+      if (no === outage.no) continue;                      // 退場者を除外 → 10人
+      const cur = fromSlots.find(s => s.id === slotId);
+      const p = T.squad.find(q => q.no === no);
+      pool.push({ no, tags: cur ? cur.tags : F.tagsOfPos(p), p });
+    }
+    const out = {};
+    for (const slot of slots) {
+      let best = null, bestScore = -1;
+      for (const c of pool) {
+        const isGKp = c.p.pos === "GK";
+        if ((slot.role === "GK") !== isGKp) continue;
+        const aff = Math.max(F.roleAffinity(slot.tags, c.tags), F.roleAffinity(slot.tags, F.tagsOfPos(c.p)));
+        const attr = slot.role === "ST" || slot.role === "W" || slot.role === "AM"
+          ? c.p.attrs.att : slot.role === "CB" || slot.role === "DM" ? c.p.attrs.def : (c.p.attrs.sta + c.p.attrs.tec) / 2;
+        const sc = aff * 100 + attr * 0.3;
+        if (sc > bestScore) { bestScore = sc; best = c; }
+      }
+      if (!best) best = pool[0];
+      if (best) { out[slot.id] = best.no; pool.splice(pool.indexOf(best), 1); }
+    }
+    const res = { assign: out, shape: shapeId };
+    m.set(key, res);
+    return res;
+  };
+
+  // ある時刻のスロット割当を解決（フェーズ + 交代スワップ + #81 退場リシェイプ）
   E.rosterAt = (match, scenario, team, t) => {
     const phases = E.phasesOf(match, scenario, team);
     let phase = phases[0];
     for (const ph of phases) if (ph.from <= t) phase = ph;
-    const assign = { ...phase.assign };
+    let assign = { ...phase.assign };
     // フェーズ開始前の交代を反映（新フェーズの assign はスタメン番号基準のため
     // 既に OUT した選手を IN 選手へ差し替える）
     const allSubs = (scenario.subs[team] || []).slice().sort((a, b) => a.t - b.t);
     const entered = {};
+    let subsApplied = 0;
     for (const s of allSubs) {
       if (s.t > t) break;
+      subsApplied++;
       for (const slot in assign) if (assign[slot] === s.out) {
         assign[slot] = s.in;
         if (s.t > phase.from) entered[s.in] = s.t;
         break;
       }
     }
-    return { assign, shape: phase.shape, phaseFrom: phase.from, entered };
+    let shape = phase.shape, phaseFrom = phase.from, outage = null;
+    // #81: 発生済み退場を適用（v1: チーム毎1件）— 10人シェイプへ決定論リシェイプ
+    for (const o of E.outagesOf(match, scenario, team)) {
+      if (o.t > t) break;
+      if (!Object.values(assign).includes(o.no)) continue;   // 既に不在（検証で防止済み）
+      const r = reshapeToTen(match, scenario, team, assign, shape, o, subsApplied);
+      assign = { ...r.assign };
+      shape = r.shape;
+      phaseFrom = Math.max(phaseFrom, o.t);                  // 切替ブレンドの起点
+      outage = o;
+    }
+    return { assign, shape, phaseFrom, entered, outage };
   };
 
   // 選手の在場区間（分数計算・入退場アニメ・妥当性検証に使用）
@@ -2115,16 +2256,32 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       if (s.in === no) on = s.t;
       if (s.out === no) off = s.t;
     }
+    // #81: 退場/交代なし負傷はそこで在場終了（交代より早ければ優先）
+    for (const o of E.outagesOf(match, scenario, team))
+      if (o.no === no && (off == null || o.t < off)) off = o.t;
     if (on == null) return null;
     return { from: on, to: off ?? range.t1 };
   };
 
   /* --------------------- ポゼッション波形 P(t) ∈ [-1,1] --------------------- */
   // P>0: possessionPlus チームの攻勢。KPスプライン + 小ノイズ（帯域制限）
-  E.possessionAt = (match, t) => {
+  E.possessionAt = (match, t, scenario) => {
     const base = N.spline(match.possessionKP, t)[0];
     const n = 0.10 * N.vnoise1(N.seedOf(match.meta.id + "poss"), t, 37);
-    return clamp(base + n, -1, 1);
+    let p = base + n;
+    // #81: 数的不利の保持シフト — 退場チームから相手側へ（2分ランプで浸透・決定論）。
+    //   scenario 未指定/outages 無しは従来値と完全一致（golden安全）。
+    if (scenario && scenario.outages) {
+      for (const tm of Object.keys(scenario.outages)) {
+        for (const o of scenario.outages[tm] || []) {
+          if (t <= o.t) continue;
+          const u = N.smooth(clamp((t - o.t) / 120));
+          const sign = tm === match.possessionPlus ? -1 : +1;   // 退場側の保持を減らす
+          p += sign * 0.28 * u;
+        }
+      }
+    }
+    return clamp(p, -1, 1);
   };
 
   /* ------------------- アンカー（シナリオ実効） ------------------- */
@@ -2148,14 +2305,17 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     let base = !oc
       ? match.playerAnchors
       : match.playerAnchors.filter(a => !inWindows(a.t, oc.suppress)).concat(oc.playerAnchors || []);
-    // #83: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）
-    if (scenario && scenario.editAnchors && scenario.editAnchors.length) base = base.concat(scenario.editAnchors);
-    if (chainBuilding) return base;
+    // #83/#123: 編集フレームの再合成 — scenario.editAnchors（scenario級・match非改変）。
+    //   編集アンカーは**最後に**連結する＝記録イベント/チェーン由来アンカーと同時刻でも
+    //   編集が最終適用され「編集した配置を通過」が厳密に成立する（適用は step5 の逐次lerp）。
+    const edits = scenario && scenario.editAnchors && scenario.editAnchors.length ? scenario.editAnchors : null;
+    if (chainBuilding) return edits ? base.concat(edits) : base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
     // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
     const chain = buildChain(match, scenario);
-    const list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    let list = chain.anchors && chain.anchors.length ? base.concat(chain.anchors) : base;
+    if (edits) list = list.concat(edits);
     panchorCache.set(key, list);
     return list;
   };
@@ -2219,7 +2379,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       const half0 = E.halfOf(match, t);
       return basePlayerPos(match, scenario, team, no, slot, t, {
         half: half0, dir: match.dir[team][half0 === 1 ? "h1" : "h2"],
-        P: E.possessionAt(match, t), ballS: E.ballSlowAt(match, t),
+        P: E.possessionAt(match, t, scenario), ballS: E.ballSlowAt(match, t),
       });
     }
     const key = scenTok(scenario) + "|" + team + no + "|" + slot.id + "|" + t + "|" + (lineComputing ? 1 : 0);
@@ -2229,7 +2389,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const dir = match.dir[team][half === 1 ? "h1" : "h2"];
     const bctx = {
       half, dir,
-      P: E.possessionAt(match, t),
+      P: E.possessionAt(match, t, scenario),
       ballS: E.ballSlowAt(match, t),
     };
     const out = basePlayerPos(match, scenario, team, no, slot, t, bctx);
@@ -2396,7 +2556,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     let forceRef = null;    // コーナー後の受け手参照点（ゴール前 = クロスの落下点）
     const shareGain = match.possessionShareGain ?? 0.385;  // パック毎の較正ノブ
     while (t < range.t1 - 1) {
-      const P = E.possessionAt(match, t);
+      const P = E.possessionAt(match, t, scenario);
       const share = clamp(0.5 + P * shareGain, 0.07, 0.93); // 実測支配率へ較正（定常分布）
       const u = N.hash2(seed, idx * 17 + 3);
       // 持続性マルコフ: 独立抽選だと1本ごとに敵味方が入れ替わって見える（実測で平均1.4本）。
@@ -3152,10 +3312,27 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
   // 最終位置 = 基礎位置 + ボール文脈調整（GK追従・プレッシング）
   // 調整はすべて lerp ブレンド + 平滑ゲートで速度上限を保つ
+  // #123: 編集アンカーの最終強制 — ユーザー編集は明示的意図なので、記録ゴール再現の
+  //   希釈・行動レイヤ（プレス/ラン/分離）を含む**全ての上流変位より最後に**適用し、
+  //   窓中心では編集座標そのものを通過させる。scenario.editAnchors 限定＝収録世界・golden不変。
+  const editHoldOf = (scenario, team, no, t) => {
+    const list = scenario && scenario.editAnchors;
+    if (!list || !list.length) return null;
+    let best = null;
+    for (const a of list) {
+      if (a.team !== team || a.no !== no) continue;
+      const sg = a.sigma ?? 6;
+      const g = N.gauss(t, a.t, sg);
+      if (!best || g > best.w) best = { w: g, x: a.x, y: a.y };
+    }
+    return best && best.w > 0.01 ? best : null;
+  };
+
   const playerPos = (match, scenario, team, no, slot, t, ctx) => {
     const bctx = { half: ctx.half, dir: ctx.dir, P: ctx.P, ballS: ctx.ballS };
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
     const ball = ctx.ball;
+
 
     // GK: 実ボール角へ微補正（#31・base の角度圧縮を実ボールで研ぐ・帯域内）
     // ※深度は base（平滑ボール基準）に委ねる。シュートは GK を置き去りにし得るため
@@ -3220,6 +3397,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
     x = clamp(x, -HALF_W + 0.4, HALF_W - 0.4);
     y = clamp(y, -HALF_H + 0.4, HALF_H - 0.4);
+    // #123: 編集アンカーの最終強制（w=1 で編集座標を厳密通過 — 全上流より優先）
+    const eh = editHoldOf(scenario, team, no, t);
+    if (eh) { x = lerp(x, eh.x, eh.w); y = lerp(y, eh.y, eh.w); }
     return { x, y };
   };
 
@@ -3365,7 +3545,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const memoKey = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + t;
     if (stateMemo && stateMemo.key === memoKey) return stateMemo.st;
     const half = E.halfOf(match, t);
-    const P = E.possessionAt(match, t);
+    const P = E.possessionAt(match, t, scenario);
     const ball = E.ballAt(match, scenario, t);
     const ballS = E.ballSlowAt(match, t);
     const carrier = E.carrierAt(match, scenario, t);
@@ -3455,6 +3635,21 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
           });
         }
       }
+      // #81: 退場（レッド/交代なし負傷）も同じ動線でピッチを去る
+      for (const o of E.outagesOf(match, scenario, team)) {
+        if (o.t <= t && t - o.t < 30) {
+          const u = N.smooth(clamp((t - o.t) / 30));
+          const last = E.stateFrozenPos(match, scenario, team, o.no, o.t);
+          const p = match.teams[team].squad.find(q => q.no === o.no);
+          if (!p) continue;
+          players.push({
+            team, no: o.no, name: p.name, ja: p.ja, label: p.label, pos2: p.pos,
+            role: "OUT", slot: null,
+            x: lerp(last.x, 0, u * 0.8), y: lerp(last.y, -(HALF_H + 2.5), u),
+            onPitch: false, leaving: u, attrs: p.attrs, captain: false, dismissed: true,
+          });
+        }
+      }
       // キャプテンマーク
       const order = match.teams[team].captainOrder || [];
       for (const cno of order) {
@@ -3541,7 +3736,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       carrierPos = basePosOf(match, scenario, carrier.team, carrier.no, carrier.seg.slot, tt);
     }
     const ctx = {
-      half, dir, P: E.possessionAt(match, tt),
+      half, dir, P: E.possessionAt(match, tt, scenario),
       ballS: E.ballSlowAt(match, tt), ball: E.ballAt(match, scenario, tt),
       carrier, carrierPos,
       pressRank: pressRankAt(match, scenario, tt, carrier, carrierPos),
@@ -3755,8 +3950,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     for (const p of def) { const d = Math.hypot(p.x - ball.x, p.y - ball.y); if (d < dnDef) { dnDef = d; presser = p; } }
 
     // --- CPR: 保持者の圧迫余裕 × ボール地点脅威 ---
-    const freedom = 1 - Math.exp(-(dnDef * dnDef) / 49);
-    const CPR = D.threatAt(ball.x, ball.y, dir) * freedom * hasBall;
+    // #106: 守備者の def は実効距離（dwDef>1 = 同じ距離でも圧が強い）、保持者の att/tec は脅威係数。
+    //   dw は #90 と同じ差分ベース（未編集=1.0）→ 収録パックはビット不変（較正保護）。
+    const dwP = Math.min(1.24, Math.max(0.76, (presser && presser.dwDef) || 1));
+    const dnEff = dnDef / dwP;
+    const freedom = 1 - Math.exp(-(dnEff * dnEff) / 49);
+    const CPR = D.threatAt(ball.x, ball.y, dir) * freedom * hasBall
+      * Math.min(1.24, Math.max(0.76, (carrier && carrier.dwAtk) || 1));
 
     // --- PLV: パスレーン開通（ボール → 各受け手） ---
     let plv1 = 0, plv2 = 0, plvTarget = null;
@@ -3769,14 +3969,20 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       for (const d of def) {
         const u = clamp(((d.x - ball.x) * lx + (d.y - ball.y) * ly) / (len * len));
         const px = ball.x + u * lx, py = ball.y + u * ly;
-        const dd = Math.hypot(d.x - px, d.y - py);
+        // #106: def が高い守備者はレーン・シャドウが広い（実効距離・未編集=1.0）
+        const dd = Math.hypot(d.x - px, d.y - py) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
         lane *= 1 - Math.exp(-(dd * dd) / 9);
         if (lane < 0.02) break;
       }
       let dRec = 1e9;
-      for (const d of def) { const dd = Math.hypot(d.x - rec.x, d.y - rec.y); if (dd < dRec) dRec = dd; }
+      for (const d of def) {
+        const dd = Math.hypot(d.x - rec.x, d.y - rec.y) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
+        if (dd < dRec) dRec = dd;
+      }
       const recFree = 1 - Math.exp(-(dRec * dRec) / 36);
-      const v = lane * D.threatAt(rec.x, rec.y, dir) * (0.4 + 0.6 * recFree);
+      // #106: 受け手の att/tec は「同じ位置でも脅威が大きい」係数（未編集=1.0）
+      const v = lane * D.threatAt(rec.x, rec.y, dir) * (0.4 + 0.6 * recFree)
+        * Math.min(1.24, Math.max(0.76, rec.dwAtk || 1));
       if (v > plv1) { plv2 = plv1; plv1 = v; plvTarget = rec; }
       else if (v > plv2) plv2 = v;
     }
@@ -3795,14 +4001,29 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       return { team: p.team, no: p.no, label: p.label, val: v };
     }).sort((a, b) => b.val - a.val);
 
+    // --- #106: GK 抑制係数 — 守備側GKの def/aer の**上書き差分**（未編集=1.0・±約16%有界）
+    //   収録パックの危険度・OOS・golden は不変（#90 と同じ較正保護の設計）。
+    let gkF = 1;
+    {
+      const gk = state.players.find(q => q.onPitch && q.team !== atkTeam && q.role === "GK");
+      if (gk) {
+        const base = match.teams[gk.team].squad.find(q => q.no === gk.no);
+        if (base && base.attrs) {
+          const dlt = Math.max(-40, Math.min(40,
+            ((gk.attrs.def - base.attrs.def) + (gk.attrs.aer - base.attrs.aer)) / 2)) / 100 * 0.4;
+          gkF = 1 / (1 + dlt);
+        }
+      }
+    }
+
     // 瞬時4モジュールのみの暫定合成（時間系は indexAt が付与）
     const W = D.WEIGHTS;
     const instW = W.SDI + W.CPR + W.PLV + W.OVL;
     const instRaw = (W.SDI * SDI + W.CPR * CPR + W.PLV * PLV + W.OVL * OVL) / instW;
-    const total = clamp(Math.pow(clamp(instRaw), D.GAMMA) * D.GAIN) * 100;
+    const total = clamp(Math.pow(clamp(instRaw), D.GAMMA) * D.GAIN * gkF) * 100;
 
     return {
-      total, raw: { SDI, CPR, PLV, OVL },
+      total, gkF, raw: { SDI, CPR, PLV, OVL },
       mods: { SDI: SDI * 100, CPR: CPR * 100, PLV: PLV * 100, OVL: OVL * 100 },
       hasBall, carrier: carrier ? carrier.no : null, presser: presser ? presser.no : null,
       plvTarget: plvTarget ? plvTarget.no : null, contrib,
@@ -3902,7 +4123,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       const r = inst[k].raw;
       const raw = W.SDI * r.SDI + W.CPR * r.CPR + W.PLV * r.PLV + W.OVL * r.OVL
         + W.TPA * tpa[k] + W.TRV * trv[k];
-      const total = clamp(Math.pow(clamp(raw), D.GAMMA) * D.GAIN) * 100;
+      const total = clamp(Math.pow(clamp(raw), D.GAMMA) * D.GAIN * (inst[k].gkF || 1)) * 100;   // #106
+
       out[k] = {
         ...inst[k],
         total,
@@ -4149,7 +4371,99 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     }
     return { ok: errors.length === 0, errors, info };
   };
-  S.validateScenario = (match, scenario) => S.validatePlan(match, scenario.subs, scenario.lineup);
+  // #81: outages（退場/交代枠なし負傷）の検証 — その時点で在場・非GK・チーム毎に1件（v1）・
+  //   退場後にその選手を OUT 指定する交代は不可。actual/未指定シナリオは従来どおり厳密11人。
+  const validateOutages = (match, scenario, errors) => {
+    const outs = scenario.outages;
+    if (!outs) return;
+    const range = E.playedRange(match);
+    for (const team of Object.keys(outs)) {
+      const T = match.teams[team];
+      if (!T) { errors.push(`[outage] 未知チーム ${team}`); continue; }
+      const list = outs[team] || [];
+      if (list.length > 1) errors.push(`[${T.name}] 数的不利は v1 ではチーム毎に1件まで`);
+      for (const o of list) {
+        const p = T.squad.find(q => q.no === o.no);
+        if (!p) { errors.push(`[${T.name}] #${o.no} はスカッド外（退場指定不可）`); continue; }
+        if (p.pos === "GK") { errors.push(`[${T.name}] GKの退場は v1 非対応（${p.ja}）`); continue; }
+        if (o.t < range.t0 || o.t > range.t1) errors.push(`[${T.name}] ${p.ja} の退場時刻がタイムライン外`);
+        // その時点で在場か（スタメン or 投入済み・未交代退出）— subs のみで判定（outage 自身は除く）
+        const starters = new Set(Object.values(((scenario.lineup && scenario.lineup[team]) || T).phases[0].assign));
+        let on = starters.has(o.no) ? range.t0 : null, off = null;
+        for (const s of (scenario.subs[team] || [])) {
+          if (s.in === o.no) on = s.t;
+          if (s.out === o.no) off = s.t;
+        }
+        if (on == null || on > o.t || (off != null && off <= o.t))
+          errors.push(`[${T.name}] ${p.ja} は退場時刻にピッチ上にいない`);
+        // 退場後の交代で OUT 指定は不可（既にいない）
+        for (const s of (scenario.subs[team] || []))
+          if (s.out === o.no && s.t > o.t) errors.push(`[${T.name}] ${p.ja} は退場済み — 以降の交代OUT不可`);
+        if (o.reshape && !F.SHAPES[o.reshape]) errors.push(`[${T.name}] 未知の10人シェイプ ${o.reshape}`);
+      }
+    }
+  };
+  // #80: 外的失点（仮説）の検証 — kind 既知・時刻内・チーム毎≤2（v1）
+  const SHOCK_KINDS = ["ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];
+  const validateShockGoals = (match, scenario, errors) => {
+    const list = scenario.shockGoals;
+    if (!list) return;
+    const range = E.playedRange(match);
+    const perTeam = {};
+    for (const sg of list) {
+      const T = match.teams[sg.team];
+      if (!T) { errors.push(`[shock] 未知チーム ${sg.team}`); continue; }
+      if (!SHOCK_KINDS.includes(sg.kind)) errors.push(`[${T.name}] 未知の外的失点種別 ${sg.kind}`);
+      if (sg.t < range.t0 + 30 || sg.t > range.t1 - 30) errors.push(`[${T.name}] 外的失点の時刻がタイムライン外`);
+      perTeam[sg.team] = (perTeam[sg.team] || 0) + 1;
+      if (perTeam[sg.team] > 2) errors.push(`[${T.name}] 外的失点は v1 ではチーム毎2件まで`);
+    }
+  };
+  S.SHOCK_KINDS = SHOCK_KINDS;
+  S.validateScenario = (match, scenario) => {
+    const v = S.validatePlan(match, scenario.subs, scenario.lineup);
+    validateOutages(match, scenario, v.errors);
+    validateShockGoals(match, scenario, v.errors);
+    v.ok = v.errors.length === 0;
+    return v;
+  };
+
+  // #80: 不変編集 — 外的失点（仮説）の注入・削除
+  S.withShockGoal = (match, scenario, shock /* {t,team,kind} */) => {
+    const next = S.fork(match, scenario);
+    next.shockGoals = [...(next.shockGoals || []), { kind: "deflection", ...shock }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  S.withoutShockGoal = (match, scenario, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.shockGoals) {
+      next.shockGoals = next.shockGoals.filter((_, i) => i !== idx);
+      if (!next.shockGoals.length) delete next.shockGoals;
+    }
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+
+  // #81: 不変編集 — 退場/負傷（交代なし離脱）の追加・削除
+  S.withOutage = (match, scenario, team, outage /* {t,no,kind,reshape?} */) => {
+    const next = S.fork(match, scenario);
+    const o = { kind: "red-card", ...outage };
+    // 退場者をその後 OUT する交代は自動で取り下げ（現実にも起こり得ない・件数を返す）
+    const beforeN = next.subs[team].length;
+    next.subs[team] = next.subs[team].filter(s => !(s.out === o.no && s.t > o.t));
+    const dropped = beforeN - next.subs[team].length;
+    if (!next.outages) next.outages = {};
+    next.outages[team] = [...(next.outages[team] || []), o].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next), dropped };
+  };
+  S.withoutOutage = (match, scenario, team, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.outages && next.outages[team]) {
+      next.outages[team] = next.outages[team].filter((_, i) => i !== idx);
+      if (!next.outages[team].length) delete next.outages[team];
+      if (!Object.keys(next.outages).length) delete next.outages;
+    }
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
 
   /* --------------------------- シナリオ管理 --------------------------- */
   let seq = 0;
@@ -4175,11 +4489,39 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const srcSubs = base.subs || base;   // 旧署名（subs直渡し）互換
     const subs = {};
     for (const k of E.teamKeys(match)) subs[k] = (srcSubs[k] || []).map(s => ({ ...s }));
-    return {
+    const sc = {
       id: `sim-${++seq}`, label: label || `シナリオ ${seq}`, actual: false,
       subs, lineup: cloneLineup(base.lineup), tweaks: cloneTweaks(base.tweaks),
       outcome: null,   // sim.mjs が決定論付与
     };
+    // #81: 数的不利（退場/交代枠なし負傷）— team別 [{t,no,kind,reshape?}]。未指定は付与しない（golden安全）
+    if (base.outages) {
+      sc.outages = {};
+      for (const k of Object.keys(base.outages)) sc.outages[k] = base.outages[k].map(o => ({ ...o }));
+    }
+    // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
+    if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
+    // #89/#83/#61: シナリオ級拡張も fork で引き継ぐ（従来は脱落＝交代等の追加編集で能力値上書きが消えるバグ）
+    if (base.attrOverrides) {
+      sc.attrOverrides = {};
+      for (const k of Object.keys(base.attrOverrides)) {
+        sc.attrOverrides[k] = {};
+        for (const no of Object.keys(base.attrOverrides[k])) sc.attrOverrides[k][no] = { ...base.attrOverrides[k][no] };
+      }
+    }
+    if (base.nameOverrides) {
+      sc.nameOverrides = {};
+      for (const k of Object.keys(base.nameOverrides)) {
+        sc.nameOverrides[k] = {};
+        for (const no of Object.keys(base.nameOverrides[k])) sc.nameOverrides[k][no] = { ...base.nameOverrides[k][no] };
+      }
+    }
+    if (base.editAnchors && base.editAnchors.length) {
+      sc.editAnchors = base.editAnchors.map(a2 => ({ ...a2 }));
+      if (base.editFrom != null) sc.editFrom = base.editFrom;
+    }
+    if (base.opponentHt) sc.opponentHt = { ...base.opponentHt };
+    return sc;
   };
   S.fromActual = (match, label) => {
     const subs = {};
@@ -4217,6 +4559,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   // min 以降の既存フェーズは破棄（そこからはユーザーの指揮）。min<=1 は初期陣形を差替。
   S.withFormation = (match, scenario, team, min, shape) => {
     if (!F.SHAPES[shape]) return { scenario, validation: { ok: false, errors: [`未知の陣形 ${shape}`], info: {} } };
+    // #81: 手動の陣形変更は11人シェイプのみ（10_* は退場リシェイプ専用）
+    if (F.SHAPES[shape].length !== 11) return { scenario, validation: { ok: false, errors: [`${shape} は11人シェイプではありません`], info: {} } };
     const next = S.fork(match, scenario);
     const lu = ensureLineup(match, next, team);
     const t = Math.max(0, S.minuteToT(match, min));
@@ -4389,12 +4733,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     return { suggestions: top, context: { needDef, needAtk, oppDanger, ownDanger, diff, remaining } };
   };
 
-  const tagsOfPos = (p) => {
-    if (p.pos === "GK") return ["GK"];
-    if (p.pos === "DF") return p.attrs.pac >= 76 ? ["CB", "FB", "WB"] : ["CB", "FB"];
-    if (p.pos === "MF") return p.attrs.att >= 80 ? ["CM", "AM", "W"] : ["CM", "DM", "WB"];
-    return p.attrs.pac >= 85 ? ["ST", "W"] : ["ST"];
-  };
+  // #81 で実体を formations.tagsOfPos へ共有化（engine の10人再割当でも使用）— 挙動は同一
+  const tagsOfPos = (p) => F.tagsOfPos(p);
   S.tagsOfPos = tagsOfPos;
 
   const buildReason = (oc, b, needDef, needAtk, diff) => {
@@ -4512,6 +4852,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const keptGoalTs = match.events
       .filter(e => e.type === "goal" && !removed.some(r => r.ev === e))
       .map(e => e.t);
+    // #80: 外的失点（仮説）— 追加ゴール候補の近傍(±90s)回避リストに先に含める
+    const shocks = (scenario.shockGoals || []).slice().sort((x, y) => x.t - y.t);
+    for (const sg of shocks) keptGoalTs.push(sg.t);
     const teamDelta = {};
     keys.forEach((team, ti) => {
       let gainI = 0, actI = 0, scenI = 0;
@@ -4594,6 +4937,39 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       });
     });
 
+    /* --- 2b) #80 外的失点の注入 — 危険度に依存しない仮説ゴール ---
+       責任ある表現（不可侵）: これは仮説的 what-if であり、実試合・実審判に
+       この事象があったという断定ではない（収録記録は不変）。得点者個人は特定しない。 */
+    const SHOCK_LABEL = {
+      "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し",
+      "deflection": "デフレクション", "keeper-error": "GKミス",
+      "set-piece": "セットピースの混戦", "own-goal": "オウンゴール",
+    };
+    shocks.forEach((sg, si) => {
+      const team = sg.team;
+      if (!match.teams[team] || !teamDelta[team]) return;      // 検証済み前提の防御
+      const t = Math.round(clamp(sg.t, range.t0 + 60, range.t1 - 60));
+      const half = E.halfOf(match, t);
+      const d = match.dir[team][half === 1 ? "h1" : "h2"];
+      const gy = (N.hash2(sHash, si * 733 + 11) * 2 - 1) * 2.6;
+      const label = R.subs ? R.subs.tToLabel(match, t) : `${Math.ceil(t / 60)}'`;
+      added.push({
+        t, type: "goal", team, no: null, assist: null, sim: true,
+        shock: true, kind: sg.kind || "deflection",
+        min: label,
+        label: `GOAL〔仮定〕 ${SHOCK_LABEL[sg.kind] || "外的要因"} — ${match.teams[team].name}`,
+        detail: "仮説的な外的失点の注入（what-if）。実試合・実審判にこの事象があったという断定ではありません（記録は不変・得点者個人は特定しません）。",
+      });
+      ballAnchors.push(
+        { t: t - 7, x: d * 26, y: gy * 3.5 },
+        { t: t - 1.2, x: d * 42, y: gy * 2.0 },
+        { t: t, x: d * 52.2, y: gy, hold: 4 },
+        { t: Math.min(t + 55, range.t1 - 5), x: 0, y: 0, hold: 6 },
+      );
+      teamDelta[team].shock = (teamDelta[team].shock || 0) + 1;
+    });
+    added.sort((x, y) => x.t - y.t);
+
     /* --- 3) イベント再構成 + スコア --- */
     const events = match.events
       .filter(ev => !removed.some(r => r.ev === ev))
@@ -4607,7 +4983,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     let sig = 0;
     const mix = (v) => { sig = (Math.imul(sig, 31) + v) | 0; };
     for (const r of removed) mix(r.ev.t | 0);
-    for (const a of added) mix(a.t * 7 + a.no * 131 + N.seedOf(a.team));
+    for (const a of added) mix(a.t * 7 + (a.no ?? 0) * 131 + N.seedOf(a.team) + (a.shock ? N.seedOf("shock:" + (a.kind || "")) : 0));
     if (removed.length + added.length > 0 && sig === 0) sig = 1;
 
     return {
@@ -4673,6 +5049,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       yellow: { own: +14, opp: +6, carded: +20 },
     },
     AR_SUB_SELF: +16,      // 自分の投入直後
+    // #80: 外的失点（仮説）の心理増幅 — 理不尽な失点ほどスイングが大きい
+    SHOCK_W: { "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
+               "own-goal": 1.4, "deflection": 1.25, "set-piece": 1.15 },
     AR_TAU: 240,           // 覚醒インパルス減衰[s]
     AR_BASE: 48,
     AR_KICKOFF: 10,        // キックオフ直後の初期活性
@@ -4708,6 +5087,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   const dispSign = (ev, team) => (ev.team === team ? "own" : "opp");
 
   /* ============ チーム心理モメンタム M(t) ∈ [-1.2, +1.2]（閉形式） ============ */
+  const shockW = (ev) => (ev && ev.shock ? (PSY.PARAMS.SHOCK_W[ev.kind] || 1.3) : 1);   // #80
+
   PSY.momentumAt = (match, scenario, t) => {
     scenario = scenario || E.actualScenario(match);
     const out = {};
@@ -4718,7 +5099,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       const w = P.M_EV[ev.type];
       if (!w || !ev.team) continue;
       const decay = Math.exp(-(t - ev.t) / P.M_TAU);
-      for (const k of keys) out[k] += (w[dispSign(ev, k)] || 0) * decay;
+      for (const k of keys) out[k] += (w[dispSign(ev, k)] || 0) * shockW(ev) * decay;
     }
     for (const k of keys) {
       for (const s of scenario.subs[k] || []) {
@@ -4829,7 +5210,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       if (ev.type === "yellow" && ev.team === team && ev.no === no)
         mf += P.MF_YELLOW * Math.exp(-(te - ev.t) / 900);
       if (ev.type === "goal" && ev.team !== team && ev.t >= pr.from)
-        mf += P.MF_CONCEDE * Math.exp(-(te - ev.t) / 1200);
+        mf += P.MF_CONCEDE * shockW(ev) * Math.exp(-(te - ev.t) / 1200);
     }
     mf += P.MF_TRAIL * N.smooth(clamp(trailingMins(match, scenario, team, pr.from, te) / 30));
     mf = clamp(mf);
@@ -4844,7 +5225,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       let a = w[dispSign(ev, team)] || 0;
       if (ev.type === "goal" && ev.team === team && ev.no === no) a = w.scorer;
       if (ev.type === "yellow" && ev.team === team && ev.no === no) a = w.carded;
-      imp += a * decay;
+      imp += a * shockW(ev) * decay;
     }
     for (const s of scenario.subs[team] || []) {
       if (s.in === no && s.t <= te) imp += P.AR_SUB_SELF * Math.exp(-(te - s.t) / 300);
@@ -5639,6 +6020,109 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     };
   };
 
+  /* ============ #117: 守備構造解析 v1（読み取り専用・golden安全） ============
+     v1a 守備側帰属ビュー: 相手の危険度モジュール平均を「守備側が何を許したか」として再集計。
+     v1b 守備ブロック読み出し: 非保持時・GK除外・ボール相対のライン高さ/幅/縦/スライド/中央閉鎖度。
+     いずれもモデル推定上の観察（実測ではない・実在チームの断定ではない）。 */
+
+  const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));   // #117 局所
+
+  // v1a: 被CPR/被PLV/被OVL/被TRV/被Total の試合平均（K の値 = K が相手に許した量）
+  const defProfCache = new Map();
+  T.defenseProfile = (match, scenario, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const step = opts.step || 90;
+    const key = match.meta.id + "|" + E.scenarioKey(scenario) + "|" + step;
+    if (defProfCache.has(key)) return defProfCache.get(key);
+    const D = R.danger;
+    const range = E.playedRange(match);
+    const keys = E.teamKeys(match);
+    const acc = {};
+    for (const k of keys) acc[k] = { CPR: 0, PLV: 0, OVL: 0, TRV: 0, total: 0 };
+    let n = 0;
+    for (let t = range.t0 + 60; t < range.t1; t += step) {
+      const ix = D.indexAt(match, scenario, t);
+      for (const k of keys) {
+        const opp = E.oppOf(match, k);
+        const m = ix[opp].mods;                       // 相手の攻撃モジュール = k が許した量
+        acc[k].CPR += m.CPR; acc[k].PLV += m.PLV; acc[k].OVL += m.OVL; acc[k].TRV += m.TRV;
+        acc[k].total += ix[opp].total;
+      }
+      n++;
+    }
+    const out = { samples: n, conceded: {} };
+    for (const k of keys) {
+      out.conceded[k] = {};
+      for (const f of Object.keys(acc[k])) out.conceded[k][f] = +(acc[k][f] / n).toFixed(2);
+    }
+    if (defProfCache.size > 24) defProfCache.clear();
+    defProfCache.set(key, out);
+    return out;
+  };
+
+  // v1b: 守備ブロック（非保持時のみ・GK除外・ボール相対）— 単一時刻
+  T.defenseBlockAt = (match, scenario, team, t) => {
+    scenario = scenario || E.actualScenario(match);
+    const c = E.carrierAt(match, scenario, t);
+    if (!c || c.mode !== "hold" || c.team === team) return null;   // 非保持時のみ
+    const st = E.stateAt(match, scenario, t);
+    const out = st.players.filter(p => p.onPitch && p.team === team && p.role !== "GK");
+    if (out.length < 7) return null;
+    const half = t < match.time.h2.start ? "h1" : "h2";
+    const dir = match.dir[team][half];                              // 攻撃方向
+    const ownGoalX = -dir * 52.5;
+    // 最終ライン: 自ゴールに近い順の外野4人の平均x（#27の合意ラインと同思想の軽量版）
+    const byDepth = [...out].sort((a, b) => (a.x - b.x) * dir - (b.x - a.x) * dir);
+    const deep4 = [...out].sort((a, b) => Math.abs(a.x - ownGoalX) - Math.abs(b.x - ownGoalX)).slice(0, 4);
+    const lineX = deep4.reduce((a, p) => a + p.x, 0) / deep4.length;
+    const lineHeight = Math.abs(lineX - ownGoalX);
+    // ブロック幅/縦（外野の広がり）と重心
+    const xs = out.map(p => p.x), ys = out.map(p => p.y);
+    const width = Math.max(...ys) - Math.min(...ys);
+    const depth = Math.max(...xs) - Math.min(...xs);
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    // スライド追従: ブロック重心 y がボール y（減衰0.55）にどれだけ付いているか
+    const ball = st.ball;
+    const slideGap = Math.abs(cy - ball.y * 0.55);
+    // 中央レーン閉鎖度: ボール→自ゴールの中央3レーン（y=中心±6）の遮断率（PLVレーン式の逆読み・dwDef反映=#106）
+    let closure = 0;
+    for (const oy of [-6, 0, 6]) {
+      const gx = ownGoalX, gy2 = clamp(ball.y * 0.25 + oy, -30, 30);
+      const lx = gx - ball.x, ly = gy2 - ball.y;
+      const len = Math.hypot(lx, ly) || 1;
+      let lane = 1;
+      for (const d of out) {
+        const u = clamp(((d.x - ball.x) * lx + (d.y - ball.y) * ly) / (len * len));
+        const px = ball.x + u * lx, py = ball.y + u * ly;
+        const dd = Math.hypot(d.x - px, d.y - py) / Math.min(1.24, Math.max(0.76, d.dwDef || 1));
+        lane *= 1 - Math.exp(-(dd * dd) / 9);
+        if (lane < 0.02) break;
+      }
+      closure += (1 - lane) / 3;
+    }
+    return { t, lineHeight: +lineHeight.toFixed(1), width: +width.toFixed(1), depth: +depth.toFixed(1),
+      slideGap: +slideGap.toFixed(1), centralClosure: +closure.toFixed(3), byDepthFirst: byDepth[0]?.no };
+  };
+
+  // v1b 集計: 非保持サンプルの平均（試合 or 区間）
+  T.defenseBlock = (match, scenario, team, opts = {}) => {
+    scenario = scenario || E.actualScenario(match);
+    const range = E.playedRange(match);
+    const t0 = opts.t0 ?? range.t0 + 60, t1 = opts.t1 ?? range.t1, step = opts.step || 45;
+    const acc = { lineHeight: 0, width: 0, depth: 0, slideGap: 0, centralClosure: 0 };
+    let n = 0;
+    for (let t = t0; t < t1; t += step) {
+      const b = T.defenseBlockAt(match, scenario, team, t);
+      if (!b) continue;
+      for (const f of Object.keys(acc)) acc[f] += b[f];
+      n++;
+    }
+    if (!n) return null;
+    const out = { samples: n };
+    for (const f of Object.keys(acc)) out[f] = +(acc[f] / n).toFixed(2);
+    return out;
+  };
+
   // タイムライン帯用の低解像度サンプル列 [{u(0..1), phase, team}]
   T.phaseStrip = (match, scenario, n = 240) => {
     scenario = scenario || E.actualScenario(match);
@@ -5818,7 +6302,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   const altShapesOf = (match, team) => {
     const F = R.formations;
     const cur = match.teams[team].phases[0].shape;
-    return Object.keys(F.SHAPES).filter(s => s !== cur).sort();
+    // #81: 10人シェイプ（10_*）は退場リシェイプ専用 — 11人の可変候補から除外
+    return Object.keys(F.SHAPES).filter(s => s !== cur && !s.startsWith("10_")).sort();
   };
 
   // 生成: [{id, label, desc, exploits, scenario, validation}]
@@ -5912,6 +6397,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 (() => {
   const R = (globalThis.RPDX ??= {});
   const SCN = (R.scenlib = {});
+  const F = R.formations;
 
   /* ---- 直列化（最小表現・決定論） ---- */
   SCN.serialize = (scenario) => {
@@ -5926,6 +6412,14 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (scenario.lineup) o.u = scenario.lineup;
     if (scenario.tweaks) o.w = scenario.tweaks;
     if (scenario.opponentHt) o.h = scenario.opponentHt;
+    if (scenario.outages) {                                   // #81: 退場 [t,no,kind,reshape?]
+      const g = {};
+      for (const [k, arr] of Object.entries(scenario.outages))
+        if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
+      if (Object.keys(g).length) o.g = g;
+    }
+    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点 [t,team,kind]
+      o.q = scenario.shockGoals.map(x => [x.t, x.team, x.kind || "deflection"]);
     return JSON.stringify(o);
   };
 
@@ -5938,6 +6432,12 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     }
     const sc = S.createScenario(match, o.l || "imported", { subs, lineup: o.u || null, tweaks: o.w || null });
     if (o.h) sc.opponentHt = o.h;
+    if (o.g) {                                                // #81: 退場の復元
+      sc.outages = {};
+      for (const [k, arr] of Object.entries(o.g))
+        sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
+    }
+    if (o.q) sc.shockGoals = o.q.map(([t, team, kind]) => ({ t, team, kind: kind || "deflection" }));  // #80
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -6018,9 +6518,31 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
-    sc.editAnchors = editAnchors;
-    sc.editFrom = frame.t;
-    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+    // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
+    //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
+    const MERGE_WIN = 25;
+    const prev = sc.editAnchors || [];
+    const kept = prev.filter(a =>
+      !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
+    const replaced = prev.length - kept.length;
+    sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
+    sc.editFrom = sc.editAnchors.length
+      ? Math.min(...sc.editAnchors.map(a => a.t))
+      : frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc),
+      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+  };
+
+  // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
+  SCN.withoutEditGroup = (match, scenario, t) => {
+    const S = R.subs;
+    const next = S.fork(match, scenario);
+    const before = (next.editAnchors || []).length;
+    next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
+    const removed = before - next.editAnchors.length;
+    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
+    else { delete next.editAnchors; delete next.editFrom; }
+    return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
   /* ---- #91: ロスター/シナリオ/フレームの JSON 往復（統合スキーマ・取込→反映→書出） ----
@@ -6049,7 +6571,29 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       ov.editAnchors = scenario.editAnchors;
       if (scenario.editFrom != null) ov.editFrom = scenario.editFrom;
     }
+    if (scenario.outages) ov.outages = scenario.outages;      // #81
+    if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
+    // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
+    //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
+    //   収録実試合（較正済み）は同梱しない＝公式記録・golden の非改変を構成的に保証。
+    if (match.meta.calibrated === false) {
+      const teamCfg = (k) => {
+        const T = match.teams[k];
+        return {
+          code: T.code, name: T.name, nameEn: T.nameEn, coach: T.coach,
+          formation: T.phases[0].shape, color: T.color, colorDeep: T.colorDeep,
+          kit: T.kit, captainOrder: T.captainOrder, xi: { ...T.phases[0].assign },
+          squad: T.squad.map(p => ({ no: p.no, pos: p.pos, name: p.name, ja: p.ja, label: p.label, attrs: { ...p.attrs } })),
+        };
+      };
+      const [ha, aw] = match.teamOrder;
+      bundle.customMatch = {
+        seed: match.meta.id.replace(/^custom-/, ""),
+        competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        home: teamCfg(ha), away: teamCfg(aw),
+      };
+    }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
   };
@@ -6115,10 +6659,91 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       sc.editAnchors = ov.editAnchors.filter(a => a && keySet.has(a.team));
       sc.editFrom = ov.editFrom != null ? ov.editFrom : ov.editAnchors[0].t;
     }
+    // #80: 外的失点（未知チームは無視・検証は validateScenario 側）
+    if (Array.isArray(ov.shockGoals) && ov.shockGoals.length)
+      sc.shockGoals = ov.shockGoals.filter(x => x && keySet.has(x.team))
+        .map(x => ({ t: +x.t, team: x.team, kind: x.kind || "deflection" }));
+    // #81: 退場（未知チームは無視・検証は validateScenario 側）
+    if (ov.outages && typeof ov.outages === "object") {
+      const g = {};
+      for (const [tm, arr] of Object.entries(ov.outages))
+        if (keySet.has(tm) && Array.isArray(arr) && arr.length)
+          g[tm] = arr.map(x => ({ t: +x.t, no: +x.no, kind: x.kind || "red-card", ...(x.reshape ? { reshape: x.reshape } : {}) }));
+      if (Object.keys(g).length) sc.outages = g;
+    }
 
     const validation = S.validateScenario(match, sc);
     const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
     return { scenario: sc, validation, frame, match: o.match || null };
+  };
+
+  /* ---- #80(B): 巻き返しシナリオ・ビルダー ----
+     ビハインド中のチームに対し、回復プラン候補（攻撃的シフト/攻撃的交代/複合）を
+     決定論生成し、目的関数 = 10·Δ(得点差) + Δ攻撃危険度% − max(0, Δ被危険度%) で降順ランク。
+     断定ではなくモデル上の比較（#62 と同型・#34 バッチ互換の entries を返す）。 */
+  SCN.recoveryPlans = (match, baseScenario) => {
+    const E = R.engine, S = R.subs, SIM = R.sim;
+    const base = baseScenario && !baseScenario.actual ? baseScenario : null;
+    const mk = () => S.fork(match, base || S.fromActual(match, "巻き返し"));
+    // 現況スコアとビハインド側の特定（base の outcome 世界）
+    const ocBase = SIM.outcome(match, mk());
+    const keys = E.teamKeys(match);
+    const score = ocBase ? ocBase.score : null;
+    if (!score) return { trailer: null, plans: [] };
+    const [a, b] = keys;
+    const trailer = score[a] < score[b] ? a : score[b] < score[a] ? b : null;
+    if (!trailer) return { trailer: null, plans: [] };
+    // トリガ: 最終ビハインド区間の開始（そこから巻き返しに入るのが最も時間を使える）
+    const evs = (ocBase.events || []).filter(e => e.type === "goal");
+    let trig = 0, diff = 0, inBehind = false;
+    for (const g of evs) {
+      diff += g.team === trailer ? 1 : -1;
+      if (diff < 0 && !inBehind) { trig = g.t; inBehind = true; }
+      if (diff >= 0) inBehind = false;
+    }
+    const min0 = Math.min(85, Math.max(2, S.tToMinute(match, trig) + 1));
+    const baseDiff = score[trailer] - score[E.oppOf(match, trailer)];
+    const baseDelta = ocBase.teamDelta || {};
+    const cur = E.rosterAt(match, mk(), trailer, S.minuteToT(match, min0)).shape;
+    const atkShape = ["343", "3421", "433", "4231", "442"].find(sh => sh !== cur) || "442";
+
+    const cands = [];
+    { // 1) 攻撃的シフト
+      const r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) cands.push({ id: "attack-shift", label: `攻撃的シフト ${F.SHAPE_LABELS?.[atkShape] || atkShape}（${min0}'）`, scenario: r.scenario });
+    }
+    { // 2) 攻撃的交代（アドバイザ最上位）
+      const scx = mk();
+      const adv = S.advise(match, scx, S.minuteToT(match, min0), trailer, {});
+      const sug = adv && adv.suggestions && adv.suggestions[0];
+      if (sug) {
+        const r = S.withSub(match, scx, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+        if (r.validation.ok) cands.push({ id: "attack-sub", label: `攻撃的交代 ${sug.outJa}→${sug.inJa}（${min0}'）`, scenario: r.scenario });
+      }
+    }
+    { // 3) 複合（シフト+交代）
+      let r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) {
+        const adv = S.advise(match, r.scenario, S.minuteToT(match, min0), trailer, {});
+        const sug = adv && adv.suggestions && adv.suggestions[0];
+        if (sug) {
+          const r2 = S.withSub(match, r.scenario, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+          if (r2.validation.ok) r = r2;
+        }
+        cands.push({ id: "combined", label: `複合（シフト+交代・${min0}'）`, scenario: r.scenario });
+      }
+    }
+    const opp = E.oppOf(match, trailer);
+    const plans = cands.map(c => {
+      const oc = SIM.outcome(match, c.scenario);
+      const d = oc.score[trailer] - oc.score[opp];
+      const atk = ((oc.teamDelta[trailer]?.deltaPct || 0) - (baseDelta[trailer]?.deltaPct || 0)) / 10;
+      const risk = Math.max(0, ((oc.teamDelta[opp]?.deltaPct || 0) - (baseDelta[opp]?.deltaPct || 0)) / 10);
+      const objective = +(10 * (d - baseDiff) + atk - risk).toFixed(2);
+      return { ...c, validation: { ok: true, errors: [] }, objective,
+        score: oc.score, scoreDiff: d, atkGainPct: Math.round(atk * 10), riskPct: Math.round(risk * 10) };
+    }).sort((x, y) => y.objective - x.objective);
+    return { trailer, trigger: trig, minute: min0, baseScore: score, plans };
   };
 
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
@@ -6550,6 +7175,18 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (!T) return { ok: false, error: "チームが見つかりません" };
     const p = T.squad.find(q => q.no === no);
     if (!p) return { ok: false, error: "選手が見つかりません" };
+    // 先に全検証（部分適用を防ぐ — 番号重複で名前だけ変わる等を排除）
+    if (patch.no != null && Math.trunc(patch.no) !== no) {
+      const cand = Math.trunc(patch.no);
+      if (!(cand >= 1 && cand <= 99)) return { ok: false, error: "背番号は 1〜99" };
+      if (T.squad.some(q => q.no === cand)) return { ok: false, error: "背番号が重複しています" };
+    }
+    if (patch.pos != null && String(patch.pos) !== p.pos && !["GK", "DF", "MF", "FW"].includes(String(patch.pos)))
+      return { ok: false, error: "ポジションは GK/DF/MF/FW" };
+    if (patch.pos === "GK" && p.pos !== "GK") { /* スワップは下で処理 */ }
+    else if (p.pos === "GK" && patch.pos != null && patch.pos !== "GK"
+      && T.squad.filter(q => q.pos === "GK").length <= 1)
+      return { ok: false, error: "各チームに GK が1人必要です（先に別の選手を GK にしてください）" };
     if (patch.name != null) {
       const nm = String(patch.name).trim();
       if (nm) { p.ja = nm; p.name = nm; p.label = nm.slice(0, 6); }
@@ -6588,6 +7225,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       for (const ph of T.phases) for (const s of Object.keys(ph.assign)) if (ph.assign[s] === no) ph.assign[s] = newNo;
       if (T.captainOrder) T.captainOrder = T.captainOrder.map(n => (n === no ? newNo : n));
       for (const s of (match.subsActual[team] || [])) { if (s.out === no) s.out = newNo; if (s.in === no) s.in = newNo; }
+      for (const ev of (match.events || [])) if (ev.team === team && ev.no === no) ev.no = newNo;
     }
     return { ok: true, newNo };
   };
@@ -8322,6 +8960,14 @@ self.onmessage = (e) => {
     const mq = urlq.get("match");
     if (mq && mq !== "template" && mq !== "__tpl__" && R.data.MATCHES && R.data.MATCHES[mq]) App.match = R.data.MATCHES[mq];
     else App.match = getTemplateMatch();
+    // #91残: ?data= バンドルに customMatch があれば起動試合をそれで確定（レンダラ生成前）
+    if (urlq.has("data")) {
+      try {
+        const ob = JSON.parse(decodeURIComponent(urlq.get("data")));
+        if (ob && ob.customMatch) App.match = G.createMatch(ob.customMatch);
+        else if (ob && ob.match && R.data.MATCHES[ob.match]) App.match = R.data.MATCHES[ob.match];
+      } catch { /* 後段の適用処理が拒否する */ }
+    }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
     } catch (err) {
@@ -8424,6 +9070,7 @@ self.onmessage = (e) => {
     buildKikenTiles();
     buildPsyPanel();
     buildMatchSel();
+    buildShockTeamSel();
     // #92: 未較正（汎用推定）試合は明示。収録実試合（calibrated未設定）では非表示。
     const cc = $("#calibChip");
     if (cc) cc.style.display = App.match.meta.calibrated === false ? "" : "none";
@@ -8587,7 +9234,8 @@ self.onmessage = (e) => {
   /* --------------------------- 配置エディタ --------------------------- */
   const buildEditorStatic = () => {
     const sel = $("#fmShape");
-    sel.innerHTML = Object.keys(F.SHAPES).map(k =>
+    // #81: 10人シェイプ（10_*）は退場リシェイプ専用 — 手動の陣形変更（11人前提）からは除外
+    sel.innerHTML = Object.keys(F.SHAPES).filter(k => !k.startsWith("10_")).map(k =>
       `<option value="${k}">${F.SHAPE_LABELS?.[k] || k}</option>`).join("");
   };
   const fitEditor = () => {
@@ -8817,6 +9465,20 @@ self.onmessage = (e) => {
     toast("実試合データに戻しました", "#94A2BD");
   };
 
+  // #80: 外的失点（仮定）の注入
+  const buildShockTeamSel = () => {
+    const sel = $("#shockTeam");
+    if (sel) sel.innerHTML = teamOrder().map(k => `<option value="${k}">${App.match.teams[k].name}</option>`).join("");
+  };
+  $("#shockAdd") && ($("#shockAdd").onclick = () => {
+    const team = $("#shockTeam").value, min = +$("#shockMin").value, kind = $("#shockKind").value;
+    const sc = forkIfActual();
+    const r = S.withShockGoal(App.match, sc, { t: S.minuteToT(App.match, min), team, kind });
+    if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+    refreshScenario(r.scenario);
+    toast(`⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+  });
+
   $("#btnAdvise").onclick = () => {
     const sc = activeScenario();
     const adv = S.advise(App.match, sc, App.t, App.rosterTab, { includeGK: App.options.includeGK });
@@ -8895,16 +9557,51 @@ self.onmessage = (e) => {
           `<span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:20px;height:16px;font-size:9.5px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center">${k[0]}</span>` +
           `<span style="flex:1">${o?.ja ?? s.out} → <b>${n?.ja ?? s.in}</b></span>` });
       }
+      // #81: 退場（数的不利）行 — 赤カードで明示・✕で取り消し
+      for (let i = 0; i < ((sc.outages && sc.outages[k]) || []).length; i++) {
+        const og = sc.outages[k][i];
+        const p = T.squad.find(q => q.no === og.no);
+        rows.push({ t: og.t, k, i, outage: true, html: `<span class="min num">${S.tToLabel(App.match, og.t)}</span>` +
+          `<span style="width:14px;height:18px;background:#C33;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(255,255,255,.25)" title="退場"></span>` +
+          `<span style="flex:1"><b>${p?.ja ?? og.no}</b> 退場（${og.kind === "injury-no-sub" ? "負傷・枠なし" : "レッド"}）→ 10人</span>` });
+      }
+    }
+    // #123: 配置編集の履歴行 — 時刻グループごとに表示・✕で該当時刻のみ取り消し
+    {
+      const groups = new Map();
+      for (const a of (sc.editAnchors || [])) {
+        const gk = Math.round(a.t);
+        if (!groups.has(gk)) groups.set(gk, 0);
+        groups.set(gk, groups.get(gk) + 1);
+      }
+      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
+          `<span title="配置編集">✏</span>` +
+          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+      }
+    }
+    // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
+    const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
+      "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
+    for (let i = 0; i < (sc.shockGoals || []).length; i++) {
+      const sg = sc.shockGoals[i];
+      const T = App.match.teams[sg.team];
+      rows.push({ t: sg.t, k: sg.team, i, shock: true, html: `<span class="min num">${S.tToLabel(App.match, sg.t)}</span>` +
+        `<span title="外的失点（仮定）">⚡</span>` +
+        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に仮定ゴール（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
         btn.onclick = () => {
-          const [k, i] = btn.dataset.del.split(":");
-          const r = S.withoutSub(App.match, App.scenario, k, +i);
+          const [kind, k, i] = btn.dataset.del.split(":");
+          const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
+            : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
+            : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
         };
       });
@@ -8933,9 +9630,10 @@ self.onmessage = (e) => {
     }
     for (const g of oc.added) {
       const T = App.match.teams[g.team];
-      const p = T.squad.find(q => q.no === g.no);
+      const p = g.no != null ? T.squad.find(q => q.no === g.no) : null;
+      const who = g.shock ? `<b>仮定ゴール</b>（得点者は特定しない）` : `<b>${p?.ja ?? g.no}</b> のゴール`;
       evRows.push(`<div class="ev add"><span class="min">${g.min}</span>
-        <span>${T.name} <b>${p?.ja ?? g.no}</b> のゴール<br><span class="why">${g.detail}</span></span></div>`);
+        <span>${T.name} ${who}${g.shock ? " ⚡" : ""}<br><span class="why">${g.detail}</span></span></div>`);
     }
     body.innerHTML = `
       <div class="scoreline">
@@ -8954,7 +9652,33 @@ self.onmessage = (e) => {
       </div>
       <div class="hint">決定論 — 同じシナリオは常に同じ結果。判定は危険度プロセス曲線（20人・GK除外）に基づく。<br>
       これは「起こり得た未来」の<b>予測ではなく</b>、モデル規則による決定論的<b>再構成</b>です。
-      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>`;
+      実ゴールの再現はアンカー（記録準拠の再現指定）に基づくため、What-if の説明は因果の発見ではありません。</div>
+      ${oc.score[a] !== oc.score[b] ? `<div style="margin-top:8px"><button class="btn gold" id="btnRecovery">巻き返し案を比較（ビハインド側・モデル比較）</button></div><div id="recoveryBox"></div>` : ""}`;
+    // #80(B): 巻き返しシナリオ・ビルダー
+    const rbtn = $("#btnRecovery");
+    if (rbtn) rbtn.onclick = () => {
+      rbtn.disabled = true; rbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const res = globalThis.RPDX.scenlib.recoveryPlans(App.match, App.scenario);
+        const box = $("#recoveryBox");
+        if (!res.trailer || !res.plans.length) { box.innerHTML = `<div class="hint">有効な巻き返し候補がありません</div>`; rbtn.style.display = "none"; return; }
+        const [ta, tb] = teamOrder();
+        box.innerHTML = res.plans.map((pl, i) => `
+          <div class="suggestion">
+            <div class="head"><span class="eyebrow">#${i + 1}</span> ${pl.label}
+              <span class="num" style="margin-left:auto">${pl.score[ta]}–${pl.score[tb]}</span>
+              <button class="btn" style="margin-left:8px;padding:3px 9px" data-rec="${i}">適用</button></div>
+            <div class="why">目的関数 ${pl.objective}（Δ攻撃 ${pl.atkGainPct >= 0 ? "+" : ""}${pl.atkGainPct}% / 被リスク +${pl.riskPct}%）— 断定ではなくモデル上の比較</div>
+          </div>`).join("");
+        box.querySelectorAll("[data-rec]").forEach(bn => bn.onclick = () => {
+          const pl = res.plans[+bn.dataset.rec];
+          pl.scenario.label = pl.label;
+          refreshScenario(pl.scenario);
+          toast(`巻き返し案を適用 — ${pl.label}`, GOLD);
+        });
+        rbtn.style.display = "none";
+      }, 30);
+    };
   };
 
   /* --------------------------- D²ダッシュボード --------------------------- */
@@ -9084,9 +9808,12 @@ self.onmessage = (e) => {
       const [a, b] = m.teamOrder || Object.keys(m.teams);
       return `<option value="${id}"${m === App.match ? " selected" : ""}>${m.teams[a].name} ${m.meta.score[a]}–${m.meta.score[b]} ${m.teams[b].name}</option>`;
     });
-    opts.push(`<option value="${TPL_ID}"${isTpl ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
+    const inReg = ids.includes(App.match.meta.id) || App.match === templateMatchCache;
+    if (!inReg) opts.push(`<option value="__cur__" selected>📄 取込カスタム（${App.match.teams[App.match.teamOrder[0]].name}×${App.match.teams[App.match.teamOrder[1]].name}）</option>`);
+    opts.push(`<option value="${TPL_ID}"${isTpl && inReg ? " selected" : ""}>🧪 テンプレ試合（未較正・自チーム起点）</option>`);
     sel.innerHTML = opts.join("");
     sel.onchange = () => {
+      if (sel.value === "__cur__") return;   // 現在の取込カスタム（何もしない）
       const m = sel.value === TPL_ID ? getTemplateMatch() : reg[sel.value];
       if (m && m !== App.match) {
         setMatch(m);
@@ -9124,7 +9851,18 @@ self.onmessage = (e) => {
     }
     // ステータス帯
     const stCls = STATUS[worst.status];
-    $("#sbText").innerHTML = `<span class="chip ${stCls}">${worst.status}</span> ` +
+    // #81: 数的状況バッジ（10 vs 11 等）— outages 発生中のみ表示
+    let numBadge = "";
+    {
+      const sc = activeScenario();
+      if (sc.outages) {
+        const [a, b] = teamOrder();
+        const na = Object.keys(E.rosterAt(App.match, sc, a, App.t).assign).length;
+        const nb = Object.keys(E.rosterAt(App.match, sc, b, App.t).assign).length;
+        if (na !== nb) numBadge = `<span class="chip warn" title="数的不利（what-if）">${na} vs ${nb}</span> `;
+      }
+    }
+    $("#sbText").innerHTML = numBadge + `<span class="chip ${stCls}">${worst.status}</span> ` +
       (worst.status === "OK"
         ? "構造安定 — D²-Field 平常域"
         : `${App.match.teams[worst.team].name}の攻撃脅威 ${Math.round(worst.total)} — ${worst.status === "CRITICAL" ? "失点危険域" : "警戒域"}`);
@@ -9183,11 +9921,20 @@ self.onmessage = (e) => {
       `<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">${lbl}
        <input type="range" min="20" max="99" value="${A[k]}" data-attr="${k}" style="flex:1">
        <span class="num" data-num="${k}" style="width:24px;text-align:right">${A[k]}</span></label>`).join("");
+    // #81: 退場（数的不利 what-if）— 在場中・非GKのみ・現在時刻で発生
+    const pres = E.presenceOf(App.match, activeScenario(), sel.team, sel.no);
+    const canDismiss = p.pos !== "GK" && pres && App.t >= pres.from && App.t < pres.to;
     $("#inspEditForm").innerHTML =
       `<label style="display:block;font-size:11px">名前<input type="text" id="edName" value="${(nm && nm.ja) || p.ja}" style="width:100%"></label>`
       + rows
-      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>
-         <div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
+      + `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" id="edApply">適用</button><button class="btn" id="edReset">リセット</button></div>`
+      + (canDismiss ? `<div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+           <button class="btn danger" id="edDismiss" title="この時刻に退場（what-if）— チームは10人に">🟥 ${S.tToLabel(App.match, App.t)} 退場</button>
+           <select class="sel" id="edDismissShape" title="10人リシェイプ" style="flex:1">
+             <option value="">自動 (${F.SHAPE_LABELS[F.tenManShapeFor(E.rosterAt(App.match, activeScenario(), sel.team, App.t).shape)]})</option>
+             ${["10_441","10_432","10_531"].map(k => `<option value="${k}">${F.SHAPE_LABELS[k]}</option>`).join("")}
+           </select></div>` : "")
+      + `<div class="chip est" style="margin-top:4px">能力値=モデル推定・編集はwhat-if（記録は不変）。位置は変わらず危険度の重みが変わります。</div>`;
     $("#inspEditForm").querySelectorAll("input[type=range]").forEach(r =>
       r.oninput = () => { $("#inspEditForm").querySelector(`[data-num="${r.dataset.attr}"]`).textContent = r.value; });
     $("#edApply").onclick = () => {
@@ -9209,6 +9956,18 @@ self.onmessage = (e) => {
       $("#inspEditForm").style.display = "none";
       selectPlayer(sel.team, sel.no);
     };
+    // #81: 退場 what-if の適用
+    $("#edDismiss") && ($("#edDismiss").onclick = () => {
+      const sc = forkIfActual();
+      const reshape = $("#edDismissShape").value || undefined;
+      const r = S.withOutage(App.match, sc, sel.team, { t: App.t, no: sel.no, kind: "red-card", ...(reshape ? { reshape } : {}) });
+      if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+      refreshScenario(r.scenario);
+      const T = App.match.teams[sel.team];
+      toast(`🟥 ${p.ja} 退場 — ${T.name}は10人（${r.dropped ? `後続の交代${r.dropped}件を取り下げ・` : ""}what-if）`, "#E8473B");
+      $("#inspEditForm").style.display = "none";
+      $("#inspector").classList.remove("open");
+    });
   };
   $("#inspEditBtn") && ($("#inspEditBtn").onclick = () => {
     const f = $("#inspEditForm");
@@ -9590,6 +10349,9 @@ self.onmessage = (e) => {
         return `<table class="stat-table" style="font-size:11px">${head}${teamOrder().map(row).join("")}</table>
         <div style="color:var(--muted);font-size:11px;margin-top:2px">現在時刻 ${E.clockAt(m, t).disp} の合成配置から中立に算出（宣言陣形ではなく実際の並び）。凸包面積=小さいほどコンパクト。占有=Voronoi近似の空間支配率。位置・結果には影響しない読み取り専用の解釈。</div>`;
       })()}
+      <h4>守備構造 v1（#117 — モデル推定・読み取り専用）</h4>
+      <div id="defStructBox"><button class="btn" id="btnDefStruct">計算して表示（現在のシナリオ・数秒）</button>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px">被CPR/被PLV/被OVL/被TRV（相手に許した量）と非保持時ブロック（GK除外・ボール相対）。実測ではなくモデル推定上の観察です。</div></div>
       <h4>イベント（クリックでジャンプ）</h4>
       ${m.events.filter(e => e.label && e.type !== "kickoff").map(e =>
         `<div style="cursor:pointer;padding:2px 0" data-jump="${e.t}"><span class="mono" style="color:var(--muted)">${e.min || E.clockAt(m, e.t).disp}</span> ${e.label}</div>`).join("")}
@@ -9602,6 +10364,27 @@ self.onmessage = (e) => {
       App.t = +d.dataset.jump - 8;
       $("#modalInfo").classList.remove("open");
     });
+    // #117: 守備構造 v1 — オンデマンド計算（シナリオ追従・重い走査はクリック時のみ）
+    const dbtn = $("#btnDefStruct");
+    if (dbtn) dbtn.onclick = () => {
+      dbtn.disabled = true; dbtn.textContent = "計算中…";
+      setTimeout(() => {
+        const T2 = globalThis.RPDX.tactics, sc = activeScenario();
+        const prof = T2.defenseProfile(m, sc);
+        const rows = teamOrder().map(k => {
+          const c = prof.conceded[k];
+          const blk = T2.defenseBlock(m, sc, k) || {};
+          return `<tr><td class="k"><b style="color:${seriesColor(k, true)}">${m.teams[k].name}</b></td>
+            <td>${c.CPR}</td><td>${c.PLV}</td><td>${c.OVL}</td><td>${c.TRV}</td><td>${c.total}</td>
+            <td>${blk.lineHeight ?? "—"}</td><td>${blk.width ?? "—"}×${blk.depth ?? "—"}</td><td>${blk.slideGap ?? "—"}</td><td>${blk.centralClosure ?? "—"}</td></tr>`;
+        }).join("");
+        $("#defStructBox").innerHTML = `
+          <table class="stat-table" style="font-size:11px">
+            <tr><td class="k"></td><td>被CPR</td><td>被PLV</td><td>被OVL</td><td>被TRV</td><td>被KIKEN</td><td>ライン高m</td><td>幅×縦m</td><td>スライド差m</td><td>中央閉鎖</td></tr>
+            ${rows}</table>
+          <div style="color:var(--muted);font-size:11px;margin-top:2px">被○○=相手に許した量（小さいほど消せている）。ブロックは非保持時のみ・GK除外。中央閉鎖=ボール→自ゴール中央3レーンの遮断率（def編集で変化=#106接続）。モデル推定上の観察であり実測・断定ではありません。</div>`;
+      }, 30);
+    };
   };
 
   const buildModelModal = () => {
@@ -9721,7 +10504,18 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ---- #91: シナリオ JSON 往復（端末内のみ・送信/蓄積なし・golden安全） ---- */
   const bMsg = (t, err) => { const el = $("#bundleMsg"); if (el) { el.textContent = t; el.style.color = err ? "var(--crit-t)" : "var(--muted)"; } };
   const applyBundle = (text, src) => {
-    const r = R.scenlib.parseBundle(App.match, text);
+    // #91残: バンドルは自己完結 — customMatch があれば未較正試合を完全再構築してから適用。
+    //   収録試合IDのバンドルなら該当試合へ自動切替（別試合へ誤適用しない）。
+    let obj = text;
+    try { obj = typeof text === "string" ? JSON.parse(text) : text; }
+    catch (e) { bMsg("⚠ JSON 解析に失敗: " + (e && e.message), true); return false; }
+    if (obj && obj.customMatch) {
+      try { setMatch(G.createMatch(obj.customMatch)); }
+      catch (e) { bMsg("⚠ カスタム試合の再構築に失敗: " + (e && e.message), true); return false; }
+    } else if (obj && obj.match && R.data.MATCHES[obj.match] && obj.match !== App.match.meta.id) {
+      setMatch(R.data.MATCHES[obj.match]);
+    }
+    const r = R.scenlib.parseBundle(App.match, obj);
     if (r.error) { bMsg("⚠ " + r.error, true); return false; }
     if (!r.validation || !r.validation.ok) { bMsg("⚠ 検証NG: " + ((r.validation && r.validation.errors) || []).join(" / "), true); return false; }
     refreshScenario(r.scenario);

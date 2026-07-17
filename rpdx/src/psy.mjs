@@ -42,6 +42,9 @@
       yellow: { own: +14, opp: +6, carded: +20 },
     },
     AR_SUB_SELF: +16,      // 自分の投入直後
+    // #80: 外的失点（仮説）の心理増幅 — 理不尽な失点ほどスイングが大きい
+    SHOCK_W: { "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
+               "own-goal": 1.4, "deflection": 1.25, "set-piece": 1.15 },
     AR_TAU: 240,           // 覚醒インパルス減衰[s]
     AR_BASE: 48,
     AR_KICKOFF: 10,        // キックオフ直後の初期活性
@@ -77,6 +80,8 @@
   const dispSign = (ev, team) => (ev.team === team ? "own" : "opp");
 
   /* ============ チーム心理モメンタム M(t) ∈ [-1.2, +1.2]（閉形式） ============ */
+  const shockW = (ev) => (ev && ev.shock ? (PSY.PARAMS.SHOCK_W[ev.kind] || 1.3) : 1);   // #80
+
   PSY.momentumAt = (match, scenario, t) => {
     scenario = scenario || E.actualScenario(match);
     const out = {};
@@ -87,7 +92,7 @@
       const w = P.M_EV[ev.type];
       if (!w || !ev.team) continue;
       const decay = Math.exp(-(t - ev.t) / P.M_TAU);
-      for (const k of keys) out[k] += (w[dispSign(ev, k)] || 0) * decay;
+      for (const k of keys) out[k] += (w[dispSign(ev, k)] || 0) * shockW(ev) * decay;
     }
     for (const k of keys) {
       for (const s of scenario.subs[k] || []) {
@@ -198,7 +203,7 @@
       if (ev.type === "yellow" && ev.team === team && ev.no === no)
         mf += P.MF_YELLOW * Math.exp(-(te - ev.t) / 900);
       if (ev.type === "goal" && ev.team !== team && ev.t >= pr.from)
-        mf += P.MF_CONCEDE * Math.exp(-(te - ev.t) / 1200);
+        mf += P.MF_CONCEDE * shockW(ev) * Math.exp(-(te - ev.t) / 1200);
     }
     mf += P.MF_TRAIL * N.smooth(clamp(trailingMins(match, scenario, team, pr.from, te) / 30));
     mf = clamp(mf);
@@ -213,7 +218,7 @@
       let a = w[dispSign(ev, team)] || 0;
       if (ev.type === "goal" && ev.team === team && ev.no === no) a = w.scorer;
       if (ev.type === "yellow" && ev.team === team && ev.no === no) a = w.carded;
-      imp += a * decay;
+      imp += a * shockW(ev) * decay;
     }
     for (const s of scenario.subs[team] || []) {
       if (s.in === no && s.t <= te) imp += P.AR_SUB_SELF * Math.exp(-(te - s.t) / 300);

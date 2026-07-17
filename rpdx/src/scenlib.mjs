@@ -10,6 +10,7 @@
 (() => {
   const R = (globalThis.RPDX ??= {});
   const SCN = (R.scenlib = {});
+  const F = R.formations;
 
   /* ---- 直列化（最小表現・決定論） ---- */
   SCN.serialize = (scenario) => {
@@ -24,6 +25,14 @@
     if (scenario.lineup) o.u = scenario.lineup;
     if (scenario.tweaks) o.w = scenario.tweaks;
     if (scenario.opponentHt) o.h = scenario.opponentHt;
+    if (scenario.outages) {                                   // #81: 退場 [t,no,kind,reshape?]
+      const g = {};
+      for (const [k, arr] of Object.entries(scenario.outages))
+        if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
+      if (Object.keys(g).length) o.g = g;
+    }
+    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点 [t,team,kind]
+      o.q = scenario.shockGoals.map(x => [x.t, x.team, x.kind || "deflection"]);
     return JSON.stringify(o);
   };
 
@@ -36,6 +45,12 @@
     }
     const sc = S.createScenario(match, o.l || "imported", { subs, lineup: o.u || null, tweaks: o.w || null });
     if (o.h) sc.opponentHt = o.h;
+    if (o.g) {                                                // #81: 退場の復元
+      sc.outages = {};
+      for (const [k, arr] of Object.entries(o.g))
+        sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
+    }
+    if (o.q) sc.shockGoals = o.q.map(([t, team, kind]) => ({ t, team, kind: kind || "deflection" }));  // #80
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -116,9 +131,31 @@
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
-    sc.editAnchors = editAnchors;
-    sc.editFrom = frame.t;
-    return { scenario: sc, validation: S.validateScenario(match, sc), moved: editAnchors.length };
+    // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
+    //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
+    const MERGE_WIN = 25;
+    const prev = sc.editAnchors || [];
+    const kept = prev.filter(a =>
+      !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
+    const replaced = prev.length - kept.length;
+    sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
+    sc.editFrom = sc.editAnchors.length
+      ? Math.min(...sc.editAnchors.map(a => a.t))
+      : frame.t;
+    return { scenario: sc, validation: S.validateScenario(match, sc),
+      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+  };
+
+  // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
+  SCN.withoutEditGroup = (match, scenario, t) => {
+    const S = R.subs;
+    const next = S.fork(match, scenario);
+    const before = (next.editAnchors || []).length;
+    next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
+    const removed = before - next.editAnchors.length;
+    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
+    else { delete next.editAnchors; delete next.editFrom; }
+    return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
   /* ---- #91: ロスター/シナリオ/フレームの JSON 往復（統合スキーマ・取込→反映→書出） ----
@@ -147,7 +184,29 @@
       ov.editAnchors = scenario.editAnchors;
       if (scenario.editFrom != null) ov.editFrom = scenario.editFrom;
     }
+    if (scenario.outages) ov.outages = scenario.outages;      // #81
+    if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
+    // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
+    //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
+    //   収録実試合（較正済み）は同梱しない＝公式記録・golden の非改変を構成的に保証。
+    if (match.meta.calibrated === false) {
+      const teamCfg = (k) => {
+        const T = match.teams[k];
+        return {
+          code: T.code, name: T.name, nameEn: T.nameEn, coach: T.coach,
+          formation: T.phases[0].shape, color: T.color, colorDeep: T.colorDeep,
+          kit: T.kit, captainOrder: T.captainOrder, xi: { ...T.phases[0].assign },
+          squad: T.squad.map(p => ({ no: p.no, pos: p.pos, name: p.name, ja: p.ja, label: p.label, attrs: { ...p.attrs } })),
+        };
+      };
+      const [ha, aw] = match.teamOrder;
+      bundle.customMatch = {
+        seed: match.meta.id.replace(/^custom-/, ""),
+        competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        home: teamCfg(ha), away: teamCfg(aw),
+      };
+    }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
     return JSON.stringify(bundle, null, 2);
   };
@@ -213,10 +272,91 @@
       sc.editAnchors = ov.editAnchors.filter(a => a && keySet.has(a.team));
       sc.editFrom = ov.editFrom != null ? ov.editFrom : ov.editAnchors[0].t;
     }
+    // #80: 外的失点（未知チームは無視・検証は validateScenario 側）
+    if (Array.isArray(ov.shockGoals) && ov.shockGoals.length)
+      sc.shockGoals = ov.shockGoals.filter(x => x && keySet.has(x.team))
+        .map(x => ({ t: +x.t, team: x.team, kind: x.kind || "deflection" }));
+    // #81: 退場（未知チームは無視・検証は validateScenario 側）
+    if (ov.outages && typeof ov.outages === "object") {
+      const g = {};
+      for (const [tm, arr] of Object.entries(ov.outages))
+        if (keySet.has(tm) && Array.isArray(arr) && arr.length)
+          g[tm] = arr.map(x => ({ t: +x.t, no: +x.no, kind: x.kind || "red-card", ...(x.reshape ? { reshape: x.reshape } : {}) }));
+      if (Object.keys(g).length) sc.outages = g;
+    }
 
     const validation = S.validateScenario(match, sc);
     const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
     return { scenario: sc, validation, frame, match: o.match || null };
+  };
+
+  /* ---- #80(B): 巻き返しシナリオ・ビルダー ----
+     ビハインド中のチームに対し、回復プラン候補（攻撃的シフト/攻撃的交代/複合）を
+     決定論生成し、目的関数 = 10·Δ(得点差) + Δ攻撃危険度% − max(0, Δ被危険度%) で降順ランク。
+     断定ではなくモデル上の比較（#62 と同型・#34 バッチ互換の entries を返す）。 */
+  SCN.recoveryPlans = (match, baseScenario) => {
+    const E = R.engine, S = R.subs, SIM = R.sim;
+    const base = baseScenario && !baseScenario.actual ? baseScenario : null;
+    const mk = () => S.fork(match, base || S.fromActual(match, "巻き返し"));
+    // 現況スコアとビハインド側の特定（base の outcome 世界）
+    const ocBase = SIM.outcome(match, mk());
+    const keys = E.teamKeys(match);
+    const score = ocBase ? ocBase.score : null;
+    if (!score) return { trailer: null, plans: [] };
+    const [a, b] = keys;
+    const trailer = score[a] < score[b] ? a : score[b] < score[a] ? b : null;
+    if (!trailer) return { trailer: null, plans: [] };
+    // トリガ: 最終ビハインド区間の開始（そこから巻き返しに入るのが最も時間を使える）
+    const evs = (ocBase.events || []).filter(e => e.type === "goal");
+    let trig = 0, diff = 0, inBehind = false;
+    for (const g of evs) {
+      diff += g.team === trailer ? 1 : -1;
+      if (diff < 0 && !inBehind) { trig = g.t; inBehind = true; }
+      if (diff >= 0) inBehind = false;
+    }
+    const min0 = Math.min(85, Math.max(2, S.tToMinute(match, trig) + 1));
+    const baseDiff = score[trailer] - score[E.oppOf(match, trailer)];
+    const baseDelta = ocBase.teamDelta || {};
+    const cur = E.rosterAt(match, mk(), trailer, S.minuteToT(match, min0)).shape;
+    const atkShape = ["343", "3421", "433", "4231", "442"].find(sh => sh !== cur) || "442";
+
+    const cands = [];
+    { // 1) 攻撃的シフト
+      const r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) cands.push({ id: "attack-shift", label: `攻撃的シフト ${F.SHAPE_LABELS?.[atkShape] || atkShape}（${min0}'）`, scenario: r.scenario });
+    }
+    { // 2) 攻撃的交代（アドバイザ最上位）
+      const scx = mk();
+      const adv = S.advise(match, scx, S.minuteToT(match, min0), trailer, {});
+      const sug = adv && adv.suggestions && adv.suggestions[0];
+      if (sug) {
+        const r = S.withSub(match, scx, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+        if (r.validation.ok) cands.push({ id: "attack-sub", label: `攻撃的交代 ${sug.outJa}→${sug.inJa}（${min0}'）`, scenario: r.scenario });
+      }
+    }
+    { // 3) 複合（シフト+交代）
+      let r = S.withFormation(match, mk(), trailer, min0, atkShape);
+      if (r.validation.ok) {
+        const adv = S.advise(match, r.scenario, S.minuteToT(match, min0), trailer, {});
+        const sug = adv && adv.suggestions && adv.suggestions[0];
+        if (sug) {
+          const r2 = S.withSub(match, r.scenario, trailer, { t: S.minuteToT(match, min0), out: sug.out, in: sug.in });
+          if (r2.validation.ok) r = r2;
+        }
+        cands.push({ id: "combined", label: `複合（シフト+交代・${min0}'）`, scenario: r.scenario });
+      }
+    }
+    const opp = E.oppOf(match, trailer);
+    const plans = cands.map(c => {
+      const oc = SIM.outcome(match, c.scenario);
+      const d = oc.score[trailer] - oc.score[opp];
+      const atk = ((oc.teamDelta[trailer]?.deltaPct || 0) - (baseDelta[trailer]?.deltaPct || 0)) / 10;
+      const risk = Math.max(0, ((oc.teamDelta[opp]?.deltaPct || 0) - (baseDelta[opp]?.deltaPct || 0)) / 10);
+      const objective = +(10 * (d - baseDiff) + atk - risk).toFixed(2);
+      return { ...c, validation: { ok: true, errors: [] }, objective,
+        score: oc.score, scoreDiff: d, atkGainPct: Math.round(atk * 10), riskPct: Math.round(risk * 10) };
+    }).sort((x, y) => y.objective - x.objective);
+    return { trailer, trigger: trig, minute: min0, baseScore: score, plans };
   };
 
   /* ---- 格子生成: 交代分スイープ（idx番目の交代の分を動かす） ---- */
