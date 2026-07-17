@@ -762,7 +762,18 @@ self.onmessage = (e) => {
     const r = S.withShockGoal(App.match, sc, { t: S.minuteToT(App.match, min), team, kind });
     if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
     refreshScenario(r.scenario);
-    toast(`⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+    toast(kind === "manual"
+      ? `🧾 スコアを記帳 +1（${App.match.teams[team].name}・${min}'）— 実記録は不変（what-if）`
+      : `⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+  });
+  // #128: 減点（記録/生成ゴールの手動取消）
+  $("#removeAdd") && ($("#removeAdd").onclick = () => {
+    const team = $("#shockTeam").value, min = +$("#removeMin").value;
+    const sc = forkIfActual();
+    const r = S.withRemoveGoal(App.match, sc, { team, t: S.minuteToT(App.match, min) });
+    if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+    refreshScenario(r.scenario);
+    toast(`➖ ${App.match.teams[team].name} の ${min}' 前後のゴールを取消（what-if・実記録は不変）`, GOLD);
   });
 
   $("#btnAdvise").onclick = () => {
@@ -857,28 +868,43 @@ self.onmessage = (e) => {
       const groups = new Map();
       for (const a of (sc.editAnchors || [])) {
         const gk = Math.round(a.t);
-        if (!groups.has(gk)) groups.set(gk, 0);
-        groups.set(gk, groups.get(gk) + 1);
+        const g = groups.get(gk) || { n: 0, ball: false };
+        g.n++; groups.set(gk, g);
       }
-      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+      for (const b2 of (sc.editBall || [])) {                     // #127: ボール編集も同グループへ
+        const gk = Math.round(b2.t);
+        const g = groups.get(gk) || { n: 0, ball: false };
+        g.ball = true; groups.set(gk, g);
+      }
+      for (const [gt, g] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        const what = g.n ? `${g.n}人${g.ball ? "＋ボール" : ""}` : "ボール";
         rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
           `<span title="配置編集">✏</span>` +
-          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+          `<span style="flex:1">配置編集（${what}）— この時刻を通過</span>` });
       }
     }
     // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
-    const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
+    const SHOCK_JA = { "manual": "手動記帳", "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
       "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
     for (let i = 0; i < (sc.shockGoals || []).length; i++) {
       const sg = sc.shockGoals[i];
       const T = App.match.teams[sg.team];
+      const manual = sg.kind === "manual";
       rows.push({ t: sg.t, k: sg.team, i, shock: true, html: `<span class="min num">${S.tToLabel(App.match, sg.t)}</span>` +
-        `<span title="外的失点（仮定）">⚡</span>` +
-        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に仮定ゴール（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
+        `<span title="${manual ? "スコア修正（記帳）" : "外的失点（仮定）"}">${manual ? "🧾" : "⚡"}</span>` +
+        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に${manual ? "得点を記帳" : "仮定ゴール"}（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
+    }
+    // #128: 減点行 — ➖ で明示・✕で取り消し
+    for (let i = 0; i < (sc.removeGoals || []).length; i++) {
+      const rg = sc.removeGoals[i];
+      const T = App.match.teams[rg.team];
+      rows.push({ t: rg.t, k: rg.team, i, rmgoal: true, html: `<span class="min num">${S.tToLabel(App.match, rg.t)}</span>` +
+        `<span title="ゴール取消（what-if）">➖</span>` +
+        `<span style="flex:1"><b>${T?.name ?? rg.team}</b> のゴールを取消（手動・実記録は不変）</span>` });
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.rmgoal ? "r" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
@@ -886,6 +912,7 @@ self.onmessage = (e) => {
           const [kind, k, i] = btn.dataset.del.split(":");
           const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
             : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "r" ? S.withoutRemoveGoal(App.match, App.scenario, +i)
             : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
             : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);

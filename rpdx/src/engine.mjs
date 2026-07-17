@@ -129,6 +129,13 @@
       }
       ea = "e" + (scenario.editFrom ?? "") + ":" + scenario.editAnchors.length + ":" + (hh >>> 0).toString(36);
     }
+    // #127: ボール編集もキャッシュ・キーへ（世界シード外）
+    if (scenario && scenario.editBall && scenario.editBall.length) {
+      let hb = 5;
+      for (const b2 of scenario.editBall)
+        hb = (Math.imul(hb, 31) + (Math.round(b2.t * 7) ^ (Math.round(b2.x * 13 + b2.y * 7) | 0))) | 0;
+      ea += "b" + scenario.editBall.length + ":" + (hb >>> 0).toString(36);
+    }
     // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
     let ao = "";
     if (scenario && scenario.attrOverrides) {
@@ -303,9 +310,11 @@
   };
   const ballAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    if (!oc) return match.ballAnchors;
+    const eb = scenario && scenario.editBall && scenario.editBall.length ? scenario.editBall : null;   // #127
+    if (!oc) return eb ? match.ballAnchors.concat(eb).sort((a, b) => a.t - b.t) : match.ballAnchors;
     const list = match.ballAnchors.filter(a => !inWindows(a.t, oc.suppress));
-    return list.concat(oc.ballAnchors || []).sort((a, b) => a.t - b.t);
+    const merged = list.concat(oc.ballAnchors || []);
+    return (eb ? merged.concat(eb) : merged).sort((a, b) => a.t - b.t);
   };
   const panchorCache = new Map();
   // チェーン生成中はチェーン由来アンカー（リスタート/タックル）を注入しない
@@ -320,7 +329,10 @@
     //   編集アンカーは**最後に**連結する＝記録イベント/チェーン由来アンカーと同時刻でも
     //   編集が最終適用され「編集した配置を通過」が厳密に成立する（適用は step5 の逐次lerp）。
     const edits = scenario && scenario.editAnchors && scenario.editAnchors.length ? scenario.editAnchors : null;
-    if (chainBuilding) return edits ? base.concat(edits) : base;
+    // #127: チェーン生成は編集アンカーを**見ない** — editAnchors は scenarioHash 外＝
+    //   「同一ハッシュ⇒同一チェーン」の契約を守る（編集は動きの拘束であり物語の再シードではない）。
+    //   これにより多重編集でも保持者系列が安定し、保持者編集→ボール追随が決定論で成立する。
+    if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
     // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
@@ -1682,7 +1694,12 @@
         // シュート等でアンカーが選手から離れ出すと near が消えて自然にリリースされる。
         const dNow = Math.hypot(cp.x - ball.x, cp.y - ball.y);
         const near = N.smooth(clamp((5.2 - dNow) / 2.8));
-        const w = Math.max(ball.free, near * 0.9) * N.smooth(clamp(carrier.u * 1.6));
+        let w = Math.max(ball.free, near * 0.9) * N.smooth(clamp(carrier.u * 1.6));
+        // #127: 保持者に編集アンカーが効いている間は吸着を強制 — 記録再現の follow が
+        //   free を落として旧トラックに張り付くのを、ユーザー編集（明示意図）が上書きする。
+        //   scenario.editAnchors 限定＝収録世界・golden は不変。
+        const ehc = editHoldOf(scenario, carrier.team, carrier.no, t);
+        if (ehc) w = Math.max(w, ehc.w * N.smooth(clamp(carrier.u * 1.6)));
         if (w > 0.02) {
           const dseed = N.seedOf(match.meta.id + "dribble");
           const ax = cp.x + 0.7 * N.vnoise1(dseed + carrier.no * 7, t, 2.9);

@@ -619,11 +619,12 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     </div>
     <div id="subErrors"></div>
     <div id="subList"></div>
-    <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:5px" aria-label="外的失点の注入（inject hypothetical goal）">
-      <span class="eyebrow" style="width:100%">外的失点（仮定）— SHOCK</span>
-      <select id="shockTeam" class="sel" aria-label="失点するチーム（conceding team scores AGAINST — 得点側を選択）" style="max-width:96px"></select>
+    <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:5px" aria-label="スコア修正（manual score adjust what-if）">
+      <span class="eyebrow" style="width:100%">スコア修正（what-if）— SCORE</span>
+      <select id="shockTeam" class="sel" aria-label="対象チーム（得点/取消するチーム）" style="max-width:96px"></select>
       <input type="number" id="shockMin" class="num numin" min="2" max="100" value="60" aria-label="分（minute）" style="width:52px">
       <select id="shockKind" class="sel" aria-label="種別（kind）" style="flex:1;min-width:110px">
+        <option value="manual">手動（記帳）</option>
         <option value="ref-penalty">誤審PK</option>
         <option value="ref-offside-missed">オフサイド見逃し</option>
         <option value="deflection">デフレクション</option>
@@ -631,8 +632,11 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         <option value="set-piece">セットピース混戦</option>
         <option value="own-goal">オウンゴール</option>
       </select>
-      <button class="btn" id="shockAdd" aria-label="外的失点を注入（inject）">注入</button>
-      <div class="hint" style="width:100%">仮説の what-if — 実試合・実審判への断定ではありません（記録・得点者個人は不変/非特定）</div>
+      <button class="btn" id="shockAdd" aria-label="得点を追加（add goal）">＋追加</button>
+      <span class="vsep"></span>
+      <input type="number" id="removeMin" class="num numin" min="1" max="100" value="30" aria-label="取消す得点の分（minute of goal to remove）" style="width:52px">
+      <button class="btn" id="removeAdd" aria-label="得点を取消（remove goal）">−減点</button>
+      <div class="hint" style="width:100%">追加=そのチームに得点を記帳/仮定。減点=そのチームの指定分（±60秒）のゴールを取消。<b>実記録は不変</b>（what-if・得点者個人は非特定）</div>
     </div>
     <div class="row" style="margin-top:9px">
       <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>
@@ -791,7 +795,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
    ========================================================================= */
 (() => {
   const R = (globalThis.RPDX ??= {});
-  R.VERSION = "1.2.0";
+  R.VERSION = "1.2.1";
 })();
 
 
@@ -2112,6 +2116,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       }
       ea = "e" + (scenario.editFrom ?? "") + ":" + scenario.editAnchors.length + ":" + (hh >>> 0).toString(36);
     }
+    // #127: ボール編集もキャッシュ・キーへ（世界シード外）
+    if (scenario && scenario.editBall && scenario.editBall.length) {
+      let hb = 5;
+      for (const b2 of scenario.editBall)
+        hb = (Math.imul(hb, 31) + (Math.round(b2.t * 7) ^ (Math.round(b2.x * 13 + b2.y * 7) | 0))) | 0;
+      ea += "b" + scenario.editBall.length + ":" + (hb >>> 0).toString(36);
+    }
     // #89: 能力値上書きは危険度/位置(fatigue)に効く → キャッシュ・キーに含める（世界シードには入れない）
     let ao = "";
     if (scenario && scenario.attrOverrides) {
@@ -2286,9 +2297,11 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   };
   const ballAnchorsOf = (match, scenario) => {
     const oc = scenario && scenario.outcome;
-    if (!oc) return match.ballAnchors;
+    const eb = scenario && scenario.editBall && scenario.editBall.length ? scenario.editBall : null;   // #127
+    if (!oc) return eb ? match.ballAnchors.concat(eb).sort((a, b) => a.t - b.t) : match.ballAnchors;
     const list = match.ballAnchors.filter(a => !inWindows(a.t, oc.suppress));
-    return list.concat(oc.ballAnchors || []).sort((a, b) => a.t - b.t);
+    const merged = list.concat(oc.ballAnchors || []);
+    return (eb ? merged.concat(eb) : merged).sort((a, b) => a.t - b.t);
   };
   const panchorCache = new Map();
   // チェーン生成中はチェーン由来アンカー（リスタート/タックル）を注入しない
@@ -2303,7 +2316,10 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     //   編集アンカーは**最後に**連結する＝記録イベント/チェーン由来アンカーと同時刻でも
     //   編集が最終適用され「編集した配置を通過」が厳密に成立する（適用は step5 の逐次lerp）。
     const edits = scenario && scenario.editAnchors && scenario.editAnchors.length ? scenario.editAnchors : null;
-    if (chainBuilding) return edits ? base.concat(edits) : base;
+    // #127: チェーン生成は編集アンカーを**見ない** — editAnchors は scenarioHash 外＝
+    //   「同一ハッシュ⇒同一チェーン」の契約を守る（編集は動きの拘束であり物語の再シードではない）。
+    //   これにより多重編集でも保持者系列が安定し、保持者編集→ボール追随が決定論で成立する。
+    if (chainBuilding) return base;
     const key = match.meta.id + "|" + E.scenarioKey(scenario);
     if (panchorCache.has(key)) return panchorCache.get(key);
     // チェーンのリスタート/タックル・アンカーを合流（buildChain はガード下で base のみ参照）
@@ -3665,7 +3681,12 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         // シュート等でアンカーが選手から離れ出すと near が消えて自然にリリースされる。
         const dNow = Math.hypot(cp.x - ball.x, cp.y - ball.y);
         const near = N.smooth(clamp((5.2 - dNow) / 2.8));
-        const w = Math.max(ball.free, near * 0.9) * N.smooth(clamp(carrier.u * 1.6));
+        let w = Math.max(ball.free, near * 0.9) * N.smooth(clamp(carrier.u * 1.6));
+        // #127: 保持者に編集アンカーが効いている間は吸着を強制 — 記録再現の follow が
+        //   free を落として旧トラックに張り付くのを、ユーザー編集（明示意図）が上書きする。
+        //   scenario.editAnchors 限定＝収録世界・golden は不変。
+        const ehc = editHoldOf(scenario, carrier.team, carrier.no, t);
+        if (ehc) w = Math.max(w, ehc.w * N.smooth(clamp(carrier.u * 1.6)));
         if (w > 0.02) {
           const dseed = N.seedOf(match.meta.id + "dribble");
           const ax = cp.x + 0.7 * N.vnoise1(dseed + carrier.no * 7, t, 2.9);
@@ -4398,7 +4419,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     }
   };
   // #80: 外的失点（仮説）の検証 — kind 既知・時刻内・チーム毎≤2（v1）
-  const SHOCK_KINDS = ["ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];
+  const SHOCK_KINDS = ["manual", "ref-penalty", "ref-offside-missed", "deflection", "keeper-error", "set-piece", "own-goal"];   // #128: manual=手動記帳
   const validateShockGoals = (match, scenario, errors) => {
     const list = scenario.shockGoals;
     if (!list) return;
@@ -4410,7 +4431,23 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       if (!SHOCK_KINDS.includes(sg.kind)) errors.push(`[${T.name}] 未知の外的失点種別 ${sg.kind}`);
       if (sg.t < range.t0 + 30 || sg.t > range.t1 - 30) errors.push(`[${T.name}] 外的失点の時刻がタイムライン外`);
       perTeam[sg.team] = (perTeam[sg.team] || 0) + 1;
-      if (perTeam[sg.team] > 2) errors.push(`[${T.name}] 外的失点は v1 ではチーム毎2件まで`);
+      if (perTeam[sg.team] > 5) errors.push(`[${T.name}] スコア修正（追加）はチーム毎5件まで`);
+    }
+  };
+  // #128: 減点（記録/生成ゴールの手動取消）の検証 — 対象ゴール実在・チーム毎5件まで・重複不可
+  const validateRemoveGoals = (match, scenario, errors) => {
+    const list = scenario.removeGoals;
+    if (!list) return;
+    const perTeam = {}, used = new Set();
+    for (const rg of list) {
+      const T = match.teams[rg.team];
+      if (!T) { errors.push(`[remove] 未知チーム ${rg.team}`); continue; }
+      const hit = match.events.find(ev => ev.type === "goal" && ev.team === rg.team && Math.abs(ev.t - rg.t) <= 60);
+      if (!hit) { errors.push(`[${T.name}] 指定時刻±60秒に取消対象のゴールがありません`); continue; }
+      if (used.has(hit.t)) errors.push(`[${T.name}] 同じゴールを重複して取消指定`);
+      used.add(hit.t);
+      perTeam[rg.team] = (perTeam[rg.team] || 0) + 1;
+      if (perTeam[rg.team] > 5) errors.push(`[${T.name}] スコア修正（減点）はチーム毎5件まで`);
     }
   };
   S.SHOCK_KINDS = SHOCK_KINDS;
@@ -4418,6 +4455,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     const v = S.validatePlan(match, scenario.subs, scenario.lineup);
     validateOutages(match, scenario, v.errors);
     validateShockGoals(match, scenario, v.errors);
+    validateRemoveGoals(match, scenario, v.errors);
     v.ok = v.errors.length === 0;
     return v;
   };
@@ -4426,6 +4464,20 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   S.withShockGoal = (match, scenario, shock /* {t,team,kind} */) => {
     const next = S.fork(match, scenario);
     next.shockGoals = [...(next.shockGoals || []), { kind: "deflection", ...shock }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  // #128: 減点の追加・削除
+  S.withRemoveGoal = (match, scenario, rg /* {team,t} */) => {
+    const next = S.fork(match, scenario);
+    next.removeGoals = [...(next.removeGoals || []), { team: rg.team, t: rg.t }].sort((a, b) => a.t - b.t);
+    return { scenario: next, validation: S.validateScenario(match, next) };
+  };
+  S.withoutRemoveGoal = (match, scenario, idx) => {
+    const next = S.fork(match, scenario);
+    if (next.removeGoals) {
+      next.removeGoals = next.removeGoals.filter((_, i) => i !== idx);
+      if (!next.removeGoals.length) delete next.removeGoals;
+    }
     return { scenario: next, validation: S.validateScenario(match, next) };
   };
   S.withoutShockGoal = (match, scenario, idx) => {
@@ -4493,8 +4545,11 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       sc.outages = {};
       for (const k of Object.keys(base.outages)) sc.outages[k] = base.outages[k].map(o => ({ ...o }));
     }
-    // #80: 外的失点（仮説）[{t,team,kind}] — 未指定は付与しない（golden安全）
+    // #80: 外的失点/スコア修正 [{t,team,kind}] — 未指定は付与しない（golden安全）
     if (base.shockGoals) sc.shockGoals = base.shockGoals.map(g => ({ ...g }));
+    // #128: 減点 / #127: ボール編集
+    if (base.removeGoals) sc.removeGoals = base.removeGoals.map(g => ({ ...g }));
+    if (base.editBall) sc.editBall = base.editBall.map(b2 => ({ ...b2 }));
     // #89/#83/#61: シナリオ級拡張も fork で引き継ぐ（従来は脱落＝交代等の追加編集で能力値上書きが消えるバグ）
     if (base.attrOverrides) {
       sc.attrOverrides = {};
@@ -4837,6 +4892,12 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         removed.push({ ev, reason: `攻撃脅威が実試合比 ${Math.round(ratio * 100)}% に低下`, ratio });
       }
     }
+    /* --- 1b) #128 減点（手動取消）— 記録/生成ゴールを removed/suppress 経路で取り消す --- */
+    for (const rg of (scenario.removeGoals || [])) {
+      const hit = match.events.find(ev => ev.type === "goal" && ev.team === rg.team && Math.abs(ev.t - rg.t) <= 60);
+      if (!hit || removed.some(r => r.ev === hit)) continue;
+      removed.push({ ev: hit, reason: "手動取消（what-if・実記録は不変）", ratio: 1, manual: true });
+    }
     for (const r of removed) {
       suppress.push({ t0: r.ev.t - 26, t1: restartAfter(match, r.ev.t) + 3 });
     }
@@ -4935,6 +4996,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
        責任ある表現（不可侵）: これは仮説的 what-if であり、実試合・実審判に
        この事象があったという断定ではない（収録記録は不変）。得点者個人は特定しない。 */
     const SHOCK_LABEL = {
+      "manual": "手動スコア修正（記帳）",
       "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し",
       "deflection": "デフレクション", "keeper-error": "GKミス",
       "set-piece": "セットピースの混戦", "own-goal": "オウンゴール",
@@ -5044,7 +5106,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     },
     AR_SUB_SELF: +16,      // 自分の投入直後
     // #80: 外的失点（仮説）の心理増幅 — 理不尽な失点ほどスイングが大きい
-    SHOCK_W: { "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
+    SHOCK_W: { "manual": 1.0, "ref-penalty": 1.6, "ref-offside-missed": 1.5, "keeper-error": 1.45,
                "own-goal": 1.4, "deflection": 1.25, "set-piece": 1.15 },
     AR_TAU: 240,           // 覚醒インパルス減衰[s]
     AR_BASE: 48,
@@ -6412,8 +6474,12 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         if (arr && arr.length) g[k] = arr.map(x => [x.t, x.no, x.kind || "red-card", x.reshape || null]);
       if (Object.keys(g).length) o.g = g;
     }
-    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点 [t,team,kind]
+    if (scenario.shockGoals && scenario.shockGoals.length)    // #80: 外的失点/スコア修正 [t,team,kind]
       o.q = scenario.shockGoals.map(x => [x.t, x.team, x.kind || "deflection"]);
+    if (scenario.editBall && scenario.editBall.length)        // #127: ボール編集 [t,x,y]
+      o.eb = scenario.editBall.map(b2 => [b2.t, b2.x, b2.y]);
+    if (scenario.removeGoals && scenario.removeGoals.length)  // #128: 減点 [team,t]
+      o.rg = scenario.removeGoals.map(r2 => [r2.team, r2.t]);
     return JSON.stringify(o);
   };
 
@@ -6432,6 +6498,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         sc.outages[k] = arr.map(([t, no, kind, reshape]) => ({ t, no, kind: kind || "red-card", ...(reshape ? { reshape } : {}) }));
     }
     if (o.q) sc.shockGoals = o.q.map(([t, team, kind]) => ({ t, team, kind: kind || "deflection" }));  // #80
+    if (o.eb) sc.editBall = o.eb.map(([t, x, y]) => ({ t, x, y }));                                     // #127
+    if (o.rg) sc.removeGoals = o.rg.map(([team, t]) => ({ team, t }));                                  // #128
     const validation = S.validateScenario(match, sc);
     return { scenario: sc, validation };
   };
@@ -6512,6 +6580,19 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       editAnchors.push({ t: frame.t, team: p.team, no: p.no, x: p.x, y: p.y, sigma: Math.max(4, d * 0.19) });
     }
     const sc = S.createScenario(match, "編集フレーム再合成 @" + Math.round(frame.t) + "s", base);
+    // #127: ボール差分 → scenario.editBall へ蓄積マージ（±25s は最新置換・#50 経路で速度安全）
+    let ballMoved = 0;
+    {
+      const nb = E.ballAt(match, base, frame.t);
+      const fb = frame.ball;
+      if (fb && nb && Math.hypot(fb.x - nb.x, fb.y - nb.y) > 0.5) {
+        const prevB = sc.editBall || [];
+        sc.editBall = prevB.filter(a2 => Math.abs(a2.t - frame.t) > 25)
+          .concat([{ t: frame.t, x: +fb.x.toFixed(2), y: +fb.y.toFixed(2) }])
+          .sort((x2, y2) => x2.t - y2.t);
+        ballMoved = 1;
+      }
+    }
     // #123: 蓄積マージ — 既存アンカー（fork で引き継ぎ済み）を保持し、
     //   同一選手×近接時刻（±25s）のみ最新で置換。別時刻の編集は共存＝多重編集の記憶。
     const MERGE_WIN = 25;
@@ -6520,22 +6601,25 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       !editAnchors.some(n => n.team === a.team && n.no === a.no && Math.abs(n.t - a.t) <= MERGE_WIN));
     const replaced = prev.length - kept.length;
     sc.editAnchors = kept.concat(editAnchors).sort((x, y) => x.t - y.t || (x.no - y.no));
-    sc.editFrom = sc.editAnchors.length
-      ? Math.min(...sc.editAnchors.map(a => a.t))
-      : frame.t;
+    const allTs = sc.editAnchors.map(a => a.t).concat((sc.editBall || []).map(b2 => b2.t));
+    sc.editFrom = allTs.length ? Math.min(...allTs) : frame.t;
+    if (!sc.editAnchors.length) delete sc.editAnchors;
     return { scenario: sc, validation: S.validateScenario(match, sc),
-      moved: editAnchors.length, replaced, total: sc.editAnchors.length };
+      moved: editAnchors.length, ballMoved, replaced, total: (sc.editAnchors || []).length };
   };
 
   // #123: 時刻グループ単位の編集取り消し（±0.5s を同一グループとみなす）
   SCN.withoutEditGroup = (match, scenario, t) => {
     const S = R.subs;
     const next = S.fork(match, scenario);
-    const before = (next.editAnchors || []).length;
+    const before = (next.editAnchors || []).length + (next.editBall || []).length;
     next.editAnchors = (next.editAnchors || []).filter(a => Math.abs(a.t - t) > 0.5);
-    const removed = before - next.editAnchors.length;
-    if (next.editAnchors.length) next.editFrom = Math.min(...next.editAnchors.map(a => a.t));
-    else { delete next.editAnchors; delete next.editFrom; }
+    if (next.editBall) next.editBall = next.editBall.filter(b2 => Math.abs(b2.t - t) > 0.5);   // #127
+    const removed = before - next.editAnchors.length - (next.editBall || []).length;
+    const ts = next.editAnchors.map(a => a.t).concat((next.editBall || []).map(b2 => b2.t));
+    if (!next.editAnchors.length) delete next.editAnchors;
+    if (next.editBall && !next.editBall.length) delete next.editBall;
+    if (ts.length) next.editFrom = Math.min(...ts); else delete next.editFrom;
     return { scenario: next, validation: S.validateScenario(match, next), removed };
   };
 
@@ -6567,6 +6651,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     }
     if (scenario.outages) ov.outages = scenario.outages;      // #81
     if (scenario.shockGoals && scenario.shockGoals.length) ov.shockGoals = scenario.shockGoals;  // #80
+    if (scenario.editBall && scenario.editBall.length) ov.editBall = scenario.editBall;          // #127
+    if (scenario.removeGoals && scenario.removeGoals.length) ov.removeGoals = scenario.removeGoals; // #128
     const bundle = { v: 1, kind: "rpdx-bundle", match: match.meta.id, label: scenario.label || "", overrides: ov };
     // #91残: 未較正（テンプレ/カスタム）試合はロスター（名前/背番号/pos/能力値/XI/チーム名）を
     //   customMatch として同梱 → 再読込時に generic.createMatch で完全再構築できる。
@@ -6657,6 +6743,11 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (Array.isArray(ov.shockGoals) && ov.shockGoals.length)
       sc.shockGoals = ov.shockGoals.filter(x => x && keySet.has(x.team))
         .map(x => ({ t: +x.t, team: x.team, kind: x.kind || "deflection" }));
+    // #127/#128: ボール編集・減点
+    if (Array.isArray(ov.editBall) && ov.editBall.length)
+      sc.editBall = ov.editBall.map(b2 => ({ t: +b2.t, x: +b2.x, y: +b2.y }));
+    if (Array.isArray(ov.removeGoals) && ov.removeGoals.length)
+      sc.removeGoals = ov.removeGoals.filter(r2 => r2 && keySet.has(r2.team)).map(r2 => ({ team: r2.team, t: +r2.t }));
     // #81: 退場（未知チームは無視・検証は validateScenario 側）
     if (ov.outages && typeof ov.outages === "object") {
       const g = {};
@@ -9470,7 +9561,18 @@ self.onmessage = (e) => {
     const r = S.withShockGoal(App.match, sc, { t: S.minuteToT(App.match, min), team, kind });
     if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
     refreshScenario(r.scenario);
-    toast(`⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+    toast(kind === "manual"
+      ? `🧾 スコアを記帳 +1（${App.match.teams[team].name}・${min}'）— 実記録は不変（what-if）`
+      : `⚡ 仮定の外的失点を注入（${App.match.teams[team].name}・${min}'）— 実試合への断定ではありません`, GOLD);
+  });
+  // #128: 減点（記録/生成ゴールの手動取消）
+  $("#removeAdd") && ($("#removeAdd").onclick = () => {
+    const team = $("#shockTeam").value, min = +$("#removeMin").value;
+    const sc = forkIfActual();
+    const r = S.withRemoveGoal(App.match, sc, { team, t: S.minuteToT(App.match, min) });
+    if (!r.validation.ok) { toast(r.validation.errors[0], "var(--crit-t)"); return; }
+    refreshScenario(r.scenario);
+    toast(`➖ ${App.match.teams[team].name} の ${min}' 前後のゴールを取消（what-if・実記録は不変）`, GOLD);
   });
 
   $("#btnAdvise").onclick = () => {
@@ -9565,28 +9667,43 @@ self.onmessage = (e) => {
       const groups = new Map();
       for (const a of (sc.editAnchors || [])) {
         const gk = Math.round(a.t);
-        if (!groups.has(gk)) groups.set(gk, 0);
-        groups.set(gk, groups.get(gk) + 1);
+        const g = groups.get(gk) || { n: 0, ball: false };
+        g.n++; groups.set(gk, g);
       }
-      for (const [gt, n] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+      for (const b2 of (sc.editBall || [])) {                     // #127: ボール編集も同グループへ
+        const gk = Math.round(b2.t);
+        const g = groups.get(gk) || { n: 0, ball: false };
+        g.ball = true; groups.set(gk, g);
+      }
+      for (const [gt, g] of [...groups.entries()].sort((x, y) => x[0] - y[0])) {
+        const what = g.n ? `${g.n}人${g.ball ? "＋ボール" : ""}` : "ボール";
         rows.push({ t: gt, k: "E", i: gt, edit: true, html: `<span class="min num">${S.tToLabel(App.match, gt)}</span>` +
           `<span title="配置編集">✏</span>` +
-          `<span style="flex:1">配置編集（${n}人）— この時刻を通過</span>` });
+          `<span style="flex:1">配置編集（${what}）— この時刻を通過</span>` });
       }
     }
     // #80: 外的失点（仮定）行 — ⚡で明示・✕で取り消し
-    const SHOCK_JA = { "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
+    const SHOCK_JA = { "manual": "手動記帳", "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し", "deflection": "デフレクション",
       "keeper-error": "GKミス", "set-piece": "セットピース混戦", "own-goal": "オウンゴール" };
     for (let i = 0; i < (sc.shockGoals || []).length; i++) {
       const sg = sc.shockGoals[i];
       const T = App.match.teams[sg.team];
+      const manual = sg.kind === "manual";
       rows.push({ t: sg.t, k: sg.team, i, shock: true, html: `<span class="min num">${S.tToLabel(App.match, sg.t)}</span>` +
-        `<span title="外的失点（仮定）">⚡</span>` +
-        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に仮定ゴール（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
+        `<span title="${manual ? "スコア修正（記帳）" : "外的失点（仮定）"}">${manual ? "🧾" : "⚡"}</span>` +
+        `<span style="flex:1"><b>${T?.name ?? sg.team}</b> に${manual ? "得点を記帳" : "仮定ゴール"}（${SHOCK_JA[sg.kind] || sg.kind}）</span>` });
+    }
+    // #128: 減点行 — ➖ で明示・✕で取り消し
+    for (let i = 0; i < (sc.removeGoals || []).length; i++) {
+      const rg = sc.removeGoals[i];
+      const T = App.match.teams[rg.team];
+      rows.push({ t: rg.t, k: rg.team, i, rmgoal: true, html: `<span class="min num">${S.tToLabel(App.match, rg.t)}</span>` +
+        `<span title="ゴール取消（what-if）">➖</span>` +
+        `<span style="flex:1"><b>${T?.name ?? rg.team}</b> のゴールを取消（手動・実記録は不変）</span>` });
     }
     rows.sort((a, b) => a.t - b.t);
     $("#subList").innerHTML = rows.map(r =>
-      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
+      `<div class="srow">${r.html}${isSim() ? `<button class="btn" style="padding:1px 7px;font-size:10px" data-del="${r.outage ? "o" : r.shock ? "q" : r.rmgoal ? "r" : r.edit ? "e" : "s"}:${r.k}:${r.i}">✕</button>` : ""}</div>`
     ).join("");
     if (isSim()) {
       $("#subList").querySelectorAll("[data-del]").forEach(btn => {
@@ -9594,6 +9711,7 @@ self.onmessage = (e) => {
           const [kind, k, i] = btn.dataset.del.split(":");
           const r = kind === "o" ? S.withoutOutage(App.match, App.scenario, k, +i)
             : kind === "q" ? S.withoutShockGoal(App.match, App.scenario, +i)
+            : kind === "r" ? S.withoutRemoveGoal(App.match, App.scenario, +i)
             : kind === "e" ? globalThis.RPDX.scenlib.withoutEditGroup(App.match, App.scenario, +i)
             : S.withoutSub(App.match, App.scenario, k, +i);
           refreshScenario(r.scenario);
