@@ -110,11 +110,12 @@
     </div>
     <div id="subErrors"></div>
     <div id="subList"></div>
-    <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:5px" aria-label="外的失点の注入（inject hypothetical goal）">
-      <span class="eyebrow" style="width:100%">外的失点（仮定）— SHOCK</span>
-      <select id="shockTeam" class="sel" aria-label="失点するチーム（conceding team scores AGAINST — 得点側を選択）" style="max-width:96px"></select>
+    <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:5px" aria-label="スコア修正（manual score adjust what-if）">
+      <span class="eyebrow" style="width:100%">スコア修正（what-if）— SCORE</span>
+      <select id="shockTeam" class="sel" aria-label="対象チーム（得点/取消するチーム）" style="max-width:96px"></select>
       <input type="number" id="shockMin" class="num numin" min="2" max="100" value="60" aria-label="分（minute）" style="width:52px">
       <select id="shockKind" class="sel" aria-label="種別（kind）" style="flex:1;min-width:110px">
+        <option value="manual">手動（記帳）</option>
         <option value="ref-penalty">誤審PK</option>
         <option value="ref-offside-missed">オフサイド見逃し</option>
         <option value="deflection">デフレクション</option>
@@ -122,8 +123,11 @@
         <option value="set-piece">セットピース混戦</option>
         <option value="own-goal">オウンゴール</option>
       </select>
-      <button class="btn" id="shockAdd" aria-label="外的失点を注入（inject）">注入</button>
-      <div class="hint" style="width:100%">仮説の what-if — 実試合・実審判への断定ではありません（記録・得点者個人は不変/非特定）</div>
+      <button class="btn" id="shockAdd" aria-label="得点を追加（add goal）">＋追加</button>
+      <span class="vsep"></span>
+      <input type="number" id="removeMin" class="num numin" min="1" max="100" value="30" aria-label="取消す得点の分（minute of goal to remove）" style="width:52px">
+      <button class="btn" id="removeAdd" aria-label="得点を取消（remove goal）">−減点</button>
+      <div class="hint" style="width:100%">追加=そのチームに得点を記帳/仮定。減点=そのチームの指定分（±60秒）のゴールを取消。<b>実記録は不変</b>（what-if・得点者個人は非特定）</div>
     </div>
     <div class="row" style="margin-top:9px">
       <button class="btn gold" id="btnAdvise">AI提案 — TacticalSubAdvisor</button>

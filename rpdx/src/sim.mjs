@@ -90,6 +90,12 @@
         removed.push({ ev, reason: `攻撃脅威が実試合比 ${Math.round(ratio * 100)}% に低下`, ratio });
       }
     }
+    /* --- 1b) #128 減点（手動取消）— 記録/生成ゴールを removed/suppress 経路で取り消す --- */
+    for (const rg of (scenario.removeGoals || [])) {
+      const hit = match.events.find(ev => ev.type === "goal" && ev.team === rg.team && Math.abs(ev.t - rg.t) <= 60);
+      if (!hit || removed.some(r => r.ev === hit)) continue;
+      removed.push({ ev: hit, reason: "手動取消（what-if・実記録は不変）", ratio: 1, manual: true });
+    }
     for (const r of removed) {
       suppress.push({ t0: r.ev.t - 26, t1: restartAfter(match, r.ev.t) + 3 });
     }
@@ -188,6 +194,7 @@
        責任ある表現（不可侵）: これは仮説的 what-if であり、実試合・実審判に
        この事象があったという断定ではない（収録記録は不変）。得点者個人は特定しない。 */
     const SHOCK_LABEL = {
+      "manual": "手動スコア修正（記帳）",
       "ref-penalty": "誤審PK", "ref-offside-missed": "オフサイド見逃し",
       "deflection": "デフレクション", "keeper-error": "GKミス",
       "set-piece": "セットピースの混戦", "own-goal": "オウンゴール",
