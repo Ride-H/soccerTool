@@ -47,14 +47,3 @@ mkdirSync(join(root, "..", "dist"), { recursive: true });
 const out = join(root, "..", "dist", "rpdx.html");
 writeFileSync(out, html);
 console.log("built:", out, (html.length / 1024).toFixed(1) + "KB");
-
-// Artifact向け（claude.aiがhtml/head/bodyの骨格でラップするため本文のみ）
-const bodyStart = html.indexOf("<body>") + 6;
-const bodyEnd = html.indexOf("</body>");
-const artifact =
-  `<title>RPD-X | 日本 × ブラジル 2026 — D²-Field 戦術解析</title>\n` +
-  `<style>\n${css}\n</style>\n` +
-  html.slice(bodyStart, bodyEnd);
-const out2 = join(root, "..", "dist", "rpdx_artifact.html");
-writeFileSync(out2, artifact);
-console.log("built:", out2, (artifact.length / 1024).toFixed(1) + "KB");
