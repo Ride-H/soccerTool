@@ -34,7 +34,7 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 再ビルド / テスト（Node.js のみ・パッケージ不要）:
 
 ```bash
-node rpdx/build.mjs                 # → dist/rpdx.html + dist/rpdx_artifact.html
+node rpdx/build.mjs                 # → dist/rpdx.html（配布用単一ファイル）
 node --test rpdx/test/*.test.mjs    # 357テスト（データ整合・速度上限・規則・決定論・結果再構成・PSY・チェーン品質・リアリズム・GK幾何・オフサイドライン・ボール物理・UQ/フィルタ/生理/接触・形メトリクス・レイヤレジストリ・i18n辞書・ポリシー探索）
 ```
 
@@ -447,7 +447,7 @@ rpdx/test/   357テスト（engine / danger / data / subs / sim / lineup / gener
              pressing / golden / oracle / property）
 rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
-dist/        rpdx.html（配布用単一ファイル）/ rpdx_artifact.html（claude.ai Artifact用）
+dist/        rpdx.html（配布用単一ファイル・ビルド生成物）
 ```
 
 すべて `globalThis.RPDX` 名前空間方式（import/export不使用）で、`build.mjs` が連結して単一HTMLに焼き込みます。
