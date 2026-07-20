@@ -25,6 +25,18 @@
    "carrier": "6ea305e8",
    "score": "ARG:4,EGY:2"
   },
+  "wc2026-final-esp-arg|actual": {
+   "pos": "e2d254e8",
+   "ball": "f28fb6e8",
+   "carrier": "8902d67b",
+   "score": "ESP:1,ARG:0"
+  },
+  "wc2026-final-esp-arg|whatif-cancel-last-sub": {
+   "pos": "d3414b07",
+   "ball": "b675fa20",
+   "carrier": "36d5d341",
+   "score": "ESP:1,ARG:1"
+  },
   "wc2026-sf-fra-esp|actual": {
    "pos": "edc08f21",
    "ball": "d0a2c3a5",

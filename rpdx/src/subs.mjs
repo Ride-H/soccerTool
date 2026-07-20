@@ -23,19 +23,24 @@
 
   /* ------------------------- 分 ⇄ 実プレー秒 ------------------------- */
   S.minuteToT = (match, min) => {
-    const h1 = match.time.h1, h2 = match.time.h2;
+    const h1 = match.time.h1, h2 = match.time.h2, h3 = match.time.h3, h4 = match.time.h4;
     if (min <= 45) return clamp(min * 60, 0, h1.end);
     if (min <= 45 + h1.added) return clamp(2700 + (min - 45) * 60, 0, h1.end); // 45+X
-    return clamp(h2.start + (min - 45) * 60, h2.start, h2.end);
+    if (!h3 || min <= 90 + (h2.added || 0)) return clamp(h2.start + (min - 45) * 60, h2.start, h2.end);
+    // 延長（#141）: 91..105 → h3 / 106.. → h4
+    if (!h4 || min <= 105 + (h3.added || 0)) return clamp(h3.start + (min - 90) * 60, h3.start, h3.end);
+    return clamp(h4.start + (min - 105) * 60, h4.start, h4.end);
   };
   S.tToMinute = (match, t) => {
     const c = E.clockAt(match, t);
     return Math.max(1, Math.ceil(c.clock / 60)); // 66:00 → 66'（公式記録の慣習）
   };
+  const PERIOD_BASE = [0, 2700, 5400, 6300, 7200];
+  const PERIOD_MIN = [0, 45, 90, 105, 120];
   S.tToLabel = (match, t) => {
     const c = E.clockAt(match, t);
-    const base = c.half === 1 ? 2700 : 5400;
-    if (c.clock > base) return `${c.half === 1 ? 45 : 90}+${Math.floor((c.clock - base - 0.001) / 60) + 1}'`;
+    const base = PERIOD_BASE[c.half];
+    if (c.clock > base) return `${PERIOD_MIN[c.half]}+${Math.floor((c.clock - base - 0.001) / 60) + 1}'`;
     return `${Math.max(1, Math.ceil(c.clock / 60))}'`;
   };
 
@@ -52,13 +57,26 @@
       const subs = [...(plan[team] || [])].sort((a, b) => a.t - b.t);
       const err = (m) => errors.push(`[${T.name}] ${m}`);
 
+      // #141: 延長のある試合（time.h3 あり）は 6人・4窓（延長窓≤1）— 競技規則準拠。
+      //   通常試合は従来どおり 5人・3窓（挙動ビット不変）。
+      const hasET = !!match.time.h3;
+      const maxSubs = hasET ? S.MAX_SUBS + 1 : S.MAX_SUBS;
       if (starters.size !== 11) err(`スタメン ${starters.size}人 ≠ 11`);
-      if (subs.length > S.MAX_SUBS) err(`交代人数 ${subs.length} が上限${S.MAX_SUBS}を超過`);
+      if (subs.length > maxSubs) err(`交代人数 ${subs.length} が上限${maxSubs}を超過`);
 
-      // 交代窓: 同時刻グループ = 1窓。HT（後半開始時 t==h2.start）はカウント外
-      const windows = new Set();
-      for (const s of subs) if (s.t !== match.time.h2.start) windows.add(Math.round(s.t));
-      if (windows.size > S.MAX_WINDOWS) err(`交代窓 ${windows.size} が上限${S.MAX_WINDOWS}を超過（HTは非カウント）`);
+      // 交代窓: 同時刻グループ = 1窓。HT（t==h2.start）・延長ブレーク（t==h3/h4.start）はカウント外
+      const breakTs = [match.time.h2.start];
+      if (match.time.h3) breakTs.push(match.time.h3.start);
+      if (match.time.h4) breakTs.push(match.time.h4.start);
+      const windows = new Set(), etWindows = new Set();
+      for (const s of subs) {
+        if (breakTs.includes(s.t)) continue;
+        windows.add(Math.round(s.t));
+        if (hasET && s.t >= match.time.h3.start) etWindows.add(Math.round(s.t));
+      }
+      const regWindows = windows.size - etWindows.size;
+      if (regWindows > S.MAX_WINDOWS) err(`交代窓 ${regWindows} が上限${S.MAX_WINDOWS}を超過（HTは非カウント）`);
+      if (etWindows.size > 1) err(`延長の交代窓 ${etWindows.size} が上限1を超過（ブレークは非カウント）`);
 
       const range = E.playedRange(match);
       const onPitch = new Set(starters);
@@ -77,7 +95,7 @@
       if (onPitch.size !== 11) err(`最終人数 ${onPitch.size} ≠ 11`);
       let gkCount = 0; for (const no of onPitch) if (isGK(no)) gkCount++;
       if (gkCount !== 1) err(`GK人数 ${gkCount} ≠ 1`);
-      info[team] = { count: subs.length, windows: windows.size, remaining: S.MAX_SUBS - subs.length };
+      info[team] = { count: subs.length, windows: windows.size, remaining: maxSubs - subs.length };
     }
     return { ok: errors.length === 0, errors, info };
   };
@@ -270,7 +288,13 @@
   S.fromActual = (match, label) => {
     const subs = {};
     for (const k of E.teamKeys(match)) subs[k] = (match.subsActual[k] || []).map(s => ({ t: s.t, out: s.out, in: s.in }));
-    return S.createScenario(match, label, { subs });
+    const base = { subs };
+    // #141: 実試合の退場も what-if の出発点に引き継ぐ（取り消しは編集で可能）
+    if (match.outagesActual) {
+      base.outages = {};
+      for (const k of Object.keys(match.outagesActual)) base.outages[k] = match.outagesActual[k].map(o => ({ ...o }));
+    }
+    return S.createScenario(match, label, base);
   };
   S.fork = (match, scenario, label) =>
     S.createScenario(match, label || scenario.label, scenario);

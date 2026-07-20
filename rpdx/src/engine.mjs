@@ -22,19 +22,40 @@
   const clamp = N.clamp, lerp = N.lerp;
 
   /* ------------------------------ 時間軸 ------------------------------ */
-  E.playedRange = (match) => ({ t0: match.time.h1.start, t1: match.time.h2.end, ht: match.time.h1.end });
-  E.halfOf = (match, t) => (t < match.time.h1.end ? 1 : 2);
-  // 表示時計: {half, clockSec, base, added, disp}
+  // 延長対応（#141）: time.h3/h4（延長前後半）は任意。無い試合は完全に従来経路。
+  E.playedRange = (match) => ({
+    t0: match.time.h1.start,
+    t1: (match.time.h4 || match.time.h3 || match.time.h2).end,
+    ht: match.time.h1.end,
+  });
+  // 方向半（1=前半エンド / 2=後半エンド）。延長は「延長前半=後半と同エンド・
+  // 延長後半=前半と同エンド（エンド交代）」のモデル仮定で 1/2 へ写像する —
+  // dir/kickoffBy の参照側（h1/h2キー）は全呼び出し箇所で不変のまま延長に対応する。
+  E.halfOf = (match, t) => {
+    if (t < match.time.h1.end) return 1;
+    if (match.time.h4 && t >= match.time.h4.start) return 1;
+    return 2;
+  };
+  // 表示時計: {half: ピリオド(1..4), clock, disp}（105+X / 120+X 表示に対応）
+  const PERIOD_CAP = [0, 2700, 5400, 6300, 7200];
+  const PERIOD_MIN = [0, 45, 90, 105, 120];
+  E.periodOf = (match, t) => {
+    const T = match.time;
+    if (T.h4 && t >= T.h4.start) return 4;
+    if (T.h3 && t >= T.h3.start) return 3;
+    return t < T.h1.end ? 1 : 2;
+  };
   E.clockAt = (match, t) => {
-    const h = E.halfOf(match, t);
-    const seg = h === 1 ? match.time.h1 : match.time.h2;
+    const T = match.time;
+    const h = E.periodOf(match, t);
+    const seg = h === 1 ? T.h1 : h === 2 ? T.h2 : h === 3 ? T.h3 : T.h4;
     const clock = seg.clock0 + (t - seg.start);
-    const baseCap = h === 1 ? 2700 : 5400;
+    const baseCap = PERIOD_CAP[h];
     const mm = Math.floor(clock / 60), ss = Math.floor(clock % 60);
     let disp;
     if (clock >= baseCap) {
       const am = Math.floor((clock - baseCap) / 60), as = Math.floor((clock - baseCap) % 60);
-      disp = `${h === 1 ? 45 : 90}+${am}:${String(as).padStart(2, "0")}`;
+      disp = `${PERIOD_MIN[h]}+${am}:${String(as).padStart(2, "0")}`;
     } else {
       disp = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
     }
@@ -72,7 +93,15 @@
   E.actualScenario = (match) => {
     const subs = {};
     for (const k of E.teamKeys(match)) subs[k] = (match.subsActual[k] || []).map(s => ({ ...s }));
-    return { id: "actual", label: "実試合", actual: true, subs, lineup: null, tweaks: null };
+    const sc = { id: "actual", label: "実試合", actual: true, subs, lineup: null, tweaks: null };
+    // #141: 実試合の退場（レッドカード等）— #81 outages と同一経路で
+    // 10人リシェイプ・在場終了・退場動線・表示に反映する。未収録試合は従来どおり。
+    if (match.outagesActual) {
+      sc.outages = {};
+      for (const k of Object.keys(match.outagesActual))
+        sc.outages[k] = match.outagesActual[k].map(o => ({ ...o }));
+    }
+    return sc;
   };
   // 内容ベースのハッシュ: 実試合と「実試合と同一内容のシナリオ」は同じ世界になる
   // （同一 subs/lineup/tweaks → 同一チェーン・同一危険度 → 結果不変が構成的に成立）
@@ -188,6 +217,11 @@
   // #81: 数的不利（退場/交代枠なし負傷）— team別 sorted リスト
   E.outagesOf = (match, scenario, team) =>
     ((scenario && scenario.outages && scenario.outages[team]) || []);
+
+  // #141: 時刻 t におけるフィールド上人数（退場を反映）= 11 − その時点までの退場者数。
+  //   退場が無い試合/シナリオでは常に 11（従来の不変量）。テスト・UI の人数検証で使用。
+  E.onPitchCount = (match, scenario, team, t) =>
+    11 - E.outagesOf(match, scenario, team).filter(o => o.t <= t).length;
 
   // #81: 退場後の10人リシェイプ（役割適合の貪欲再割当・決定論・メモ化）
   //   subs.withFormation と同じ採点式（共有 F.tagsOfPos）。GKは常にGKスロットへ。
@@ -426,6 +460,13 @@
      再帰を避ける（chainBuilding と同型）。lineCache は 0.25s バケットでキャッシュ。 */
   let lineComputing = false;
   const lineCache = new Map();
+  // 上限は「1セッションで評価しうる (試合×シナリオ×時刻×チーム×L/O) 数」に十分な余裕を持たせる。
+  // #141: 収録試合が4本（延長=長尺の決勝を含む）になり、複数試合を同一プロセスで走らせる
+  // プロパティ検証では旧上限6000を評価途中に跨いで clear が発生し、ライン合算値が
+  // 退避タイミングに依存して ~数mm 揺れた（スクラブ順序非依存の破れ）。上限を上げて
+  // 通常のマルチ試合セッション中は退避しない＝退避しない golden 経路と同一値に揃える
+  // （golden はこの規模で退避しないため不変・メモリは有界）。
+  const LINE_CACHE_MAX = 60000;
   const LINE_ROLES = { CB: 1, FB: 1, WB: 1 };
   const LINE_SYNC = 0.34;                  // 最終ラインを合意 x へ引き寄せる重み（同期昇降）
 
@@ -448,7 +489,7 @@
       }
     } finally { lineComputing = false; }
     const out = { lineX: nn ? sum / nn : -dir * 30, dir, count: nn };
-    if (lineCache.size > 6000) lineCache.clear();
+    if (lineCache.size > LINE_CACHE_MAX) lineCache.clear();
     lineCache.set(key, out);
     return out;
   };
@@ -477,7 +518,7 @@
     const ballDepth = dir * E.ballSlowAt(match, t).x;
     // オフサイド境界: 「ボールと2nd-lastの両方より前」＝ 深い方（max）を越えるとオフサイド
     const out = { offsideDepth: Math.max(secondLast, ballDepth), dir };
-    if (lineCache.size > 6000) lineCache.clear();
+    if (lineCache.size > LINE_CACHE_MAX) lineCache.clear();
     lineCache.set(key, out);
     return out;
   };
@@ -518,11 +559,15 @@
     const keys = E.teamKeys(match);
     const plus = match.possessionPlus || keys[0];
     const minus = keys.find(k => k !== plus);
-    // セグメント境界を跨げない時刻（交代・フェーズ切替・ハーフ・保持台本の境界）
+    // セグメント境界を跨げない時刻（交代・フェーズ切替・ハーフ・延長・退場・保持台本の境界）
     const cuts = [range.ht];
+    if (match.time.h3) cuts.push(match.time.h3.start);
+    if (match.time.h4) cuts.push(match.time.h4.start);
     for (const k of keys) {
       for (const s of scenario.subs[k] || []) cuts.push(s.t);
       for (const ph of E.phasesOf(match, scenario, k)) if (ph.from > 0) cuts.push(ph.from);
+      // 退場者がフライト/ホールドを跨いで保持者に残らないよう境界化（#141）
+      for (const o of E.outagesOf(match, scenario, k)) cuts.push(o.t);
     }
     if (match.chainForce) for (const w of match.chainForce) { cuts.push(w.t0); cuts.push(w.t1); }
     cuts.sort((a, b) => a - b);

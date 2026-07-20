@@ -28,7 +28,8 @@ for (const m of Object.values(MATCHES)) {
         const st = E.stateAt(m, sc, t);
         for (const team of E.teamKeys(m)) {
           const on = st.players.filter(p => p.onPitch && p.team === team);
-          if (on.length !== 11) bad.push(`t=${t.toFixed(0)} ${team} 人数=${on.length}`);
+          const want = E.onPitchCount(m, sc, team, t);   // #141: 退場を反映（無ければ常に11）
+          if (on.length !== want) bad.push(`t=${t.toFixed(0)} ${team} 人数=${on.length}(期待${want})`);
           const gks = on.filter(p => p.role === "GK");
           if (gks.length !== 1) bad.push(`t=${t.toFixed(0)} ${team} GK=${gks.length}`);
           for (const p of on) {
@@ -82,6 +83,7 @@ for (const m of Object.values(MATCHES)) {
         if (!c || !c.seg || !c.seg.restart || c.seg.rdelay < 1) continue;
         const tEnd = c.seg.tf + c.seg.rdelay - 0.2;
         if (Math.abs(t - tEnd) > 0.6) continue;                 // 窓末尾（到着後）のみ
+        if (t >= c.seg.tf + c.seg.rdelay) continue;             // 解放後は拾わない（ピン中の位置のみ検証）
         const b = E.ballAt(m, sc, t);
         if (b.free < 0.9) continue;                             // 実試合アンカー窓は対象外
         const kind = c.seg.restart; seen[kind] = (seen[kind] || 0) + 1;
