@@ -1338,8 +1338,15 @@
           useFlat(M4.trs(px, 0.05, pz, 2.6, 1, 2.6), [0.99, 0.93, 0.72], { alpha: 0.85 * pulse * alpha, ring: 0.82, soft: 0.12 });
           drawMesh(mQuad);
         }
+        // #133: 編集モードの掴み対象ハイライト（明るいシアン・脈動 — 掴んでいる対象を明示）
+        const es = scene.editSel;
+        if (scene.editMode && es && es.kind === "player" && es.team === p.team && es.no === p.no) {
+          const pulse = 0.6 + 0.32 * Math.sin(time * 6.5);
+          useFlat(M4.trs(px, 0.06, pz, 5.2, 1, 5.2), [0.32, 0.95, 1], { alpha: 0.95 * pulse, ring: 0.8, soft: 0.08 });
+          drawMesh(mQuad);
+        }
         // 選択/ホバーリング
-        if (selected && selected.team === p.team && selected.no === p.no) {
+        else if (selected && selected.team === p.team && selected.no === p.no) {
           const pulse = 0.72 + 0.2 * Math.sin(time * 4);
           useFlat(M4.trs(px, 0.05, pz, 4.4, 1, 4.4), [1, 1, 1], { alpha: 0.9 * pulse, ring: 0.78, soft: 0.08 });
           drawMesh(mQuad);
@@ -1384,6 +1391,14 @@
       gl.depthMask(false);
       useFlat(M4.trs(b.x, 0.015, bz, 1.0 + b.z * 0.5, 1, 1.0 + b.z * 0.5), [0, 0, 0], { alpha: clamp(0.42 - b.z * 0.06, 0.08, 0.42), soft: 0.6 });
       drawMesh(mQuad);
+      // #133: 編集モードのボール掴みアフォーダンス（掴めることを明示・選択中は明るく脈動）
+      if (scene.editMode) {
+        const bSel = scene.editSel && scene.editSel.kind === "ball";
+        const pulse = 0.5 + 0.32 * Math.sin(time * (bSel ? 6.5 : 3.2));
+        useFlat(M4.trs(b.x, 0.055, bz, bSel ? 4.2 : 2.9, 1, bSel ? 4.2 : 2.9),
+          bSel ? [0.32, 0.95, 1] : [0.98, 0.86, 0.5], { alpha: (bSel ? 0.95 : 0.5) * pulse, ring: 0.8, soft: 0.1 });
+        drawMesh(mQuad);
+      }
       gl.depthMask(true);
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });
