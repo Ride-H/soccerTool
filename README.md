@@ -452,10 +452,10 @@ API: `RPDX.generic.createMatch(cfg)`（`rpdx/src/generic.mjs`）。
 rpdx/src/    noise / formations / data_match*(検証済データ×2) / engine / danger / subs / sim /
              psy / duel / physio / filter / uq / tactics / opponent / scenlib / policy / layers / generic
 rpdx/app/    render3d(自作WebGL2・人型/粒子/半透明) / ui / app.css / index.template.html
-rpdx/test/   357テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
-             argegy / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
-             pressing / golden / oracle / property）
-rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）
+rpdx/test/   427テスト（engine / danger / data / subs / sim / lineup / generic / psy / packs /
+             argegy / esparg / binding / insight / chain / realism / modules / ballphysics / gk / offsideline /
+             pressing / golden / oracle / property / shape）
+rpdx/tools/  batch.mjs（バッチ・シミュレーションCLI）/ bench.mjs（ベンチマーク）/ shape-probe.mjs（チーム形状の妥当性計測 — `node rpdx/tools/shape-probe.mjs`）
 docs/        MATCH_PACKS.md（試合追加手順書）/ RESPONSIBLE_ANALYSIS.md（責任ある解析表現ガイドライン）
 dist/        rpdx.html（配布用単一ファイル・ビルド生成物）
 ```
