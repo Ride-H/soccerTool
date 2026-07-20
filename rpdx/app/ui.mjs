@@ -32,7 +32,7 @@
     zoneView: "BOTH",
     camPreset: "broadcast",   // #134: 現在のカメラプリセット（リプレイ後の復帰先）
     selected: null, hover: null,
-    editFrame: null, editSel: null,
+    editFrame: null, editSel: null, editHist: null,   // #133: 編集アンドゥ/リドゥ履歴
     rosterTab: null,
     pickOut: null, pickIn: null,
     editorSel: null, editorDrag: null,
@@ -1957,9 +1957,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       renderer.editMode = true;
       renderer.setPreset("tactical");                 // 俯瞰＝タップ精度が最良
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === "tactical"));
+      resetEditHist();                                // #133: 履歴を初期化
       renderEditAnalysis();
     } else {
-      App.editFrame = null; App.editSel = null;
+      App.editFrame = null; App.editSel = null; App.editHist = null;
       renderer.editMode = false;
     }
     $("#btnEdit") && $("#btnEdit").classList.toggle("on", on);
@@ -1998,39 +1999,132 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     } catch (e) { console.warn("save failed", e); }
     $("#curveStatus") && ($("#curveStatus").textContent = "フレーム保存 (" + json.length + "B)");
   });
+  // #133: 整列/アンドゥ ツール（遅延アロー＝下方で定義される const を参照するため TDZ を回避）
+  $("#editUndo") && ($("#editUndo").onclick = () => undoEdit());
+  $("#editRedo") && ($("#editRedo").onclick = () => redoEdit());
+  $("#editMirror") && ($("#editMirror").onclick = () => mirrorTeam());
+  $("#editAlign") && ($("#editAlign").onclick = () => alignBackline());
 
-  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→地面交点へ移動
+  // 編集ドラッグ: pick半径内の最寄りエンティティ（選手/ボール/審判）をタップ→選択→地面交点へ移動。
+  // #133: 選択は永続（ドラッグ後も保持＝ナッジ/整列の対象）・タッチは半径拡大・履歴でアンドゥ/リドゥ。
   const glcv = $("#gl");
+  // タッチ端末は掴み半径を広げる（画面倍率連動の近似）。マウスは従来精度。
+  const grabRadius = () => (window.matchMedia && window.matchMedia("(pointer:coarse)").matches ? 5.5 : 3.7);
   const editNearest = (g) => {
     if (!App.editFrame || !g) return null;
-    let best = null, bd = 3.5;
+    let best = null, bd = grabRadius();
     for (const p of App.editFrame.players) {
       if (!p.onPitch) continue;
       const d = Math.hypot(p.x - g.x, p.y - g.y);
       if (d < bd) { bd = d; best = p; }
     }
     const b = App.editFrame.ball;
-    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd) { bd = d; best = b; } }
+    if (b) { const d = Math.hypot(b.x - g.x, b.y - g.y); if (d < bd + 0.8) { bd = d; best = b; } }  // ボールは少し掴みやすく
     for (const rf of App.editFrame.referees) {
       const d = Math.hypot(rf.x - g.x, rf.y - g.y);
       if (d < bd) { bd = d; best = rf; }
     }
     return best;
   };
+  // 選択エンティティの記述（renderer ハイライト用）
+  const editSelDesc = () => {
+    const s = App.editSel; if (!s || !App.editFrame) return null;
+    if (s === App.editFrame.ball) return { kind: "ball" };
+    if (App.editFrame.players.includes(s)) return { kind: "player", team: s.team, no: s.no };
+    const ri = App.editFrame.referees.indexOf(s);
+    if (ri >= 0) return { kind: "ref", idx: ri };
+    return null;
+  };
+  // ---- 編集履歴（アンドゥ/リドゥ・#133）: 位置スナップショットのスタック ----
+  const snapFrame = () => {
+    if (!App.editFrame) return null;
+    return {
+      players: App.editFrame.players.map(p => [p.team, p.no, p.x, p.y]),
+      ball: [App.editFrame.ball.x, App.editFrame.ball.y],
+      refs: App.editFrame.referees.map(r => [r.x, r.y]),
+    };
+  };
+  const applySnap = (s) => {
+    if (!s || !App.editFrame) return;
+    for (const [team, no, x, y] of s.players) {
+      const p = App.editFrame.players.find(q => q.team === team && q.no === no);
+      if (p) { p.x = x; p.y = y; }
+    }
+    App.editFrame.ball.x = s.ball[0]; App.editFrame.ball.y = s.ball[1];
+    s.refs.forEach((r, i) => { if (App.editFrame.referees[i]) { App.editFrame.referees[i].x = r[0]; App.editFrame.referees[i].y = r[1]; } });
+    App.editFrame.edited = true;
+    renderEditAnalysis();
+    updateEditButtons();
+  };
+  const resetEditHist = () => { App.editHist = { stack: [snapFrame()], idx: 0 }; updateEditButtons(); };
+  const pushEditHist = () => {
+    if (!App.editHist) { resetEditHist(); return; }
+    const h = App.editHist;
+    h.stack = h.stack.slice(0, h.idx + 1);   // リドゥ枝を破棄
+    h.stack.push(snapFrame());
+    if (h.stack.length > 40) h.stack.shift(); else h.idx++;
+    updateEditButtons();
+  };
+  const undoEdit = () => { const h = App.editHist; if (!h || h.idx <= 0) return; h.idx--; applySnap(h.stack[h.idx]); };
+  const redoEdit = () => { const h = App.editHist; if (!h || h.idx >= h.stack.length - 1) return; h.idx++; applySnap(h.stack[h.idx]); };
+  const updateEditButtons = () => {
+    const h = App.editHist;
+    const u = $("#editUndo"), r = $("#editRedo");
+    if (u) u.disabled = !h || h.idx <= 0;
+    if (r) r.disabled = !h || h.idx >= h.stack.length - 1;
+  };
+
+  // ---- 整列ツール（#133）: 選択選手のチームに対する幾何ヘルパ。結果は editFrame 位置＝editAnchors に落ちる ----
+  const selTeamOutfield = () => {
+    const d = editSelDesc();
+    const team = d && d.kind === "player" ? d.team : (App.editSel && App.editSel.team) || teamOrder()[0];
+    return App.editFrame.players.filter(p => p.onPitch && p.team === team && p.role !== "GK");
+  };
+  const mirrorTeam = () => {                      // 左右（幅方向 y）ミラー
+    if (!App.editFrame) return;
+    for (const p of selTeamOutfield()) p.y = -p.y;
+    App.editFrame.edited = true; pushEditHist(); renderEditAnalysis();
+  };
+  const alignBackline = () => {                   // 最終ライン（自ゴール側の低位3人）を平均 x へ一直線
+    if (!App.editFrame) return;
+    const half = App.editFrame.half || 1;
+    const ps = selTeamOutfield();
+    if (ps.length < 3) return;
+    const team = ps[0].team;
+    const dir = (App.match.dir && App.match.dir[team]) ? App.match.dir[team][half === 1 ? "h1" : "h2"] : 1;
+    const sorted = [...ps].sort((a, b) => dir * a.x - dir * b.x);   // 自ゴール側から昇順
+    const back = sorted.slice(0, Math.min(4, sorted.length));
+    const avg = back.reduce((s, p) => s + p.x, 0) / back.length;
+    for (const p of back) p.x = avg;
+    App.editFrame.edited = true; pushEditHist(); renderEditAnalysis();
+  };
+  const nudgeSel = (dx, dy) => {
+    if (!App.editFrame || !App.editSel) return;
+    App.editSel.x = clamp(App.editSel.x + dx, -52.5, 52.5);
+    App.editSel.y = clamp(App.editSel.y + dy, -34, 34);
+    App.editFrame.edited = true; pushEditHist(); renderEditAnalysis();
+  };
+
+  let editDragging = false, editDragMoved = false;
   glcv.addEventListener("pointerdown", (e) => {
     if (!App.editFrame) return;
     const g = renderer.groundAt(e.clientX, e.clientY);
-    App.editSel = editNearest(g);
-    if (App.editSel) { try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+    const hit = editNearest(g);
+    if (hit) { App.editSel = hit; editDragging = true; editDragMoved = false; try { glcv.setPointerCapture(e.pointerId); } catch (_) {} }
+    else { App.editSel = null; }   // 空タップで選択解除
+    updateEditButtons();
   });
   glcv.addEventListener("pointermove", (e) => {
-    if (!App.editFrame || !App.editSel) return;
+    if (!App.editFrame || !App.editSel || !editDragging) return;
     const g = renderer.groundAt(e.clientX, e.clientY);
     if (!g) return;
     App.editSel.x = g.x; App.editSel.y = g.y;
-    App.editFrame.edited = true;
+    App.editFrame.edited = true; editDragMoved = true;
   });
-  glcv.addEventListener("pointerup", () => { if (App.editSel) renderEditAnalysis(); App.editSel = null; });
+  glcv.addEventListener("pointerup", () => {
+    if (editDragging && editDragMoved) { pushEditHist(); renderEditAnalysis(); }
+    editDragging = false;   // 選択は保持（ナッジ/整列の対象）
+  });
   if (urlq.get("edit") === "1") setTimeout(() => setEditMode(true), 60);   // ヘッドレス検証用
   const FIELD_MODES = [["particles", "粒子"], ["surface", "面"], ["off", "OFF"]];
   const cycleFieldMode = () => {
@@ -2113,6 +2207,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+    // #133: 編集モードのアンドゥ/リドゥ・ナッジ（矢印は時刻スクラブより優先）
+    if (App.editFrame) {
+      const z = (e.ctrlKey || e.metaKey) && e.code === "KeyZ";
+      if (z && e.shiftKey) { e.preventDefault(); redoEdit(); return; }
+      if (z) { e.preventDefault(); undoEdit(); return; }
+      if (App.editSel && e.code.startsWith("Arrow")) {
+        e.preventDefault();
+        const s = e.shiftKey ? 1.0 : 0.5;     // Shift で 1m・既定 0.5m
+        if (e.code === "ArrowLeft") nudgeSel(0, -s);
+        else if (e.code === "ArrowRight") nudgeSel(0, s);
+        else if (e.code === "ArrowUp") nudgeSel(s, 0);
+        else if (e.code === "ArrowDown") nudgeSel(-s, 0);
+        return;
+      }
+    }
     if (e.code === "Space") { e.preventDefault(); setPlaying(!App.playing); }
     else if (e.code === "ArrowRight") App.t = Math.min(App.t + 15, E.playedRange(App.match).t1);
     else if (e.code === "ArrowLeft") App.t = Math.max(App.t - 15, 0);
@@ -2378,6 +2487,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       options: App.options,
       selected: App.selected,
       hover: App.hover,
+      editMode: !!App.editFrame, editSel: editSelDesc(),   // #133: 掴み対象のハイライト・ボールアフォーダンス
       contribMap, ballTrail, playerTrail,
       speedLabels, psyAura,
       hotZone: App.hotZone,

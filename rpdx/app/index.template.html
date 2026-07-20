@@ -35,12 +35,16 @@
 
 <!-- ビューバー -->
 <div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
-  <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
+  <span class="chip est" title="3Dビュー=この瞬間の実座標を掴んで動かす／ミニピッチ(左)=作戦盤でスロットを組む">3D＝実座標エディタ（掴んで移動・矢印で微調整）</span>
+  <button class="btn" id="editUndo" aria-label="編集を元に戻す（undo・Ctrl+Z）" title="元に戻す (Ctrl+Z)" disabled>↶</button>
+  <button class="btn" id="editRedo" aria-label="編集をやり直す（redo・Shift+Ctrl+Z）" title="やり直し (Shift+Ctrl+Z)" disabled>↷</button>
+  <button class="btn" id="editMirror" aria-label="選択チームを左右反転（mirror）" title="選択チームを左右反転">左右反転</button>
+  <button class="btn" id="editAlign" aria-label="バックラインを一直線に整列（align backline）" title="最終ラインを一直線に">バックライン整列</button>
   <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
   <button class="btn" id="editReplay" aria-label="この配置から再生（re-synthesize forward）">この配置から再生</button>
   <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
   <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
-  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:640px"></span>
+  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:560px"></span>
 </div>
 <div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
@@ -82,7 +86,7 @@
     <div id="outcomeBody"></div>
   </section>
   <section class="panel" id="formationEditor">
-    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span></h3>
+    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span> <span class="eyebrow" style="opacity:.7" title="ミニピッチ=作戦盤（スロット単位の陣形設計）。この瞬間の実座標編集は「編集」ボタン→3Dビューで。">作戦盤</span></h3>
     <div class="row">
       <select id="fmShape" class="sel" aria-label="フォーメーションを選択（select formation）"></select>
       <span class="eyebrow" data-i18n="分">分</span>
