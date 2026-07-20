@@ -26,8 +26,11 @@
       fieldMode: "particles",     // particles | surface | off
       zones: true, solidPlayers: false,
       speedLabels: true, psy: true,
+      kitNumbers: true, goalReplay: true,   // #134: 描画リアル感v1（背番号・ゴールリプレイ）
     },
+    replay: null,   // #134: ゴール・スロー・リプレイ制御 {endT, restoreT, restoreSpeed, restoreCam}
     zoneView: "BOTH",
+    camPreset: "broadcast",   // #134: 現在のカメラプリセット（リプレイ後の復帰先）
     selected: null, hover: null,
     editFrame: null, editSel: null,
     rosterTab: null,
@@ -222,6 +225,7 @@ self.onmessage = (e) => {
     en: {
       "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "背番号": "Kit №", "リプレイ": "Replay",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
       "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
       "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
@@ -280,6 +284,7 @@ self.onmessage = (e) => {
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
+      App.camPreset = urlq.get("cam");
       renderer.setPreset(urlq.get("cam"), true);
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === urlq.get("cam")));
     }
@@ -1562,12 +1567,34 @@ self.onmessage = (e) => {
     $("#toasts").appendChild(d);
     setTimeout(() => { d.style.opacity = "0"; d.style.transition = "opacity .4s"; setTimeout(() => d.remove(), 450); }, 3800);
   };
+  // #134: ゴール・スロー・リプレイ — 得点通過時に ~5秒巻き戻してスローでゴール裏カメラ再生。
+  // 既存 stateAt/アンカーのみ参照＝結果・再現性は不変（純カメラ+時刻演出）。編集フレーム中/多重発火は抑止。
+  const maybeGoalReplay = (ev) => {
+    if (!App.options.goalReplay || !App.playing || App.replay || App.editFrame) return;
+    const st = E.stateAt(App.match, activeScenario(), ev.t);
+    const side = st.ball.x >= 0 ? 1 : -1;
+    App.replay = { endT: Math.min(ev.t + 2.6, E.playedRange(App.match).t1), restoreT: App.t, restoreSpeed: App.speed, restoreCam: App.camPreset || "broadcast" };
+    App.t = Math.max(0, ev.t - 5);      // 巻き戻し（大ジャンプ＝checkCrossings は t1-t0<=0 で発火せず）
+    App.speed = 1.2;                     // スロー（通常12x → 1.2x）
+    renderer.replayCam(side, false);
+    const badge = $("#replayBadge"); if (badge) badge.style.display = "";
+  };
+  const endGoalReplay = () => {
+    if (!App.replay) return;
+    App.t = App.replay.restoreT; App.speed = App.replay.restoreSpeed;
+    renderer.setPreset(App.replay.restoreCam, false);
+    App.replay = null;
+    const badge = $("#replayBadge"); if (badge) badge.style.display = "none";
+  };
   const checkCrossings = (t0, t1) => {
     if (t1 - t0 <= 0 || t1 - t0 > App.speed * 0.6 + 2) return;
     const sc = activeScenario();
     for (const ev of E.eventsOf(App.match, sc)) {
       if (ev.t > t0 && ev.t <= t1) {
-        if (ev.type === "goal") toast(`GOAL ${ev.min || ""} ${ev.label.replace(/^GOAL(〔SIM〕)? /, "")}`, ev.sim ? GOLD : seriesColor(ev.team, true));
+        if (ev.type === "goal") {
+          toast(`GOAL ${ev.min || ""} ${ev.label.replace(/^GOAL(〔SIM〕)? /, "")}`, ev.sim ? GOLD : seriesColor(ev.team, true));
+          maybeGoalReplay(ev);   // #134: ゴール・スロー・リプレイ（純カメラ演出・SIM不変）
+        }
         else if (ev.type === "yellow") toast(`警告 ${ev.min || ""} ${ev.label.replace("警告 ", "")}`, "#FFC61A");
         else if (ev.type === "red") toast(`退場 ${ev.min || ""} ${ev.label.replace(/^退場 /, "")}`, "#E5484D");
         else if (ev.type === "save") toast(ev.label, "#7FA6FF");
@@ -1916,6 +1943,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     b.onclick = () => {
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.remove("on"));
       b.classList.add("on");
+      App.camPreset = b.dataset.cam;   // #134: リプレイ後の復帰先として記憶
       renderer.setPreset(b.dataset.cam);
     };
   });
@@ -2013,10 +2041,29 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#togField").classList.toggle("on", next[0] !== "off");
   };
   $("#togField").onclick = cycleFieldMode;
+  // #134: 表示オプションの端末内保存（localStorage・送信なし）— 重い/演出系トグルを跨セッションで維持。
+  const LS_OPT = "rpdx_opts_v1";
+  const PERSIST_OPTS = ["kitNumbers", "goalReplay", "labels", "speedLabels", "psy", "trails"];
+  const saveOpts = () => {
+    try {
+      const o = {}; for (const k of PERSIST_OPTS) o[k] = App.options[k];
+      localStorage.setItem(LS_OPT, JSON.stringify(o));
+    } catch { /* localStorage 不可でも無視 */ }
+  };
+  const loadOpts = () => {
+    try {
+      const o = JSON.parse(localStorage.getItem(LS_OPT) || "{}");
+      for (const k of PERSIST_OPTS) if (typeof o[k] === "boolean") App.options[k] = o[k];
+    } catch { /* ignore */ }
+  };
+  loadOpts();
   const bindTog = (id, key) => {
-    $(id).onclick = () => {
+    const el = $(id); if (!el) return;
+    el.classList.toggle("on", App.options[key]);   // 保存値を初期表示へ反映
+    el.onclick = () => {
       App.options[key] = !App.options[key];
-      $(id).classList.toggle("on", App.options[key]);
+      el.classList.toggle("on", App.options[key]);
+      saveOpts();
     };
   };
   bindTog("#togZones", "zones");
@@ -2024,6 +2071,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   bindTog("#togLabel", "labels");
   bindTog("#togSpeed", "speedLabels");
   bindTog("#togPsy", "psy");
+  bindTog("#togNum", "kitNumbers");
+  bindTog("#togReplay", "goalReplay");
   const setGK = (inc) => {
     App.options.includeGK = inc;
     $("#gk20").classList.toggle("on", !inc);
@@ -2099,6 +2148,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       App.t = Math.min(App.t + dt * App.speed, range.t1);
       if (App.t >= range.t1) setPlaying(false);
       checkCrossings(t0, App.t);
+      // #134: リプレイ終了 → 元の時刻・速度・カメラへ復帰
+      if (App.replay && App.t >= App.replay.endT) endGoalReplay();
+    } else if (App.replay) {
+      endGoalReplay();   // 停止したらリプレイも解除
     }
 
     const sc = activeScenario();
