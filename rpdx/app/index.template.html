@@ -35,12 +35,16 @@
 
 <!-- ビューバー -->
 <div id="editBar" class="panel" role="toolbar" aria-label="配置編集（frame editor）">
-  <span class="chip est">編集モード — タップで選手/ボール/審判を移動（俯瞰推奨）</span>
+  <span class="chip est" title="3Dビュー=この瞬間の実座標を掴んで動かす／ミニピッチ(左)=作戦盤でスロットを組む">3D＝実座標エディタ（掴んで移動・矢印で微調整）</span>
+  <button class="btn" id="editUndo" aria-label="編集を元に戻す（undo・Ctrl+Z）" title="元に戻す (Ctrl+Z)" disabled>↶</button>
+  <button class="btn" id="editRedo" aria-label="編集をやり直す（redo・Shift+Ctrl+Z）" title="やり直し (Shift+Ctrl+Z)" disabled>↷</button>
+  <button class="btn" id="editMirror" aria-label="選択チームを左右反転（mirror）" title="選択チームを左右反転">左右反転</button>
+  <button class="btn" id="editAlign" aria-label="バックラインを一直線に整列（align backline）" title="最終ラインを一直線に">バックライン整列</button>
   <button class="btn" id="editRef" aria-label="審判を追加（add referee）">審判＋</button>
   <button class="btn" id="editReplay" aria-label="この配置から再生（re-synthesize forward）">この配置から再生</button>
   <button class="btn" id="editSave" aria-label="フレームを保存（save frame JSON）">保存</button>
   <button class="btn" id="editExit" aria-label="編集を終了（exit edit）">終了</button>
-  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:640px"></span>
+  <span id="editAnalysis" class="chip" role="status" aria-live="polite" style="max-width:560px"></span>
 </div>
 <div id="viewbar" class="panel" role="toolbar" aria-label="表示切替（view controls）">
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
@@ -55,6 +59,8 @@
   <button class="btn tog on" id="togLabel" data-i18n="番号" aria-label="背番号表示切替（toggle numbers）">番号</button>
   <button class="btn tog on" id="togSpeed" data-i18n="速度" aria-label="速度表示切替（toggle speed）">速度</button>
   <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
+  <button class="btn tog on" id="togNum" data-i18n="背番号" aria-label="キット背番号の表示切替（toggle kit numbers）">背番号</button>
+  <button class="btn tog on" id="togReplay" data-i18n="リプレイ" aria-label="ゴール・スロー・リプレイ切替（toggle goal replay）">リプレイ</button>
   <span class="vsep"></span>
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
@@ -63,6 +69,7 @@
   <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
+<div id="replayBadge" role="status" aria-live="polite" style="display:none;position:absolute;top:72px;left:50%;transform:translateX(-50%);z-index:40;background:rgba(200,169,110,.94);color:#1a1206;font-weight:800;font-size:12.5px;padding:5px 15px;border-radius:20px;letter-spacing:.12em;box-shadow:0 2px 14px rgba(0,0,0,.45)">◉ REPLAY</div>
 <button class="dock-toggle" id="viewToggle" aria-label="表示コントロールの開閉（toggle view controls）" title="カメラ・表示切替">⚙</button>
 <button class="dock-toggle" id="tlToggle" aria-label="危険度タイムラインの開閉（toggle danger timeline）" title="危険度の推移">📈</button>
 
@@ -79,7 +86,7 @@
     <div id="outcomeBody"></div>
   </section>
   <section class="panel" id="formationEditor">
-    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span></h3>
+    <h3><span data-i18n="配置">配置</span> <span class="eyebrow">FORMATION</span> <span class="eyebrow" style="opacity:.7" title="ミニピッチ=作戦盤（スロット単位の陣形設計）。この瞬間の実座標編集は「編集」ボタン→3Dビューで。">作戦盤</span></h3>
     <div class="row">
       <select id="fmShape" class="sel" aria-label="フォーメーションを選択（select formation）"></select>
       <span class="eyebrow" data-i18n="分">分</span>

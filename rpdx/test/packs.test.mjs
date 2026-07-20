@@ -101,12 +101,13 @@ for (const m of packs) {
     }
   });
 
-  test(`packs[${id}]: エンジン統合 — stateAt常時22人・決定論`, () => {
+  test(`packs[${id}]: エンジン統合 — stateAt常時22人(退場反映)・決定論`, () => {
     const sc = E.actualScenario(m);
     const range = E.playedRange(m);
     for (const t of [range.t0 + 10, range.t0 + 1200, m.time.h2.start + 600, range.t1 - 10]) {
       const st = E.stateAt(m, sc, t);
-      assert.equal(st.players.filter(p => p.onPitch).length, 22, `t=${t}`);
+      const want = E.teamKeys(m).reduce((a, k) => a + E.onPitchCount(m, sc, k, t), 0);   // #141: 退場反映
+      assert.equal(st.players.filter(p => p.onPitch).length, want, `t=${t}`);
       const st2 = E.stateAt(m, sc, t);
       assert.deepEqual(
         st.players.map(p => [p.team, p.no, p.x.toFixed(6), p.y.toFixed(6)]),

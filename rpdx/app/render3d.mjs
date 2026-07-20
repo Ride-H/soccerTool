@@ -44,6 +44,10 @@
       const c = Math.cos(a), s = Math.sin(a);
       return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
     },
+    roty(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    },
     t(x, y, z) {
       return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
     },
@@ -271,16 +275,24 @@
     const px = (x) => (x + 59) * sx, py = (y) => (y + 40) * sy;
     // 外周ランオフ
     g.fillStyle = "#0F3D28"; g.fillRect(0, 0, W, H);
-    // 芝ストライプ
+    // 芝モーイング・ストライプ（#134: コントラストを上げ、縞境界に軽いソフトエッジ）
     for (let i = 0; i < 14; i++) {
-      g.fillStyle = i % 2 ? "#155636" : "#12492E";
+      g.fillStyle = i % 2 ? "#176439" : "#0F4227";
       g.fillRect(px(-52.5 + i * 7.5), py(-34), 7.5 * sx, 68 * sy);
     }
-    // 芝ノイズ
-    for (let i = 0; i < 9000; i++) {
+    // 縞に直交する薄いクロス・モー（芝目の交差＝刈り跡のリアル感）
+    g.save();
+    g.globalAlpha = 0.06;
+    for (let j = 0; j < 20; j++) {
+      g.fillStyle = j % 2 ? "#1C6E40" : "#0C3A22";
+      g.fillRect(px(-52.5), py(-34 + j * 3.4), 105 * sx, 3.4 * sy);
+    }
+    g.restore();
+    // 芝ノイズ（微粒・刈り跡のざらつき）
+    for (let i = 0; i < 11000; i++) {
       const x = Math.random() * W, y = Math.random() * H;
-      g.fillStyle = `rgba(${20 + Math.random() * 30},${70 + Math.random() * 40},${40 + Math.random() * 25},0.05)`;
-      g.fillRect(x, y, 2.2, 2.2);
+      g.fillStyle = `rgba(${20 + Math.random() * 34},${70 + Math.random() * 46},${40 + Math.random() * 28},0.055)`;
+      g.fillRect(x, y, 2.3, 2.3);
     }
     // ライン
     g.strokeStyle = "rgba(245,250,255,0.85)"; g.lineWidth = 2.6; g.lineCap = "round";
@@ -561,6 +573,29 @@
       return tx;
     };
 
+    // #134: キット背番号（胴メッシュ背面に描く番号）— キット番号色・透明背景。番号毎キャッシュ。
+    const kitNumCache = new Map();
+    const kitNumTex = (team, no, isGK) => {
+      const key = `${team}:${no}:${isGK ? 1 : 0}`;
+      const hit = kitNumCache.get(key);
+      if (hit) return hit;
+      const kit = match.teams[team].kit;
+      const numCss = isGK ? (kit.gkNumber || "#F5F7FA") : (kit.number || "#F5F7FA");
+      const cv = document.createElement("canvas");
+      cv.width = 128; cv.height = 128;
+      const g = cv.getContext("2d");
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.font = `800 ${no >= 10 ? 74 : 92}px -apple-system, 'Helvetica Neue', Arial, sans-serif`;
+      // 視認性: キット色より暗い縁取り → 番号（キット番号色）
+      g.lineWidth = 8; g.strokeStyle = "rgba(6,10,18,0.55)"; g.lineJoin = "round";
+      g.strokeText(String(no), 64, 70, 118);
+      g.fillStyle = numCss;
+      g.fillText(String(no), 64, 70, 118);
+      const tx = canvasTex(gl, cv);
+      kitNumCache.set(key, tx);
+      return tx;
+    };
+
     const hex2rgb = (h) => {
       const v = parseInt(h.slice(1), 16);
       return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
@@ -789,7 +824,7 @@
     // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
     // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
     // 歩きと走りの差: ケイデンス・膝屈曲（二節脚）・前傾・上下動を速度で連続変調。
-    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex) => {
+    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
       const f = figOf(key);
       if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
       const dx = px - f.lx, dz = pz - f.lz;
@@ -855,6 +890,17 @@
       drawMesh(mCapsule);
       useLambert(M4.chain(upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
       drawMesh(mCapsule);
+      // #134: キット背番号 — 胴の背面（ローカル −Z）に大きめに貼る（実ユニフォーム風）。
+      // ジャンプ/透明度に追随・深度で前面から遮蔽・胴の湾曲に対し平面近似（v1・可読性優先）。
+      if (numTx && jump < 0.5) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        useTex(
+          M4.chain(upper, M4.t(0, 0.16, -0.212), M4.roty(Math.PI), M4.scale(0.44, 0.5, 1)),
+          numTx, { alpha: alpha * 0.98, fog: 1e9, emiss: 0.06 });
+        drawMesh(mVQuad);
+        gl.disable(gl.BLEND);
+      }
       const headY = bob + 0.90 + 0.80 * Math.cos(lean);
       useLambert(
         M4.chain(upper, M4.trs(0, 0, 0, 1, 1, 1, -twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
@@ -984,6 +1030,22 @@
     const api = {
       cam, setPreset, flySpeed: 22,
       dpr: Math.min(window.devicePixelRatio || 1, 2),
+    };
+
+    // #134: ゴール・リプレイ用カメラ — 得点した側のゴール裏低めから。side>=0 で +X 端、<0 で −X 端。
+    // 純カメラ演出（stateAt/アンカーのみ参照・SIM 非改変）。
+    api.replayCam = (side, immediate) => {
+      const to = {
+        theta: side >= 0 ? 0.0001 : Math.PI + 0.0001,
+        phi: 0.30, dist: 44, target: [side >= 0 ? 33 : -33, 0, 0], fov: 52, followBall: false,
+      };
+      cam.mode = "orbit"; cam.followBall = false;
+      if (immediate) {
+        cam.anim = null;
+        cam.theta = to.theta; cam.phi = to.phi; cam.dist = to.dist; cam.fov = to.fov; cam.target = [...to.target];
+      } else {
+        cam.anim = { from: { theta: cam.theta, phi: cam.phi, dist: cam.dist, target: [...cam.target], fov: cam.fov }, to, u: 0 };
+      }
     };
 
     api.resize = () => {
@@ -1249,11 +1311,19 @@
         if (alpha <= 0.05) continue;
         const px = p.x, pz = -p.y;   // 幅軸 worldZ=-fieldY（放送/コーチボード慣習に一致）
 
+        // #134: 接地ソフト影 — ジャンプ中（空中戦）は縮小・減衰（浮いた説得力）。
+        const figJump = scene.aerial
+          ? (p.team + ":" + p.no === scene.aerial.winnerKey ? scene.aerial.jumpH
+            : p.team + ":" + p.no === scene.aerial.loserKey ? scene.aerial.jumpH * 0.6 : 0)
+          : 0;
+        const shScale = 1.6 * (1 - 0.45 * figJump);       // 空中ほど小さく
+        const shAlpha = (0.42 - 0.24 * figJump) * alpha;  // 空中ほど薄く
+
         // 影・リング（地面レイヤ）
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        useFlat(M4.trs(px, 0.02, pz, 1.5, 1, 1.5), [0, 0, 0], { alpha: 0.4 * alpha, soft: 0.55 });
+        useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 });
         drawMesh(mQuad);
         // 危険度リング（攻撃寄与）
         const cv = contribMap.get(p.team + p.no) || 0;
@@ -1268,8 +1338,15 @@
           useFlat(M4.trs(px, 0.05, pz, 2.6, 1, 2.6), [0.99, 0.93, 0.72], { alpha: 0.85 * pulse * alpha, ring: 0.82, soft: 0.12 });
           drawMesh(mQuad);
         }
+        // #133: 編集モードの掴み対象ハイライト（明るいシアン・脈動 — 掴んでいる対象を明示）
+        const es = scene.editSel;
+        if (scene.editMode && es && es.kind === "player" && es.team === p.team && es.no === p.no) {
+          const pulse = 0.6 + 0.32 * Math.sin(time * 6.5);
+          useFlat(M4.trs(px, 0.06, pz, 5.2, 1, 5.2), [0.32, 0.95, 1], { alpha: 0.95 * pulse, ring: 0.8, soft: 0.08 });
+          drawMesh(mQuad);
+        }
         // 選択/ホバーリング
-        if (selected && selected.team === p.team && selected.no === p.no) {
+        else if (selected && selected.team === p.team && selected.no === p.no) {
           const pulse = 0.72 + 0.2 * Math.sin(time * 4);
           useFlat(M4.trs(px, 0.05, pz, 4.4, 1, 4.4), [1, 1, 1], { alpha: 0.9 * pulse, ring: 0.78, soft: 0.08 });
           drawMesh(mQuad);
@@ -1294,11 +1371,12 @@
           if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
           else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
         }
+        const numTx = (options.kitNumbers !== false) ? kitNumTex(p.team, p.no, isGK) : null;
         drawFigure(
           figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
           shirt, shorts, toneOf(p.team, p.no),
           bodyAlpha * alpha, Math.atan2(dir, 0),
-          state.ball.x, -state.ball.y, ex
+          state.ball.x, -state.ball.y, ex, numTx
         );
         gl.disable(gl.BLEND);
       }
@@ -1313,6 +1391,14 @@
       gl.depthMask(false);
       useFlat(M4.trs(b.x, 0.015, bz, 1.0 + b.z * 0.5, 1, 1.0 + b.z * 0.5), [0, 0, 0], { alpha: clamp(0.42 - b.z * 0.06, 0.08, 0.42), soft: 0.6 });
       drawMesh(mQuad);
+      // #133: 編集モードのボール掴みアフォーダンス（掴めることを明示・選択中は明るく脈動）
+      if (scene.editMode) {
+        const bSel = scene.editSel && scene.editSel.kind === "ball";
+        const pulse = 0.5 + 0.32 * Math.sin(time * (bSel ? 6.5 : 3.2));
+        useFlat(M4.trs(b.x, 0.055, bz, bSel ? 4.2 : 2.9, 1, bSel ? 4.2 : 2.9),
+          bSel ? [0.32, 0.95, 1] : [0.98, 0.86, 0.5], { alpha: (bSel ? 0.95 : 0.5) * pulse, ring: 0.8, soft: 0.1 });
+        drawMesh(mQuad);
+      }
       gl.depthMask(true);
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });

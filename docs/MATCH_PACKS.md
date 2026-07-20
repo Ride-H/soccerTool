@@ -60,6 +60,8 @@ ESPN（gameId）/ Al Jazeera・BBC のライブブログ（ゴールの状況記
 |---|---|---|
 | `meta` | 大会・スコア・会場・主審・観衆・`note` | 事実（noteに分離を明記） |
 | `time.h1/h2` | 実プレー秒軸。`end = start + 2700 + AT秒` | 事実（AT分） |
+| `time.h3/h4`（任意） | 延長前後半。無い試合は完全に従来経路（省略可）。`h3.clock0=5400`, `h4.clock0=6300`。時計は 105+/120+ 表示に自動対応 | 事実（延長AT分） |
+| `outagesActual`（任意） | 実試合の退場 `{TEAM:[{t,no,kind}]}`。#81 の10人リシェイプ・在場終了・退場動線・10vs11表示へ合流（GK不可・v1はチーム毎1件） | 事実（分・背番号） |
 | `dir` | 前半の攻撃方向（±X）。後半は反転 | 事実（映像/記述から） |
 | `teams.*.squad` | `P(no, pos, name, ja, label, born, club, caps, goals, attrs)` | 名簿=事実 / attrs=モデル |
 | `teams.*.phases` | 布陣フェーズ（`from`秒, shape, スロット割当） | 事実（記録の陣形） |
