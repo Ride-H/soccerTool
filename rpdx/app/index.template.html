@@ -55,6 +55,8 @@
   <button class="btn tog on" id="togLabel" data-i18n="番号" aria-label="背番号表示切替（toggle numbers）">番号</button>
   <button class="btn tog on" id="togSpeed" data-i18n="速度" aria-label="速度表示切替（toggle speed）">速度</button>
   <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
+  <button class="btn tog on" id="togNum" data-i18n="背番号" aria-label="キット背番号の表示切替（toggle kit numbers）">背番号</button>
+  <button class="btn tog on" id="togReplay" data-i18n="リプレイ" aria-label="ゴール・スロー・リプレイ切替（toggle goal replay）">リプレイ</button>
   <span class="vsep"></span>
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
@@ -63,6 +65,7 @@
   <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
+<div id="replayBadge" role="status" aria-live="polite" style="display:none;position:absolute;top:72px;left:50%;transform:translateX(-50%);z-index:40;background:rgba(200,169,110,.94);color:#1a1206;font-weight:800;font-size:12.5px;padding:5px 15px;border-radius:20px;letter-spacing:.12em;box-shadow:0 2px 14px rgba(0,0,0,.45)">◉ REPLAY</div>
 <button class="dock-toggle" id="viewToggle" aria-label="表示コントロールの開閉（toggle view controls）" title="カメラ・表示切替">⚙</button>
 <button class="dock-toggle" id="tlToggle" aria-label="危険度タイムラインの開閉（toggle danger timeline）" title="危険度の推移">📈</button>
 

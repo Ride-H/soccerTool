@@ -570,6 +570,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   <button class="btn tog on" id="togLabel" data-i18n="番号" aria-label="背番号表示切替（toggle numbers）">番号</button>
   <button class="btn tog on" id="togSpeed" data-i18n="速度" aria-label="速度表示切替（toggle speed）">速度</button>
   <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
+  <button class="btn tog on" id="togNum" data-i18n="背番号" aria-label="キット背番号の表示切替（toggle kit numbers）">背番号</button>
+  <button class="btn tog on" id="togReplay" data-i18n="リプレイ" aria-label="ゴール・スロー・リプレイ切替（toggle goal replay）">リプレイ</button>
   <span class="vsep"></span>
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
@@ -578,6 +580,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   <button class="btn tog" id="btnEdit" aria-label="配置編集モード（edit positions）" title="停止して選手・ボール・審判の座標を編集">編集</button>
   <button class="btn" id="btnCustom" data-i18n="カスタム" aria-label="カスタム試合を開く（open custom match）">カスタム</button>
 </div>
+<div id="replayBadge" role="status" aria-live="polite" style="display:none;position:absolute;top:72px;left:50%;transform:translateX(-50%);z-index:40;background:rgba(200,169,110,.94);color:#1a1206;font-weight:800;font-size:12.5px;padding:5px 15px;border-radius:20px;letter-spacing:.12em;box-shadow:0 2px 14px rgba(0,0,0,.45)">◉ REPLAY</div>
 <button class="dock-toggle" id="viewToggle" aria-label="表示コントロールの開閉（toggle view controls）" title="カメラ・表示切替">⚙</button>
 <button class="dock-toggle" id="tlToggle" aria-label="危険度タイムラインの開閉（toggle danger timeline）" title="危険度の推移">📈</button>
 
@@ -7999,6 +8002,10 @@ window.addEventListener("error", (e) => {
       const c = Math.cos(a), s = Math.sin(a);
       return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
     },
+    roty(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    },
     t(x, y, z) {
       return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
     },
@@ -8226,16 +8233,24 @@ window.addEventListener("error", (e) => {
     const px = (x) => (x + 59) * sx, py = (y) => (y + 40) * sy;
     // 外周ランオフ
     g.fillStyle = "#0F3D28"; g.fillRect(0, 0, W, H);
-    // 芝ストライプ
+    // 芝モーイング・ストライプ（#134: コントラストを上げ、縞境界に軽いソフトエッジ）
     for (let i = 0; i < 14; i++) {
-      g.fillStyle = i % 2 ? "#155636" : "#12492E";
+      g.fillStyle = i % 2 ? "#176439" : "#0F4227";
       g.fillRect(px(-52.5 + i * 7.5), py(-34), 7.5 * sx, 68 * sy);
     }
-    // 芝ノイズ
-    for (let i = 0; i < 9000; i++) {
+    // 縞に直交する薄いクロス・モー（芝目の交差＝刈り跡のリアル感）
+    g.save();
+    g.globalAlpha = 0.06;
+    for (let j = 0; j < 20; j++) {
+      g.fillStyle = j % 2 ? "#1C6E40" : "#0C3A22";
+      g.fillRect(px(-52.5), py(-34 + j * 3.4), 105 * sx, 3.4 * sy);
+    }
+    g.restore();
+    // 芝ノイズ（微粒・刈り跡のざらつき）
+    for (let i = 0; i < 11000; i++) {
       const x = Math.random() * W, y = Math.random() * H;
-      g.fillStyle = `rgba(${20 + Math.random() * 30},${70 + Math.random() * 40},${40 + Math.random() * 25},0.05)`;
-      g.fillRect(x, y, 2.2, 2.2);
+      g.fillStyle = `rgba(${20 + Math.random() * 34},${70 + Math.random() * 46},${40 + Math.random() * 28},0.055)`;
+      g.fillRect(x, y, 2.3, 2.3);
     }
     // ライン
     g.strokeStyle = "rgba(245,250,255,0.85)"; g.lineWidth = 2.6; g.lineCap = "round";
@@ -8516,6 +8531,29 @@ window.addEventListener("error", (e) => {
       return tx;
     };
 
+    // #134: キット背番号（胴メッシュ背面に描く番号）— キット番号色・透明背景。番号毎キャッシュ。
+    const kitNumCache = new Map();
+    const kitNumTex = (team, no, isGK) => {
+      const key = `${team}:${no}:${isGK ? 1 : 0}`;
+      const hit = kitNumCache.get(key);
+      if (hit) return hit;
+      const kit = match.teams[team].kit;
+      const numCss = isGK ? (kit.gkNumber || "#F5F7FA") : (kit.number || "#F5F7FA");
+      const cv = document.createElement("canvas");
+      cv.width = 128; cv.height = 128;
+      const g = cv.getContext("2d");
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.font = `800 ${no >= 10 ? 74 : 92}px -apple-system, 'Helvetica Neue', Arial, sans-serif`;
+      // 視認性: キット色より暗い縁取り → 番号（キット番号色）
+      g.lineWidth = 8; g.strokeStyle = "rgba(6,10,18,0.55)"; g.lineJoin = "round";
+      g.strokeText(String(no), 64, 70, 118);
+      g.fillStyle = numCss;
+      g.fillText(String(no), 64, 70, 118);
+      const tx = canvasTex(gl, cv);
+      kitNumCache.set(key, tx);
+      return tx;
+    };
+
     const hex2rgb = (h) => {
       const v = parseInt(h.slice(1), 16);
       return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
@@ -8744,7 +8782,7 @@ window.addEventListener("error", (e) => {
     // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
     // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
     // 歩きと走りの差: ケイデンス・膝屈曲（二節脚）・前傾・上下動を速度で連続変調。
-    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex) => {
+    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
       const f = figOf(key);
       if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
       const dx = px - f.lx, dz = pz - f.lz;
@@ -8810,6 +8848,17 @@ window.addEventListener("error", (e) => {
       drawMesh(mCapsule);
       useLambert(M4.chain(upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
       drawMesh(mCapsule);
+      // #134: キット背番号 — 胴の背面（ローカル −Z）に大きめに貼る（実ユニフォーム風）。
+      // ジャンプ/透明度に追随・深度で前面から遮蔽・胴の湾曲に対し平面近似（v1・可読性優先）。
+      if (numTx && jump < 0.5) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        useTex(
+          M4.chain(upper, M4.t(0, 0.16, -0.212), M4.roty(Math.PI), M4.scale(0.44, 0.5, 1)),
+          numTx, { alpha: alpha * 0.98, fog: 1e9, emiss: 0.06 });
+        drawMesh(mVQuad);
+        gl.disable(gl.BLEND);
+      }
       const headY = bob + 0.90 + 0.80 * Math.cos(lean);
       useLambert(
         M4.chain(upper, M4.trs(0, 0, 0, 1, 1, 1, -twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
@@ -8939,6 +8988,22 @@ window.addEventListener("error", (e) => {
     const api = {
       cam, setPreset, flySpeed: 22,
       dpr: Math.min(window.devicePixelRatio || 1, 2),
+    };
+
+    // #134: ゴール・リプレイ用カメラ — 得点した側のゴール裏低めから。side>=0 で +X 端、<0 で −X 端。
+    // 純カメラ演出（stateAt/アンカーのみ参照・SIM 非改変）。
+    api.replayCam = (side, immediate) => {
+      const to = {
+        theta: side >= 0 ? 0.0001 : Math.PI + 0.0001,
+        phi: 0.30, dist: 44, target: [side >= 0 ? 33 : -33, 0, 0], fov: 52, followBall: false,
+      };
+      cam.mode = "orbit"; cam.followBall = false;
+      if (immediate) {
+        cam.anim = null;
+        cam.theta = to.theta; cam.phi = to.phi; cam.dist = to.dist; cam.fov = to.fov; cam.target = [...to.target];
+      } else {
+        cam.anim = { from: { theta: cam.theta, phi: cam.phi, dist: cam.dist, target: [...cam.target], fov: cam.fov }, to, u: 0 };
+      }
     };
 
     api.resize = () => {
@@ -9204,11 +9269,19 @@ window.addEventListener("error", (e) => {
         if (alpha <= 0.05) continue;
         const px = p.x, pz = -p.y;   // 幅軸 worldZ=-fieldY（放送/コーチボード慣習に一致）
 
+        // #134: 接地ソフト影 — ジャンプ中（空中戦）は縮小・減衰（浮いた説得力）。
+        const figJump = scene.aerial
+          ? (p.team + ":" + p.no === scene.aerial.winnerKey ? scene.aerial.jumpH
+            : p.team + ":" + p.no === scene.aerial.loserKey ? scene.aerial.jumpH * 0.6 : 0)
+          : 0;
+        const shScale = 1.6 * (1 - 0.45 * figJump);       // 空中ほど小さく
+        const shAlpha = (0.42 - 0.24 * figJump) * alpha;  // 空中ほど薄く
+
         // 影・リング（地面レイヤ）
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        useFlat(M4.trs(px, 0.02, pz, 1.5, 1, 1.5), [0, 0, 0], { alpha: 0.4 * alpha, soft: 0.55 });
+        useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 });
         drawMesh(mQuad);
         // 危険度リング（攻撃寄与）
         const cv = contribMap.get(p.team + p.no) || 0;
@@ -9249,11 +9322,12 @@ window.addEventListener("error", (e) => {
           if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
           else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
         }
+        const numTx = (options.kitNumbers !== false) ? kitNumTex(p.team, p.no, isGK) : null;
         drawFigure(
           figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
           shirt, shorts, toneOf(p.team, p.no),
           bodyAlpha * alpha, Math.atan2(dir, 0),
-          state.ball.x, -state.ball.y, ex
+          state.ball.x, -state.ball.y, ex, numTx
         );
         gl.disable(gl.BLEND);
       }
@@ -9429,8 +9503,11 @@ window.addEventListener("error", (e) => {
       fieldMode: "particles",     // particles | surface | off
       zones: true, solidPlayers: false,
       speedLabels: true, psy: true,
+      kitNumbers: true, goalReplay: true,   // #134: 描画リアル感v1（背番号・ゴールリプレイ）
     },
+    replay: null,   // #134: ゴール・スロー・リプレイ制御 {endT, restoreT, restoreSpeed, restoreCam}
     zoneView: "BOTH",
+    camPreset: "broadcast",   // #134: 現在のカメラプリセット（リプレイ後の復帰先）
     selected: null, hover: null,
     editFrame: null, editSel: null,
     rosterTab: null,
@@ -9625,6 +9702,7 @@ self.onmessage = (e) => {
     en: {
       "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
+      "背番号": "Kit №", "リプレイ": "Replay",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
       "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
       "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
@@ -9683,6 +9761,7 @@ self.onmessage = (e) => {
     if (urlq.has("t")) App.t = clamp(+urlq.get("t") || 0, 0, E.playedRange(App.match).t1);
     if (urlq.has("speed")) App.speed = +urlq.get("speed") || 12;
     if (urlq.has("cam")) {
+      App.camPreset = urlq.get("cam");
       renderer.setPreset(urlq.get("cam"), true);
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.toggle("on", x.dataset.cam === urlq.get("cam")));
     }
@@ -10965,12 +11044,34 @@ self.onmessage = (e) => {
     $("#toasts").appendChild(d);
     setTimeout(() => { d.style.opacity = "0"; d.style.transition = "opacity .4s"; setTimeout(() => d.remove(), 450); }, 3800);
   };
+  // #134: ゴール・スロー・リプレイ — 得点通過時に ~5秒巻き戻してスローでゴール裏カメラ再生。
+  // 既存 stateAt/アンカーのみ参照＝結果・再現性は不変（純カメラ+時刻演出）。編集フレーム中/多重発火は抑止。
+  const maybeGoalReplay = (ev) => {
+    if (!App.options.goalReplay || !App.playing || App.replay || App.editFrame) return;
+    const st = E.stateAt(App.match, activeScenario(), ev.t);
+    const side = st.ball.x >= 0 ? 1 : -1;
+    App.replay = { endT: Math.min(ev.t + 2.6, E.playedRange(App.match).t1), restoreT: App.t, restoreSpeed: App.speed, restoreCam: App.camPreset || "broadcast" };
+    App.t = Math.max(0, ev.t - 5);      // 巻き戻し（大ジャンプ＝checkCrossings は t1-t0<=0 で発火せず）
+    App.speed = 1.2;                     // スロー（通常12x → 1.2x）
+    renderer.replayCam(side, false);
+    const badge = $("#replayBadge"); if (badge) badge.style.display = "";
+  };
+  const endGoalReplay = () => {
+    if (!App.replay) return;
+    App.t = App.replay.restoreT; App.speed = App.replay.restoreSpeed;
+    renderer.setPreset(App.replay.restoreCam, false);
+    App.replay = null;
+    const badge = $("#replayBadge"); if (badge) badge.style.display = "none";
+  };
   const checkCrossings = (t0, t1) => {
     if (t1 - t0 <= 0 || t1 - t0 > App.speed * 0.6 + 2) return;
     const sc = activeScenario();
     for (const ev of E.eventsOf(App.match, sc)) {
       if (ev.t > t0 && ev.t <= t1) {
-        if (ev.type === "goal") toast(`GOAL ${ev.min || ""} ${ev.label.replace(/^GOAL(〔SIM〕)? /, "")}`, ev.sim ? GOLD : seriesColor(ev.team, true));
+        if (ev.type === "goal") {
+          toast(`GOAL ${ev.min || ""} ${ev.label.replace(/^GOAL(〔SIM〕)? /, "")}`, ev.sim ? GOLD : seriesColor(ev.team, true));
+          maybeGoalReplay(ev);   // #134: ゴール・スロー・リプレイ（純カメラ演出・SIM不変）
+        }
         else if (ev.type === "yellow") toast(`警告 ${ev.min || ""} ${ev.label.replace("警告 ", "")}`, "#FFC61A");
         else if (ev.type === "red") toast(`退場 ${ev.min || ""} ${ev.label.replace(/^退場 /, "")}`, "#E5484D");
         else if (ev.type === "save") toast(ev.label, "#7FA6FF");
@@ -11319,6 +11420,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     b.onclick = () => {
       document.querySelectorAll("#viewbar .cam").forEach(x => x.classList.remove("on"));
       b.classList.add("on");
+      App.camPreset = b.dataset.cam;   // #134: リプレイ後の復帰先として記憶
       renderer.setPreset(b.dataset.cam);
     };
   });
@@ -11416,10 +11518,29 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#togField").classList.toggle("on", next[0] !== "off");
   };
   $("#togField").onclick = cycleFieldMode;
+  // #134: 表示オプションの端末内保存（localStorage・送信なし）— 重い/演出系トグルを跨セッションで維持。
+  const LS_OPT = "rpdx_opts_v1";
+  const PERSIST_OPTS = ["kitNumbers", "goalReplay", "labels", "speedLabels", "psy", "trails"];
+  const saveOpts = () => {
+    try {
+      const o = {}; for (const k of PERSIST_OPTS) o[k] = App.options[k];
+      localStorage.setItem(LS_OPT, JSON.stringify(o));
+    } catch { /* localStorage 不可でも無視 */ }
+  };
+  const loadOpts = () => {
+    try {
+      const o = JSON.parse(localStorage.getItem(LS_OPT) || "{}");
+      for (const k of PERSIST_OPTS) if (typeof o[k] === "boolean") App.options[k] = o[k];
+    } catch { /* ignore */ }
+  };
+  loadOpts();
   const bindTog = (id, key) => {
-    $(id).onclick = () => {
+    const el = $(id); if (!el) return;
+    el.classList.toggle("on", App.options[key]);   // 保存値を初期表示へ反映
+    el.onclick = () => {
       App.options[key] = !App.options[key];
-      $(id).classList.toggle("on", App.options[key]);
+      el.classList.toggle("on", App.options[key]);
+      saveOpts();
     };
   };
   bindTog("#togZones", "zones");
@@ -11427,6 +11548,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   bindTog("#togLabel", "labels");
   bindTog("#togSpeed", "speedLabels");
   bindTog("#togPsy", "psy");
+  bindTog("#togNum", "kitNumbers");
+  bindTog("#togReplay", "goalReplay");
   const setGK = (inc) => {
     App.options.includeGK = inc;
     $("#gk20").classList.toggle("on", !inc);
@@ -11502,6 +11625,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       App.t = Math.min(App.t + dt * App.speed, range.t1);
       if (App.t >= range.t1) setPlaying(false);
       checkCrossings(t0, App.t);
+      // #134: リプレイ終了 → 元の時刻・速度・カメラへ復帰
+      if (App.replay && App.t >= App.replay.endT) endGoalReplay();
+    } else if (App.replay) {
+      endGoalReplay();   // 停止したらリプレイも解除
     }
 
     const sc = activeScenario();
