@@ -43,7 +43,8 @@ for (const m of Object.values(MATCHES)) {
         const st = E.stateAt(m, sc, t);
         for (const team of E.teamKeys(m)) {
           const on = st.players.filter(p => p.onPitch && p.team === team);
-          assert.equal(on.length, 11, `seed#${i} t=${t.toFixed(0)} ${team} 人数`);
+          const want = E.onPitchCount(m, sc, team, t);   // #141: 退場を反映（無ければ常に11）
+          assert.equal(on.length, want, `seed#${i} t=${t.toFixed(0)} ${team} 人数`);
           assert.equal(on.filter(p => p.role === "GK").length, 1, `seed#${i} t=${t.toFixed(0)} ${team} GK`);
         }
       }

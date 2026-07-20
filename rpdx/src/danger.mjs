@@ -268,8 +268,11 @@
   const TPA_STEP = 4, TPA_N = 8, TPA_DECAY = 0.85;
   const tpaOf = (match, scenario, t, opts) => {
     const range = E.playedRange(match);
-    // ハーフ開始をまたいで圧力を持ち越さない
-    const hStart = t >= match.time.h2.start ? match.time.h2.start : range.t0;
+    // ハーフ/延長ブレーク開始をまたいで圧力を持ち越さない（h3/h4 は #141・無ければ従来）
+    const T = match.time;
+    const hStart = T.h4 && t >= T.h4.start ? T.h4.start
+      : T.h3 && t >= T.h3.start ? T.h3.start
+      : t >= T.h2.start ? T.h2.start : range.t0;
     const out = {};
     for (const k of E.teamKeys(match)) out[k] = 0;
     let wsum = 0;

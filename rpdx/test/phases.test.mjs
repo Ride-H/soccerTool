@@ -96,11 +96,15 @@ test("#33 shape: 値域・ライン合計10人・決定論", () => {
     const sc = E.actualScenario(m), range = E.playedRange(m);
     for (let t = range.t0 + 60; t < range.t1; t += 397) {
       for (const team of E.teamKeys(m)) {
-        const s = T.shapeMetrics(m, sc, team, t);
+        const st = E.stateAt(m, sc, t);
+        const s = T.shapeFromState(m, st, team);
+        // ラインは「その瞬間フィールド上の非GK・非入場中の選手」を過不足なく分割する。
+        // 退場（10人）・交代の入場走り込み中はいずれも母集団が減る（#141 対応）。
+        const outfield = st.players.filter(p => p.onPitch && !p.entering && p.team === team && p.role !== "GK").length;
         assert.ok(s.width > 15 && s.width < 70, `width ${s.width}`);
         assert.ok(s.depth > 10 && s.depth < 80, `depth ${s.depth}`);
         assert.ok(s.area > 200 && s.area < 4500, `area ${s.area}`);
-        assert.equal(s.lines.reduce((a, b) => a + b, 0), 10, "アウトフィールド10人");
+        assert.equal(s.lines.reduce((a, b) => a + b, 0), outfield, "アウトフィールド人数(退場/入場反映)");
         assert.ok(/^\d+-\d+(-\d+)?$/.test(s.effShape), s.effShape);
         assert.deepEqual(s, T.shapeMetrics(m, sc, team, t), "決定論");
       }

@@ -1349,6 +1349,9 @@ self.onmessage = (e) => {
     } else if (kind === "yellow") {
       g.fillStyle = "#FFC61A";
       g.fillRect(x - 1.8, y - 4.5, 3.6, 9);
+    } else if (kind === "red") {
+      g.fillStyle = "#E5484D";
+      g.fillRect(x - 1.8, y - 4.5, 3.6, 9);
     } else if (kind === "save") {
       g.translate(x, y); g.rotate(Math.PI / 4);
       g.strokeStyle = "#7FA6FF"; g.lineWidth = 1.5;
@@ -1467,6 +1470,7 @@ self.onmessage = (e) => {
     for (const ev of evs) {
       if (ev.type === "goal") pins.push({ t: ev.t, kind: ev.sim ? "simgoal" : "goal", c: seriesColor(ev.team, true) });
       else if (ev.type === "yellow") pins.push({ t: ev.t, kind: "yellow" });
+      else if (ev.type === "red") pins.push({ t: ev.t, kind: "red" });
       else if (ev.type === "save") pins.push({ t: ev.t, kind: "save" });
     }
     if (sc.outcome) for (const r of sc.outcome.removed) pins.push({ t: r.t, kind: "ghost" });
@@ -1540,7 +1544,7 @@ self.onmessage = (e) => {
   };
   $("#btnPlay").onclick = () => setPlaying(!App.playing);
   const evTimes = () => E.eventsOf(App.match, activeScenario())
-    .filter(e => ["goal", "yellow", "save", "kickoff", "halftime"].includes(e.type)).map(e => e.t);
+    .filter(e => ["goal", "yellow", "red", "save", "kickoff", "halftime"].includes(e.type)).map(e => e.t);
   $("#btnPrevEv").onclick = () => {
     const ts = evTimes().filter(t => t < App.t - 2);
     App.t = ts.length ? Math.max(...ts) : 0;
@@ -1565,6 +1569,7 @@ self.onmessage = (e) => {
       if (ev.t > t0 && ev.t <= t1) {
         if (ev.type === "goal") toast(`GOAL ${ev.min || ""} ${ev.label.replace(/^GOAL(〔SIM〕)? /, "")}`, ev.sim ? GOLD : seriesColor(ev.team, true));
         else if (ev.type === "yellow") toast(`警告 ${ev.min || ""} ${ev.label.replace("警告 ", "")}`, "#FFC61A");
+        else if (ev.type === "red") toast(`退場 ${ev.min || ""} ${ev.label.replace(/^退場 /, "")}`, "#E5484D");
         else if (ev.type === "save") toast(ev.label, "#7FA6FF");
         else if (ev.type === "halftime" || ev.type === "fulltime") toast(ev.label, "#94A2BD");
       }
@@ -2111,7 +2116,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       $("#scoreA").textContent = state.score[a];
       $("#scoreB").textContent = state.score[b];
       $("#clock").textContent = state.clock.disp;
-      $("#halfLbl").textContent = state.half === 1 ? "前半" : "後半";
+      // ピリオド表記は clock.half（1..4）を使う。state.half は方向用に延長を1/2へ写像するため表示に使わない（#141）
+      $("#halfLbl").textContent = ["", "前半", "後半", "延長前半", "延長後半"][state.clock.half] || "後半";
       // 累積支配率（ポゼッション・チェーン）
       const poss = E.possessionStats(App.match, sc, App.t);
       const pa = Math.round((poss[a] || 0.5) * 100);
