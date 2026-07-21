@@ -125,8 +125,11 @@ export const launch = async ({ width = 1280, height = 800 } = {}) => {
         if (r.exceptionDetails) throw new Error("ページ内評価エラー: " + (r.exceptionDetails.text || "") + " " + JSON.stringify(r.exceptionDetails.exception || {}));
         return r.result.value;
       },
-      async screenshot() {
-        const r = await send("Page.captureScreenshot", { format: "png" }, sessionId);
+      async screenshot(opts = {}) {
+        // opts.clip = {x,y,width,height,scale}: 部分拡大撮影（継ぎ目・細部の検分用）
+        const params = { format: "png" };
+        if (opts.clip) params.clip = opts.clip;
+        const r = await send("Page.captureScreenshot", params, sessionId);
         return Buffer.from(r.data, "base64");
       },
       async dispose() {

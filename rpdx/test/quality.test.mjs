@@ -29,8 +29,8 @@ test("#152 tier判定: デスクトップ=cinematic / モバイル=lightweight /
 
 test("#152 予算表: 基準値が仕様どおり（暫定・要再検証の提案値）", () => {
   const lw = Q.flagsFor("lightweight"), cin = Q.flagsFor("cinematic");
-  // Lightweight（#152 基準表）
-  assert.equal(lw.playerTriBudget, 2500); assert.equal(lw.playerBoneBudget, 12);
+  // Lightweight（#152 基準表・boneBudget は #154 実装実測で 12→16 に改定）
+  assert.equal(lw.playerTriBudget, 2500); assert.equal(lw.playerBoneBudget, 16);
   assert.equal(lw.drawCallBudget, 400); assert.equal(lw.textureMemBudgetMB, 64);
   assert.equal(lw.cpuAnimBudgetMs, 6);
   assert.equal(lw.shadowMap, false); assert.equal(lw.bloom, false);

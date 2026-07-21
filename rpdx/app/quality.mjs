@@ -21,7 +21,9 @@
       shadowMap: false, shadowMapRes: 0, ssao: false,
       bloom: false, bloomPasses: 0, hdrTonemap: false, dof: false,
       crowd3D: false, crowdInstances: 2000,
-      playerTriBudget: 2500, playerBoneBudget: 12,
+      // boneBudget は #154 実装で 12→16 に改定（暫定値の初回更新）: 最小の自然な人型が
+      // 脊椎5+脚3×2+腕2×2=15ボーンで、16×mat4=64vec4 は WebGL2 最低保証内で全デバイス安全。
+      playerTriBudget: 2500, playerBoneBudget: 16,
       textureMemBudgetMB: 64, drawCallBudget: 400,
       animIkFull: true, animUpdateStride: 1,
     },
@@ -51,7 +53,7 @@
     { id: "ssao-off",        apply: (f) => f.ssao && ((f.ssao = false), true) },
     { id: "crowd-half",      apply: (f) => f.crowdInstances > 800 && ((f.crowdInstances = Math.round(f.crowdInstances / 2)), true) },
     { id: "crowd-3d-off",    apply: (f) => f.crowd3D && ((f.crowd3D = false), true) },
-    { id: "player-lod",      apply: (f) => f.playerTriBudget > 2500 && ((f.playerTriBudget = 2500), (f.playerBoneBudget = 12), true) },
+    { id: "player-lod",      apply: (f) => f.playerTriBudget > 2500 && ((f.playerTriBudget = 2500), (f.playerBoneBudget = 16), true) },
     { id: "anim-ik-simple",  apply: (f) => f.animIkFull && ((f.animIkFull = false), true) },
     { id: "anim-stride-2",   apply: (f) => f.animUpdateStride < 2 && ((f.animUpdateStride = 2), true) },
   ];
