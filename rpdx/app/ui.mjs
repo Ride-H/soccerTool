@@ -225,7 +225,7 @@ self.onmessage = (e) => {
     en: {
       "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
-      "背番号": "Kit №", "リプレイ": "Replay",
+      "背番号": "Kit №", "リプレイ": "Replay", "品質": "Quality",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
       "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
       "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
@@ -245,6 +245,8 @@ self.onmessage = (e) => {
   let renderer, tlCtx;
   const boot = () => {
     $("#appVer") && ($("#appVer").textContent = "v" + (R.VERSION || "?"));   // バージョン表示
+    // #152: 品質ティア確定（?tier= > 端末保存 > 自動判定・迷ったら軽量）— レンダラ生成前
+    R.quality && R.quality.init();
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
     // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");
@@ -2167,6 +2169,28 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   bindTog("#togPsy", "psy");
   bindTog("#togNum", "kitNumbers");
   bindTog("#togReplay", "goalReplay");
+  // #152: 品質ティア表示＋手動オーバーライド（自動→シネマ→軽量→自動・端末内保存のみ）
+  if (R.quality && $("#togTier")) {
+    const TIER_JA = { cinematic: "シネマ", lightweight: "軽量" };
+    const updTier = () => {
+      const st = R.quality.state();
+      $("#tierLbl").textContent = (st.source === "override" ? "" : "自動·") + (TIER_JA[st.tier] || st.tier) +
+        (st.level > 0 ? "↓" + st.level : "");
+      $("#togTier").classList.toggle("on", st.source === "override");
+    };
+    $("#togTier").onclick = () => {
+      const st = R.quality.state();
+      const next = st.source !== "override" ? "cinematic" : (st.tier === "cinematic" ? "lightweight" : "auto");
+      R.quality.setOverride(next);
+      try {
+        if (next === "auto") localStorage.removeItem("rpdx_tier_v1");
+        else localStorage.setItem("rpdx_tier_v1", next);
+      } catch (_) { /* localStorage 不可でも動作 */ }
+      updTier();
+    };
+    R.quality.onChange(updTier);
+    updTier();
+  }
   const setGK = (inc) => {
     App.options.includeGK = inc;
     $("#gk20").classList.toggle("on", !inc);
@@ -2242,9 +2266,11 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   /* ------------------------------ メインループ ------------------------------ */
   let lastNow = performance.now(), lastHUD = 0, lastRosterMin = -1;
   const maxFrames = +(urlq.get("shotframes") || 0) || Infinity; // ヘッドレス検証用
+  const govOn = !!R.quality && maxFrames === Infinity && urlq.get("gov") !== "0";  // #152
   let frameCount = 0, curveReadyAt = -1;
   const loop = (now) => {
-    const dt = Math.min((now - lastNow) / 1000, 0.1);
+    const rawMs = now - lastNow;                       // #152: 未クランプのフレーム所要（守衛の標本）
+    const dt = Math.min(rawMs / 1000, 0.1);
     lastNow = now;
     // 正準曲線の準備完了を検知したら即HUD更新（ヘッドレスでPSY/曲線が確実に載る）
     if (curveReadyAt < 0 && curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }))) {
@@ -2494,6 +2520,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       tackle: tackleFx, shield: shieldFx, passLine, aerial: aerialFx,
     });
     drawTimeline();
+    // #152: 滑らかさ守衛 — ヘッドレス検証（shotframes）と ?gov=0 では凍結（決定論スクショ保護）
+    if (govOn) R.quality.tick(rawMs, now / 1000);
     if (++frameCount < maxFrames) requestAnimationFrame(loop);
   };
   // ヘッドレス（shotframes指定時）: 正準曲線の完了を待ってから描画開始

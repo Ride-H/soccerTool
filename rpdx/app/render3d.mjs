@@ -434,6 +434,12 @@
     });
     if (!gl) throw new Error("WebGL2 not available");
     canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+    // #152: GPU文字列で品質tierを保守側へ補正（SwiftShader等ソフトウェア描画→軽量へ降格のみ）
+    try {
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "";
+      R.quality && R.quality.refineGpu(String(gpu || ""));
+    } catch (_) { /* 拡張が無い/マスクされる環境は初期判定のまま */ }
 
     const prLambert = compile(gl, VS_BASE, FS_LAMBERT);
     const prTex = compile(gl, VS_BASE, FS_TEX);
