@@ -2268,7 +2268,12 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   const maxFrames = +(urlq.get("shotframes") || 0) || Infinity; // ヘッドレス検証用
   const govOn = !!R.quality && maxFrames === Infinity && urlq.get("gov") !== "0";  // #152
   let frameCount = 0, curveReadyAt = -1;
-  const loop = (now) => {
+  const loop = (nowReal) => {
+    // #153: ショットモード（shotframes指定時）は合成クロック＝フレーム番号×16.6ms。
+    // ドライバや実行環境のタイミングに依らずフレーム列が決定論になる
+    // （ゲイト位相・カメラ慣性・パルス位相・HUD更新タイミングまで同一）。
+    const now = maxFrames !== Infinity ? frameCount * (1000 / 60) : nowReal;
+    if (maxFrames !== Infinity && frameCount === 0) lastNow = now - 1000 / 60;
     const rawMs = now - lastNow;                       // #152: 未クランプのフレーム所要（守衛の標本）
     const dt = Math.min(rawMs / 1000, 0.1);
     lastNow = now;

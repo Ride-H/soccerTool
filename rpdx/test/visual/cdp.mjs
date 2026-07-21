@@ -97,31 +97,28 @@ export const launch = async ({ width = 1280, height = 800 } = {}) => {
   // ページ（タブ）単位のセッションを作る。シナリオごとに新規タブ＝新規レンダラで、
   // 仮想時間・localStorage 注入・描画状態をタブ内に隔離する（プロセス連続起動は
   // 2回目以降にコンポジタがフレームを発行しない事象があるため、タブ方式が安定）。
-  const newPage = async () => {
+  const newPage = async ({ width = 1280, height = 800 } = {}) => {
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
     await send("Page.enable", {}, sessionId);
     await send("Runtime.enable", {}, sessionId);
+    // ビューポートを明示固定（プラットフォームのウィンドウ装飾差で 1280x713 等になるのを防ぐ）
+    await send("Emulation.setDeviceMetricsOverride",
+      { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
     return {
       // ページスクリプト実行前に評価されるスクリプトを登録（navigate 前に呼ぶ・localStorage 事前注入等）
       async injectOnNewDocument(source) {
         await send("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
       },
-      // 注意: navigate 前に仮想時間を pause で凍結する方式は、レンダラが凍結状態で生成され
-      // BeginFrame 供給が不安定化する（rAFが数回で止まる）実測があるため採らない。
-      // ロード〜仮想時間付与のわずかな実時間窓の影響は、アプリ側の「ショットモード初回
-      // フレームでのカメラ即時スナップ」で決定論化する（ui.mjs #153）。
+      // 決定論の設計メモ（#153・実測済みの落とし穴）:
+      //  - CDP 仮想時間（setVirtualTimePolicy）は再付与境界で rAF 連鎖が止まる事象がある
+      //    （mac/linux 双方で実測）ため使わない。
+      //  - 代わりにアプリ側がショットモードで合成クロック（フレーム番号×16.6ms）を使う
+      //    （ui.mjs #153）。ドライバは実時間で SHOT_DONE をポーリングするだけでよい。
       async navigate(url, { timeoutMs = 90000 } = {}) {
         const loaded = waitEvent("Page.loadEventFired", { sessionId, timeoutMs });
         await send("Page.navigate", { url }, sessionId);
         await loaded;
-      },
-      // 仮想時間を budget(ms) ぶん進めて完了を待つ（rAF が決定論の 16.6ms 刻みになる）
-      async advanceVirtualTime(budgetMs, { timeoutMs = 300000 } = {}) {
-        const done = waitEvent("Emulation.virtualTimeBudgetExpired", { sessionId, timeoutMs });
-        await send("Emulation.setVirtualTimePolicy",
-          { policy: "pauseIfNetworkFetchesPending", budget: budgetMs, maxVirtualTimeTaskStarvationCount: 1000000 }, sessionId);
-        await done;
       },
       async evaluate(expr) {
         const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);

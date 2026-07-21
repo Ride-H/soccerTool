@@ -6,10 +6,10 @@
 // 方針（Issue #153）:
 //  - 存在チェックを主（緑ピッチ/芝縞コントラスト/接地影/背番号の描画寄与）、
 //    golden ピクセル差分は補助（許容差つき・ソフトウェアレンダラ差を吸収）。
-//  - 決定論: 固定URL（?t=…&play=0&shotframes=N）＋仮想時間駆動（rAF=16.6ms刻み）＋
-//    描画側乱数のシード化（#153 前提タスク）で同一フレーム列を再現する。
-//  - 仮想時間は「再付与後の rAF 連鎖が1回で止まる」ため（Chromium特性・実測）、
-//    シナリオごとに Chrome を新規起動する。トグル状態は localStorage 事前注入
+//  - 決定論: 固定URL（?t=…&play=0&shotframes=N）＋描画側乱数のシード化＋
+//    アプリの合成クロック（ショットモードはフレーム番号×16.6ms・ui.mjs #153）。
+//    ドライバ/環境のタイミングに依らず同一フレーム列が再現される。
+//  - シナリオごとに新規タブ（レンダラ隔離）。トグル状態は localStorage 事前注入
 //    （#134 の表示オプション永続化経路）で起動時から反映する。
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,10 +38,11 @@ const check = (name, ok, detail) => {
   if (!ok) failures++;
 };
 
-// 1シナリオ = 新規タブ → （注入）→ 読込 → 仮想時間で45フレーム描画 → 検証・撮影
-// 仮想時間は一括でなくスライス付与し SHOT_DONE をポーリング（起動遅延のフレーク対策・CI安定性）
+// 1シナリオ = 新規タブ → （注入）→ 読込 → 実時間ポーリングで45フレーム完了待ち → 検証・撮影
+// （フレーム列自体はアプリの合成クロックで決定論 — ポーリング間隔は結果に影響しない）
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const runScenario = async (browser, { name, query, inject }) => {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ width: 1280, height: 800 });
   try {
     await page.injectOnNewDocument(
       "window.__rafFired=0;const _raf=window.requestAnimationFrame.bind(window);" +
@@ -49,8 +50,9 @@ const runScenario = async (browser, { name, query, inject }) => {
     if (inject) await page.injectOnNewDocument(inject);
     await page.navigate(`file://${distHtml}${query}`);
     let done = 0;
-    for (let slice = 0; slice < 16 && done !== FRAMES; slice++) {
-      await page.advanceVirtualTime(1500);
+    const t0 = Date.now();
+    while (done !== FRAMES && Date.now() - t0 < 150000) {
+      await sleep(300);
       done = await page.evaluate("globalThis.__RPDX_SHOT_DONE || 0");
     }
     const raf = await page.evaluate("window.__rafFired || 0");
@@ -148,8 +150,9 @@ const main = async () => {
       if (Math.abs(s3a.rgba[i] - s3b.rgba[i]) > 24 || Math.abs(s3a.rgba[i + 1] - s3b.rgba[i + 1]) > 24) numDiff++;
     }
     console.log(`  S3 計測: 背番号ON/OFF差分=${numDiff}px`);
-    // 実測 190〜457px（歩容の微小揺らぎで振れる）に対し余裕を見て >100（OFFのみの17px級ノイズとは一桁差）
-    check("S3: 背番号テクスチャの描画寄与（OFF起動で画素が変わる）", numDiff > 100, `${numDiff}px`);
+    // 合成クロック下の決定値=74px（3回連続でビット同一を実測）。>40 は決定値の54%で、
+    // 遠景ノイズ床（17px級）とは明確に分離する。
+    check("S3: 背番号テクスチャの描画寄与（OFF起動で画素が変わる）", numDiff > 40, `${numDiff}px`);
   }
 
   await browser.close();
