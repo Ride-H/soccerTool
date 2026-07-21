@@ -30,11 +30,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"   # #153: 視覚スモークが Node 組込み WebSocket（22+）を使う
       - name: Run tests (node --test)
         run: node --test rpdx/test/*.test.mjs
       - name: Build single-file HTML
         run: node rpdx/build.mjs
+      # #153: 視覚回帰ゲート — CDP 生プロトコル + Chrome for Testing（公式配布・バージョン固定）
+      # ランナー同梱 Chrome は自動更新でピクセルが漂移するため、golden の正準レンダラを固定する。
+      - name: Pin Chrome for visual gate (CfT 148.0.7778.97)
+        run: |
+          curl -sSfL -o /tmp/cft.zip https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.97/linux64/chrome-linux64.zip
+          unzip -q /tmp/cft.zip -d /tmp/cft
+          echo "CHROME_BIN=/tmp/cft/chrome-linux64/chrome" >> "$GITHUB_ENV"
+      - name: Visual regression smoke (#153)
+        run: node rpdx/test/visual/smoke.mjs
+      - name: Upload visual smoke output (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-smoke-out
+          path: rpdx/test/visual/out
+          if-no-files-found: ignore
       # Pages 用サイトの組み立ては main への push（= PR 結合）時のみ
       - name: Assemble Pages site (index.html + dist)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
