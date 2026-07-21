@@ -35,7 +35,13 @@ jobs:
         run: node --test rpdx/test/*.test.mjs
       - name: Build single-file HTML
         run: node rpdx/build.mjs
-      # #153: 視覚回帰ゲート — CDP 生プロトコル + ランナー同梱 Chrome（依存追加なし）
+      # #153: 視覚回帰ゲート — CDP 生プロトコル + Chrome for Testing（公式配布・バージョン固定）
+      # ランナー同梱 Chrome は自動更新でピクセルが漂移するため、golden の正準レンダラを固定する。
+      - name: Pin Chrome for visual gate (CfT 148.0.7778.97)
+        run: |
+          curl -sSfL -o /tmp/cft.zip https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.97/linux64/chrome-linux64.zip
+          unzip -q /tmp/cft.zip -d /tmp/cft
+          echo "CHROME_BIN=/tmp/cft/chrome-linux64/chrome" >> "$GITHUB_ENV"
       - name: Visual regression smoke (#153)
         run: node rpdx/test/visual/smoke.mjs
       - name: Upload visual smoke output (on failure)

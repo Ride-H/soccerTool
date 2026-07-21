@@ -26,8 +26,12 @@ mkdirSync(outDir, { recursive: true });
 
 const UPDATE = process.env.UPDATE_GOLDEN === "1";
 const FRAMES = 45;
-// golden 比較の許容: チャネル差 >20 の画素が 2.5% まで（SwiftShaderの環境差を吸収・大破綻のみ検知）
-const GOLDEN_TOL = 20, GOLDEN_RATIO = 0.025;
+// golden 比較の許容: チャネル差 >20 の画素比。
+// golden の正準環境は CI（linux・Chrome for Testing 固定版）— linux では 2.5% の厳密ゲート。
+// 他OSはフォントラスタライズが根本的に異なり同一版でも 9〜11% ずれる（実測）ため、
+// 広い閾値で「大破綻のみ」検知する（存在チェックが主・golden はローカルでは参考）。
+const GOLDEN_TOL = 20;
+const GOLDEN_RATIO = process.platform === "linux" ? 0.025 : 0.20;
 // ROI（1280x800・サイドパネル/HUD/タイムラインを避けたピッチ領域）
 const ROI_TAC = { x0: 430, y0: 240, x1: 850, y1: 620 };   // 俯瞰
 const ROI_BRD = { x0: 380, y0: 300, x1: 900, y1: 600 };   // 既定（放送）カメラ
