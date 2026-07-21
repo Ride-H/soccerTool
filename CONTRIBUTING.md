@@ -50,3 +50,15 @@ gh pr create --base main --head dev
 - **テスト緑**: `node --test rpdx/test/*.test.mjs` が全通過すること。
 
 新しい試合・チーム・選手の追加は [docs/MATCH_PACKS.md](docs/MATCH_PACKS.md) の手順に従ってください。
+
+## 視覚回帰ゲート（golden 画像）の更新ルール（#153）
+
+CI は `node rpdx/test/visual/smoke.mjs` で **視覚スモーク**（決定論固定時刻のスクリーンショットに対する
+存在チェック＋golden 画像との許容差比較）を実行します。
+
+- **golden（`rpdx/test/visual/golden/*.png`）は「意図的な視覚変更」の PR でのみ更新**してください。
+  更新は `UPDATE_GOLDEN=1 node rpdx/test/visual/smoke.mjs` で再生成し、**PR 本文に更新理由を明記**、
+  差分画像をレビューで承認してから結合します。意図しない差分で CI が落ちた場合は golden を
+  上書きせず、原因（メッシュ割れ・法線・カメラ・色）を先に直します。
+- スモークは依存ゼロ（Node 組込み WebSocket + CDP 生プロトコル + ランナー同梱 Chrome）です。
+  ローカル実行は `CHROME_BIN` で Chrome を指定できます（例: macOS の Chrome.app）。

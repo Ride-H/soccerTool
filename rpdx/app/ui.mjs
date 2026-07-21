@@ -2523,10 +2523,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     // #152: 滑らかさ守衛 — ヘッドレス検証（shotframes）と ?gov=0 では凍結（決定論スクショ保護）
     if (govOn) R.quality.tick(rawMs, now / 1000);
     if (++frameCount < maxFrames) requestAnimationFrame(loop);
+    else if (maxFrames !== Infinity) globalThis.__RPDX_SHOT_DONE = frameCount;   // #153: 視覚回帰の描画完了シグナル
   };
   // ヘッドレス（shotframes指定時）: 正準曲線の完了を待ってから描画開始
   // — 仮想時間を計算に集中させ、全フレームにPSY/曲線が確実に載る
-  const startLoop = () => requestAnimationFrame(loop);
+  // #153: 開始直前にカメラをプリセットへ即時スナップ（起動中の実時間で進んだ追従イージングを
+  // 破棄し、以後の仮想時間フレーム列を決定論化する）
+  const startLoop = () => {
+    if (maxFrames !== Infinity && renderer) renderer.setPreset(App.camPreset || "broadcast", true);
+    requestAnimationFrame(loop);
+  };
   const startWhenReady = () => {
     if (maxFrames === Infinity) { startLoop(); return; }
     const ready = () => curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }));

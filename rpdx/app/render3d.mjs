@@ -8,6 +8,8 @@
   const N = R.noise;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, u) => a + (b - a) * u;
+  // #153: 決定論シーケンシャル乱数 — 視覚要素に素の乱数関数は使わない（視覚回帰の再現性契約・visualgate.test が走査）
+  const seqRand = (seed) => { let s = seed | 0; return () => N.hash((s = (s + 0x9e3779b9) | 0)); };
 
   /* ------------------------------ mat4 ------------------------------ */
   const M4 = {
@@ -288,10 +290,11 @@
       g.fillRect(px(-52.5), py(-34 + j * 3.4), 105 * sx, 3.4 * sy);
     }
     g.restore();
-    // 芝ノイズ（微粒・刈り跡のざらつき）
+    // 芝ノイズ（微粒・刈り跡のざらつき）— #153: 決定論シード（視覚回帰の再現性）
+    const rnd = seqRand(0x51ED01);
     for (let i = 0; i < 11000; i++) {
-      const x = Math.random() * W, y = Math.random() * H;
-      g.fillStyle = `rgba(${20 + Math.random() * 34},${70 + Math.random() * 46},${40 + Math.random() * 28},0.055)`;
+      const x = rnd() * W, y = rnd() * H;
+      g.fillStyle = `rgba(${20 + rnd() * 34},${70 + rnd() * 46},${40 + rnd() * 28},0.055)`;
       g.fillRect(x, y, 2.3, 2.3);
     }
     // ライン
@@ -327,10 +330,11 @@
     const grad = g.createLinearGradient(0, 0, 0, 192);
     grad.addColorStop(0, "#0A0F1C"); grad.addColorStop(1, "#141D33");
     g.fillStyle = grad; g.fillRect(0, 0, 1024, 192);
+    const rnd = seqRand(0x51ED02);   // #153: 決定論シード（視覚回帰の再現性）
     for (let i = 0; i < 5200; i++) {
-      const x = Math.random() * 1024, y = 16 + Math.random() * 168;
-      const t = Math.random();
-      g.fillStyle = t < 0.24 ? "rgba(255,198,26,0.5)" : t < 0.5 ? "rgba(74,125,255,0.5)" : `rgba(${150 + Math.random() * 105},${150 + Math.random() * 90},${140 + Math.random() * 80},0.42)`;
+      const x = rnd() * 1024, y = 16 + rnd() * 168;
+      const t = rnd();
+      g.fillStyle = t < 0.24 ? "rgba(255,198,26,0.5)" : t < 0.5 ? "rgba(74,125,255,0.5)" : `rgba(${150 + rnd() * 105},${150 + rnd() * 90},${140 + rnd() * 80},0.42)`;
       g.fillRect(x, y, 2.6, 2.6);
     }
     return cv;
@@ -817,7 +821,7 @@
     const figState = new Map();
     const figOf = (key) => {
       let f = figState.get(key);
-      if (!f) { f = { yaw: Math.PI / 2, phase: Math.random() * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }
+      if (!f) { f = { yaw: Math.PI / 2, phase: N.hash(N.seedOf(String(key))) * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }   // #153: 位相は選手キー由来の決定論シード
       return f;
     };
     const lerpAngle = (a, b, u) => {
