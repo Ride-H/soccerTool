@@ -247,6 +247,8 @@ self.onmessage = (e) => {
     $("#appVer") && ($("#appVer").textContent = "v" + (R.VERSION || "?"));   // バージョン表示
     // #152: 品質ティア確定（?tier= > 端末保存 > 自動判定・迷ったら軽量）— レンダラ生成前
     R.quality && R.quality.init();
+    // #154: 旧カプセル描画への切り戻しフラグ（移行期のデバッグ用・VIS-02 完了後に撤去）
+    App.options.figCapsule = urlq.get("fig") === "capsule";
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
     // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");

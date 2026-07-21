@@ -44,8 +44,9 @@ jobs:
           echo "CHROME_BIN=/tmp/cft/chrome-linux64/chrome" >> "$GITHUB_ENV"
       - name: Visual regression smoke (#153)
         run: node rpdx/test/visual/smoke.mjs
-      - name: Upload visual smoke output (on failure)
-        if: failure()
+      # 視覚スモークの実レンダリングを常時アーカイブ（失敗時の原因調査＋golden再ベースライン素材）
+      - name: Upload visual smoke output
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: visual-smoke-out
