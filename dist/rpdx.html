@@ -8491,12 +8491,15 @@ window.addEventListener("error", (e) => {
   const BODY_MESH = buildBodyMesh();
   // ポーズ（既存ゲイトの回転群）→ ボーンパレット（15×mat4・スキン行列 = G × T(-head)）
   const poseSkin = (p) => {
+    const lookY = p.lookYaw || 0, lookP = p.lookPitch || 0;   // #156 注視（首0.6+頭0.4=合計1.0で分配）
+    const sway = (p.swayX || p.swayY || p.swayZ)              // #156 重心スウェイ（骨盤の並進・下流が追従）
+      ? M4.t(p.swayX || 0, p.swayY || 0, p.swayZ || 0) : null;
     const rot = [
-      null,
+      sway,                                                     // pelvis: 重心スウェイ（無指定=従来通り恒等）
       M4.mul(M4.rotX(p.lean * 0.5), M4.roty(p.twist * 0.45)),   // spine
       M4.mul(M4.rotX(p.lean * 0.5), M4.roty(p.twist * 0.55)),   // chest（累積=lean/twist・腕はここに従う）
-      M4.roty(-p.twist * 0.6),                                   // neck: 首はひねりを6割打ち消す（既存規則）
-      null,
+      M4.mul(M4.roty(-p.twist * 0.6 + lookY * 0.6), M4.rotX(lookP * 0.4)),  // neck: 首ひねり打消し＋注視
+      M4.mul(M4.roty(lookY * 0.4), M4.rotX(lookP * 0.6)),       // head: 注視（無指定=恒等）
       M4.rotX(p.hipL), M4.rotX(p.kneeL), null,
       M4.rotX(p.hipR), M4.rotX(p.kneeR), null,
       M4.rotX(p.swL), M4.rotX(-p.elL),
@@ -8519,6 +8522,46 @@ window.addEventListener("error", (e) => {
     h: 0.955 + N.hash2(N.seedOf(key + "|h"), 17) * 0.095,   // 身長 0.955..1.05
     w: 0.945 + N.hash2(N.seedOf(key + "|w"), 41) * 0.11,    // 横幅 0.945..1.055
   });
+  // #156 2ボーン解析フットIK（矢状面・Y上/Z前）: 股(hipY,hipZ)から足首を(tY,tZ)へ届かせる
+  // 股・膝の rotX を返す（poseSkin の既存 rotX 規約と一致）。膝は前方（ポールベクトル）。
+  // 骨長は SKEL 由来（thigh 0.94→0.46=0.48・shin 0.46→0.06=0.40）。
+  const IK_L1 = 0.48, IK_L2 = 0.40;
+  const solveLegIK = (hipY, hipZ, tY, tZ) => {
+    let vf = tZ - hipZ, vu = tY - hipY;             // fwd(+Z), up(+Y)
+    let d = Math.hypot(vf, vu);
+    if (d < 1e-4) { vf = 0; vu = -1; d = 1e-4; }
+    const dmin = Math.abs(IK_L1 - IK_L2) + 0.02, dmax = IK_L1 + IK_L2 - 0.005;
+    const dc = clamp(d, dmin, dmax);
+    const uf = vf / d, uu = vu / d;                 // 目標方向（単位）
+    // 膝屈曲（rotX 正 = 屈曲・既存規約）: d²=L1²+L2²+2L1L2cos(θk)
+    const ck = clamp((dc * dc - IK_L1 * IK_L1 - IK_L2 * IK_L2) / (2 * IK_L1 * IK_L2), -1, 1);
+    const knee = Math.acos(ck);
+    // 股: 目標方向の rotX 角 −（三角形の股角 α）。直下(0,-1)基準で rotX(θ)→dir(fwd,up)=(-sinθ,-cosθ)。
+    const thetaDir = Math.atan2(-uf, -uu);
+    const ca = clamp((IK_L1 * IK_L1 + dc * dc - IK_L2 * IK_L2) / (2 * IK_L1 * dc), -1, 1);
+    const alpha = Math.acos(ca);
+    return { hip: thetaDir - alpha, knee, reach: d > dmax };
+  };
+  // フットIK の前方運動学（テスト用・poseSkin と同じ (fwd,up) 規約）
+  const legFK = (hipY, hipZ, hip, knee) => {
+    const kZ = hipZ - IK_L1 * Math.sin(hip), kY = hipY - IK_L1 * Math.cos(hip);
+    return { z: kZ - IK_L2 * Math.sin(hip + knee), y: kY - IK_L2 * Math.cos(hip + knee) };
+  };
+  // #156 歩容の足配置（純関数・スケーティング解消の核）: 位相と速度から足の局所前後(fz)/高さ(fy)。
+  // 位相は PHASE_RATE で進む前提。接地相 c∈[0,π) は fz が速度整合で後退＝bodyZ 前進を打ち消し
+  // ワールド固定（支持脚が滑らない）。遊脚 c∈[π,2π) は後→前へ持ち上げて次の接地へ。
+  // ストライド上限 0.42 は脚の可達域（足首を接地高で届く水平距離）に合わせ IK のクランプ揺れを防ぐ。
+  // 【正直な限界】歩行では足首travel＝body travel で厳密固定。サッカー走行速度では上限に達し
+  // body が足を追い越すため残存スリップが出る（脚長×自然なケイデンスの物理限界・実時間ゲーム共通）。
+  const STRIDE_MAX = 0.42;
+  const PHASE_RATE = (v) => 4.2 + 0.85 * v;
+  const footPlace = (phase, v, side) => {
+    const stride = clamp(v * Math.PI / PHASE_RATE(v), 0, STRIDE_MAX);
+    const c = (((phase + (side < 0 ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    if (c < Math.PI) return { fz: stride * 0.5 - stride * (c / Math.PI), fy: 0, stance: true, stride };
+    const t = (c - Math.PI) / Math.PI, e = t * t * (3 - 2 * t);
+    return { fz: -stride * 0.5 + stride * e, fy: Math.sin(t * Math.PI) * (0.045 + 0.10 * clamp(v / 6, 0, 1)), stance: false, stride };
+  };
 
   const quadMesh = () => ({
     pos: new Float32Array([-0.5,0,-0.5, 0.5,0,-0.5, 0.5,0,0.5, -0.5,0,0.5]),
@@ -8882,7 +8925,7 @@ window.addEventListener("error", (e) => {
   /* ============================== renderer ============================== */
   R.render3d = {};
   // #154 テスト用の純データ/純関数（DOM/GL非依存 — node --test が骨格・メッシュ・ポーズを検証）
-  R.render3d._skin = { SKEL, buildBodyMesh, poseSkin, bodyVarOf, BODY_MESH };
+  R.render3d._skin = { SKEL, buildBodyMesh, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace, PHASE_RATE, BODY_MESH };
   R.render3d.create = (canvas, matchInit) => {
     let match = matchInit;
     const gl = canvas.getContext("webgl2", {
@@ -9303,7 +9346,7 @@ window.addEventListener("error", (e) => {
     // 両描画経路が共有する。数式は従来 drawFigure から移設（挙動・文脈ポーズは不変）。
     // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
     // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
-    const figPose = (key, px, pz, dt, defYaw, bx, bz, ex) => {
+    const figPose = (key, px, pz, dt, defYaw, bx, bz, ex, time) => {
       const f = figOf(key);
       if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
       const dx = px - f.lx, dz = pz - f.lz;
@@ -9345,7 +9388,8 @@ window.addEventListener("error", (e) => {
         : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
       const lift = jump * 0.85;                               // 跳躍の垂直変位（描画のみ）
       const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0) + lift;
-      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
+      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);      // capsule（従来・bob込み）
+      const baseFlat = M4.trs(px, 0, pz, 1, 1, 1, f.yaw);    // skinned（足接地・bob は骨盤スウェイ swayY へ）
       // 上半身: 前傾 + 脚と逆位相のひねり（肩の回旋 — 人形っぽさを消す）
       const twist = Math.sin(f.phase) * (0.05 + 0.16 * run) * gaitAmp;
       const upper = M4.chain(base, M4.t(0, 0.90, 0), M4.rotX(lean), M4.trs(0, 0, 0, 1, 1, 1, twist));
@@ -9360,7 +9404,55 @@ window.addEventListener("error", (e) => {
         const elbow = jump > 0.05 ? 0.3 : 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
         return { hip, knee, armSw, elbow };
       };
-      return { f, base, upper, run, gaitAmp, lean, bob, twist, jump, header, stumble, backpedal, L: side(-1), R: side(1) };
+      const L = side(-1), R = side(1);
+
+      // ================= #156 リッチアニメ（スキンド経路用・決定論） =================
+      const tSec = time || 0;
+      const kick = ex && ex.kick ? clamp(ex.kick, 0, 1) : 0;      // 0..1 キック包絡
+      const kickLeg = ex && ex.kickLeg ? ex.kickLeg : 1;          // 蹴り足（±1）
+      const normalMode = jump < 0.05 && stumble < 0.05;          // 通常接地（IK対象）
+      // 加速度（ローパス）→ アンティシペーション前傾
+      const accNow = (dt > 0 && dist <= 6) ? clamp((f.v - (f.pv ?? f.v)) / Math.max(dt, 1e-3), -12, 12) : 0;
+      f.pv = f.v;
+      f.acc = (f.acc ?? 0) + (accNow - (f.acc ?? 0)) * (dt > 0 ? Math.min(1, dt * 2.5) : 1);
+      // 重心スウェイ＋呼吸（アイドルでも静止しない）: 横=歩容 / 縦=bob+呼吸 / 前後=加速リーン
+      const koff = N.hash(N.seedOf(String(key) + "|br")) * 6.28;
+      const idleAmt = clamp(1 - f.v / 0.7, 0, 1);
+      const breath = Math.sin(tSec * 1.55 + koff) * 0.009 * idleAmt;
+      const idleSway = Math.sin(tSec * 0.8 + koff) * 0.012 * idleAmt;
+      const swayX = Math.sin(f.phase) * 0.018 * run * gaitAmp + idleSway;
+      const swayY = bob + breath;
+      const swayZ = clamp(-f.acc * 0.010, -0.045, 0.045);
+      // フットIK: ストライドを速度から算出（支持脚を世界固定＝スケーティング解消・footPlace が核）
+      const REST_ANKLE = 0.085;
+      const ikOf = (s) => {
+        // キック足: フライト開始で前方へ振り抜く（接地IKを上書き）
+        if (kick > 0.02 && s === kickLeg) {
+          const swing = Math.sin(clamp(kick, 0, 1) * Math.PI);          // 0→1→0 の振り
+          return { hip: -1.25 * swing, knee: 0.15 + 0.7 * (1 - kick) * swing };
+        }
+        const ft = footPlace(f.phase, f.v, s);
+        const r = solveLegIK(0.94 + swayY, swayZ, REST_ANKLE + ft.fy, swayZ + ft.fz);
+        return { hip: r.hip, knee: r.knee };
+      };
+      const ikL = normalMode ? ikOf(-1) : { hip: L.hip, knee: L.knee };
+      const ikR = normalMode ? ikOf(1) : { hip: R.hip, knee: R.knee };
+      // 注視（look-at）: 頭・首・胸でボール/進行方向へ（角度クランプ・首肩に分配）
+      let lookYaw = 0, lookPitch = 0;
+      if (jump < 0.05) {
+        const tgtYaw = dBall < 42 ? Math.atan2(dbx, dbz) : f.yaw;
+        let dyaw = tgtYaw - f.yaw;
+        while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+        lookYaw = clamp(dyaw, -1.0, 1.0);                              // 頭+首の合計ヨー（±57°）
+        lookPitch = clamp((dBall < 14 ? 0.14 : 0.02) - kick * 0.15, -0.32, 0.32);
+      } else if (header) { lookPitch = -0.2 * jump; }                   // 空中戦の勝者は上を見る
+      // キック時の前傾（蹴り足の振りに同調）
+      const kickLean = kick > 0.02 ? 0.22 * Math.sin(clamp(kick, 0, 1) * Math.PI) : 0;
+
+      return {
+        f, base, baseFlat, upper, run, gaitAmp, lean: lean + kickLean, bob, twist, jump, header, stumble, backpedal,
+        L, R, ikL, ikR, swayX, swayY, swayZ, lookYaw, lookPitch, normalMode,
+      };
     };
     // #134/#154: キット背番号 — 胴の背面クワッド。model は各描画経路が胴の背面に合わせて構築する。
     const drawKitNum = (model, numTx, jump, alpha) => {
@@ -9377,8 +9469,8 @@ window.addEventListener("error", (e) => {
     const legMix = (tone, shorts) =>
       [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
     // 旧経路（カプセル寄せ集め）— #154 移行期の切り戻し用に温存（?fig=capsule）。VIS-02 完了後に撤去予定。
-    const drawFigureCapsule = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
-      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex);
+    const drawFigureCapsule = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time);
       const op = { emiss: 0.04, alpha };
       const legC = legMix(tone, shorts);
       for (const s of [-1, 1]) {
@@ -9412,22 +9504,24 @@ window.addEventListener("error", (e) => {
     // #154 新経路: 単一スキンドメッシュ1回描画（関節球なし・膝/肘/股/脊椎で表面が連続）
     const skinPal = new Float32Array(18);       // 6色 × vec3
     const BOOT_COL = [0.09, 0.09, 0.105];
-    const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
-      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex);
+    const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time);
       const legC = legMix(tone, shorts);
       skinPal.set(shirt, 0); skinPal.set(shorts, 3); skinPal.set(tone.skin, 6);
       skinPal.set(tone.hair, 9); skinPal.set(legC, 12); skinPal.set(BOOT_COL, 15);
       const bones = poseSkin({
         lean: P.lean, twist: P.twist,
-        hipL: P.L.hip, kneeL: P.L.knee, hipR: P.R.hip, kneeR: P.R.knee,
+        swayX: P.swayX, swayY: P.swayY, swayZ: P.swayZ,      // #156 重心スウェイ（bob込み・呼吸）
+        lookYaw: P.lookYaw, lookPitch: P.lookPitch,           // #156 注視
+        hipL: P.ikL.hip, kneeL: P.ikL.knee, hipR: P.ikR.hip, kneeR: P.ikR.knee,   // #156 フットIK
         swL: P.L.armSw, elL: P.L.elbow, swR: P.R.armSw, elR: P.R.elbow,
       });
-      // 体格スケールを base に折り込む（足接地=原点なので接地は保存・番号も同スケールに乗る）
+      // 体格スケールを baseFlat（足接地・bob抜き）に折り込む（接地は保存・番号も同スケール）
       const bv = bodyVarOf(key);
-      const sbase = M4.chain(P.base, M4.scale(bv.w, bv.h, bv.w));
+      const sbase = M4.chain(P.baseFlat, M4.scale(bv.w, bv.h, bv.w));
       useSkin(sbase, bones, skinPal, { emiss: 0.04, alpha });
       drawMesh(mSkinBody);
-      // 背番号は胸ボーンに追従（bones の chest=index2 スキン行列で胴の傾き/ひねりに乗る）
+      // 背番号は胸ボーンに追従（bones の chest=index2 スキン行列で胴の傾き/ひねり/スウェイに乗る）
       drawKitNum(kitNumSkinned(sbase, bones.slice(2 * 16, 2 * 16 + 16)), numTx, P.jump, alpha);
       return P.f.v;
     };
@@ -9791,6 +9885,12 @@ window.addEventListener("error", (e) => {
 
       // 選手（奥→手前ソートで半透明カプセル — 透明感）
       const contribMap = scene.contribMap || new Map();
+      // #156 キック検出: フライト中の出し手（from）に振り抜き包絡を与える（u=進行度＝時刻の関数・決定論）
+      let kicker = null, kickEnv = 0;
+      if (state.carrier && state.carrier.mode === "flight" && state.carrier.from) {
+        const u = state.carrier.u || 0;
+        if (u < 0.34) { kicker = state.carrier.from.team + ":" + state.carrier.from.no; kickEnv = 1 - u / 0.34; }
+      }
       const sorted = state.players.slice().sort((a, b) => {
         const da = (eye[0] - a.x) ** 2 + (eye[2] + a.y) ** 2;   // 幅軸 worldZ=-fieldY
         const db = (eye[0] - b.x) ** 2 + (eye[2] + b.y) ** 2;
@@ -9885,12 +9985,15 @@ window.addEventListener("error", (e) => {
           if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
           else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
         }
+        if (kicker && figKey === kicker) {   // #156 蹴り足＝選手ごとの利き足（決定論）
+          ex.kick = kickEnv; ex.kickLeg = N.hash2(N.seedOf(figKey), 3) < 0.5 ? -1 : 1;
+        }
         const numTx = (options.kitNumbers !== false) ? kitNumTex(p.team, p.no, isGK) : null;
         drawFigure(
           figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
           shirt, shorts, toneOf(p.team, p.no),
           bodyAlpha * alpha, Math.atan2(dir, 0),
-          state.ball.x, -state.ball.y, ex, numTx
+          state.ball.x, -state.ball.y, ex, numTx, time
         );
         gl.disable(gl.BLEND);
       }
@@ -9930,7 +10033,7 @@ window.addEventListener("error", (e) => {
         gl.disable(gl.BLEND);
         drawFigure("REF:" + ri, rf.x, rz, dt,
           [0.13, 0.13, 0.15], [0.10, 0.10, 0.12], REF_TONE, 1,
-          Math.atan2(b.x - rf.x, bz - rz), b.x, bz, null, null);
+          Math.atan2(b.x - rf.x, bz - rz), b.x, bz, null, null, time);
       }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
