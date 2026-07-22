@@ -37,6 +37,29 @@ const vertsWhere = (m, pred) => {
 };
 const maxAbsX = (verts) => verts.reduce((mx, p) => Math.max(mx, Math.abs(p.x)), 0);
 
+test("#157 頂点AO: 接触遮蔽域（腋/股/顎下）が暗く・顔/胸は明るい・全域[0,1]", () => {
+  const m = S.BODY_MESH;
+  const nv = m.pos.length / 3;
+  assert.equal(m.ao.length, nv, "AO は頂点数ぶん");
+  let occluded = 0;
+  for (let v = 0; v < nv; v++) { const a = m.ao[v]; assert.ok(a >= 0 && a <= 1, `AO範囲 ${a}`); if (a < 0.85) occluded++; }
+  assert.ok(occluded >= 40, `遮蔽頂点が一定数ある (${occluded})`);
+  // 帯ごとの平均AO（胴カラム・腕を含む y 帯）
+  const bandAo = (lo, hi, pred) => {
+    let s = 0, n = 0;
+    for (let v = 0; v < nv; v++) { const y = m.pos[v * 3 + 1]; if (y > lo && y < hi && (!pred || pred(v))) { s += m.ao[v]; n++; } }
+    return n ? s / n : 1;
+  };
+  const groin = bandAo(0.82, 0.90, (v) => m.bidx[v * 4] <= 4);  // 股下（胴カラム＝脚を除外）
+  const face = bandAo(1.70, 1.78);        // 顔
+  const chest = bandAo(1.30, 1.44, (v) => m.bidx[v * 4] <= 4);  // 胸（胴カラム）
+  const underChin = bandAo(1.585, 1.615, (v) => m.bidx[v * 4] <= 4);  // 首（顎下）
+  assert.ok(groin < 0.72, `股下が暗い ${groin.toFixed(2)}`);
+  assert.ok(underChin < 0.82, `顎下が暗い ${underChin.toFixed(2)}`);
+  assert.ok(face > 0.97, `顔は明るい ${face.toFixed(2)}`);
+  assert.ok(chest > 0.95, `胸は明るい ${chest.toFixed(2)}`);
+});
+
 test("#155 造形: V字テーパー（肩幅 > 腰幅）", () => {
   const m = S.BODY_MESH;
   const shoulder = maxAbsX(vertsWhere(m, (p) => p.y > 1.46 && p.y < 1.54 && p.cid === 0));   // 肩ヨーク帯（シャツ）
