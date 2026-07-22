@@ -123,23 +123,29 @@
     [2, 0.30, 1.50, 0],    // 13 upArmR
     [13, 0.30, 1.20, 0],   // 14 foreArmR
   ];
-  // 色ID: 0=シャツ / 1=ショーツ / 2=肌 / 3=髪 / 4=脚（既存の肌×ショーツ混合色）
+  // 色ID: 0=シャツ / 1=ショーツ / 2=肌 / 3=髪 / 4=脚（肌×ショーツ混合色）/ 5=ブーツ（暗色）
+  // #155 造形: 楕円断面（rx=横半径/rz=前後半径）で V字テーパー・胸郭/腹部絞り・平たい背中を表現。
   const buildBodyMesh = () => {
     const B = { pel: 0, spi: 1, che: 2, nec: 3, hea: 4, thL: 5, shL: 6, foL: 7, thR: 8, shR: 9, foR: 10, uaL: 11, faL: 12, uaR: 13, faR: 14 };
     const pos = [], nor = [], bidx = [], bw = [], cid = [], idx = [];
-    // 縦軸チューブ: ring={x?,y,z?,r,c,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの重み
-    // ブレンドが「連続して曲がる皮膚」を作る（膝・肘・股・脊椎の面割れ解消の本体）。
+    // 縦軸チューブ: ring={x?,y,z?,rx,rz(またはr),c,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの
+    // 重みブレンドが「連続して曲がる皮膚」を作る。法線は楕円勾配＋縦半径勾配の解析式（円の場合は従来と一致）。
     const tube = (rings, seg) => {
       const start = pos.length / 3;
+      const rX = (r) => r.rx ?? r.r, rZ = (r) => r.rz ?? r.r;
       for (let ri = 0; ri < rings.length; ri++) {
         const rg = rings[ri];
+        const rx = rX(rg), rz = rZ(rg);
         const prev = rings[Math.max(0, ri - 1)], next = rings[Math.min(rings.length - 1, ri + 1)];
-        const slope = -((next.r - prev.r) / ((next.y - prev.y) || 1e-4));   // 半径勾配→法線の縦成分
-        const nl = Math.hypot(1, slope);
+        const dy = (next.y - prev.y) || 1e-4;
+        const rxp = (rX(next) - rX(prev)) / dy, rzp = (rZ(next) - rZ(prev)) / dy;   // dr/dy
         for (let si = 0; si < seg; si++) {
           const th = (si / seg) * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
-          pos.push((rg.x || 0) + cs * rg.r, rg.y, (rg.z || 0) + sn * rg.r);
-          nor.push(cs / nl, slope / nl, sn / nl);
+          pos.push((rg.x || 0) + cs * rx, rg.y, (rg.z || 0) + sn * rz);
+          // 外向き法線 ∝ (rz·cosθ, -(rx·rz'·sin²θ + rz·rx'·cos²θ), rx·sinθ)
+          let nx = rz * cs, ny = -(rx * rzp * sn * sn + rz * rxp * cs * cs), nz = rx * sn;
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          nor.push(nx / nl, ny / nl, nz / nl);
           bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
           bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
           cid.push(rg.c);
@@ -170,50 +176,79 @@
       cap(rings.length - 1, true);
       cap(0, false);
     };
-    // 胴〜首〜頭（1本のレイズ = 脊椎の連続曲げ・「頭が刺さっている」継ぎ目なし）
+    // 単骨に固定する楕円体（ミトン手・ブーツ）: 腕/足が筒で終わらないための塊。
+    const blob = (cx, cy, cz, rx, ry, rz, bone, color, latSeg, lonSeg) => {
+      const start = pos.length / 3;
+      for (let la = 0; la <= latSeg; la++) {
+        const phi = (la / latSeg) * Math.PI - Math.PI / 2, cphi = Math.cos(phi), sphi = Math.sin(phi);
+        for (let lo = 0; lo < lonSeg; lo++) {
+          const th = (lo / lonSeg) * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+          pos.push(cx + rx * cphi * cs, cy + ry * sphi, cz + rz * cphi * sn);
+          let nx = (cphi * cs) / rx, ny = sphi / ry, nz = (cphi * sn) / rz;
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          nor.push(nx / nl, ny / nl, nz / nl);
+          bidx.push(bone, 0, 0, 0); bw.push(1, 0, 0, 0); cid.push(color);
+        }
+      }
+      for (let la = 0; la < latSeg; la++) for (let lo = 0; lo < lonSeg; lo++) {
+        const a = start + la * lonSeg + lo, b = start + la * lonSeg + ((lo + 1) % lonSeg);
+        const c = start + (la + 1) * lonSeg + lo, d = start + (la + 1) * lonSeg + ((lo + 1) % lonSeg);
+        idx.push(a, c, b, b, c, d);
+      }
+    };
+    // 胴〜首〜頭（1本のレイズ）: V字テーパー（肩幅>腰幅）＋胸郭の膨らみ＋腹部の絞り＋
+    // 僧帽筋スロープ（肩ヨーク→首の急勾配＝首肩の連続）＋顎/面のある頭部。
     tube([
-      { y: 0.84, r: 0.145, c: 1, b: [B.pel, 1] },
-      { y: 0.94, r: 0.170, c: 1, b: [B.pel, 1] },
-      { y: 1.06, r: 0.175, c: 1, b: [B.pel, 0.75, B.spi, 0.25] },
-      { y: 1.14, r: 0.168, c: 0, b: [B.pel, 0.35, B.spi, 0.65] },
-      { y: 1.26, r: 0.172, c: 0, b: [B.spi, 0.8, B.che, 0.2] },
-      { y: 1.36, r: 0.180, c: 0, b: [B.spi, 0.3, B.che, 0.7] },
-      { y: 1.46, r: 0.183, c: 0, b: [B.che, 1] },
-      { y: 1.53, r: 0.160, c: 0, b: [B.che, 0.85, B.nec, 0.15] },
-      { y: 1.585, r: 0.085, c: 0, b: [B.che, 0.3, B.nec, 0.7] },
-      { y: 1.625, r: 0.062, c: 2, b: [B.nec, 1] },
-      { y: 1.665, r: 0.078, c: 2, b: [B.nec, 0.35, B.hea, 0.65] },
-      { y: 1.73, r: 0.105, c: 2, b: [B.hea, 1] },
-      { y: 1.80, r: 0.112, c: 3, b: [B.hea, 1] },
-      { y: 1.875, r: 0.078, c: 3, b: [B.hea, 1] },
-      { y: 1.915, r: 0.030, c: 3, b: [B.hea, 1] },
+      { y: 0.84, rx: 0.150, rz: 0.130, c: 1, b: [B.pel, 1] },
+      { y: 0.94, rx: 0.165, rz: 0.140, c: 1, b: [B.pel, 1] },              // 骨盤
+      { y: 1.06, rx: 0.150, rz: 0.118, c: 1, b: [B.pel, 0.75, B.spi, 0.25] }, // 腰＝絞り
+      { y: 1.14, rx: 0.156, rz: 0.122, c: 0, b: [B.pel, 0.35, B.spi, 0.65] },
+      { y: 1.26, rx: 0.176, rz: 0.134, c: 0, b: [B.spi, 0.8, B.che, 0.2] },
+      { y: 1.36, rx: 0.196, rz: 0.142, c: 0, b: [B.spi, 0.3, B.che, 0.7] }, // 胸郭
+      { y: 1.44, rx: 0.204, rz: 0.140, c: 0, b: [B.che, 1] },
+      { y: 1.50, rx: 0.214, rz: 0.126, c: 0, b: [B.che, 1] },              // 肩ヨーク（胸となだらかに接続）
+      { y: 1.55, rx: 0.166, rz: 0.108, c: 0, b: [B.che, 0.7, B.nec, 0.3] }, // 僧帽筋スロープ→首
+      { y: 1.60, rx: 0.072, rz: 0.074, c: 2, b: [B.nec, 1] },              // 首
+      { y: 1.635, rx: 0.064, rz: 0.070, c: 2, b: [B.nec, 0.4, B.hea, 0.6] },
+      { y: 1.675, rx: 0.082, rz: 0.094, c: 2, b: [B.hea, 1] },             // 顎（前後に深い）
+      { y: 1.73, rx: 0.104, rz: 0.112, c: 2, b: [B.hea, 1] },              // 顔（額〜頬）
+      { y: 1.79, rx: 0.110, rz: 0.118, c: 3, b: [B.hea, 1] },              // 後頭部の張り（髪）
+      { y: 1.86, rx: 0.082, rz: 0.088, c: 3, b: [B.hea, 1] },
+      { y: 1.905, rx: 0.034, rz: 0.036, c: 3, b: [B.hea, 1] },
     ], 14);
-    // 脚（腿→膝→脛→足首→つま先の連続チューブ・膝リングは腿/脛ブレンド）
-    const leg = (s, th, sh, ft) => tube([
-      { x: s * 0.13, y: 1.00, r: 0.098, c: 4, b: [th, 1] },
-      { x: s * 0.13, y: 0.88, r: 0.106, c: 4, b: [th, 1] },
-      { x: s * 0.13, y: 0.66, r: 0.096, c: 4, b: [th, 1] },
-      { x: s * 0.13, y: 0.52, r: 0.088, c: 4, b: [th, 0.65, sh, 0.35] },
-      { x: s * 0.13, y: 0.46, r: 0.084, c: 4, b: [th, 0.3, sh, 0.7] },
-      { x: s * 0.13, y: 0.38, r: 0.080, c: 4, b: [sh, 0.92, th, 0.08] },
-      { x: s * 0.13, y: 0.22, r: 0.070, c: 4, b: [sh, 1] },
-      { x: s * 0.13, y: 0.10, r: 0.058, c: 4, b: [sh, 0.8, ft, 0.2] },
-      { x: s * 0.13, y: 0.045, r: 0.052, c: 4, b: [ft, 1] },
-      { x: s * 0.13, y: 0.03, r: 0.040, z: 0.06, c: 4, b: [ft, 1] },
-    ], 10);
+    // 脚（腿の質量→膝→ふくらはぎ→足首の絞り・紡錘）。ふくらはぎは前後に厚い（rz>rx）。
+    const leg = (s, th, sh, ft) => {
+      tube([
+        { x: s * 0.13, y: 1.00, rx: 0.098, rz: 0.100, c: 4, b: [th, 1] },
+        { x: s * 0.13, y: 0.88, rx: 0.106, rz: 0.110, c: 4, b: [th, 1] },   // 大腿の質量
+        { x: s * 0.13, y: 0.66, rx: 0.093, rz: 0.096, c: 4, b: [th, 1] },
+        { x: s * 0.13, y: 0.52, rx: 0.085, rz: 0.088, c: 4, b: [th, 0.65, sh, 0.35] },
+        { x: s * 0.13, y: 0.46, rx: 0.082, rz: 0.086, c: 4, b: [th, 0.3, sh, 0.7] },
+        { x: s * 0.13, y: 0.38, rx: 0.076, rz: 0.088, c: 4, b: [sh, 0.92, th, 0.08] }, // ふくらはぎ
+        { x: s * 0.13, y: 0.26, rx: 0.064, rz: 0.070, c: 4, b: [sh, 1] },
+        { x: s * 0.13, y: 0.14, rx: 0.052, rz: 0.056, c: 4, b: [sh, 0.7, ft, 0.3] },   // 足首の絞り
+        { x: s * 0.13, y: 0.10, rx: 0.048, rz: 0.052, c: 4, b: [ft, 1] },
+      ], 10);
+      // ブーツ（つま先/踵のある形状・前方に長い楕円体・足ボーン追従）
+      blob(s * 0.13, 0.045, 0.055, 0.056, 0.050, 0.135, ft, 5, 4, 8);
+    };
     leg(-1, B.thL, B.shL, B.foL);
     leg(1, B.thR, B.shR, B.foR);
-    // 腕（肩袖→肘→手首の連続チューブ・肘リングは上腕/前腕ブレンド・付け根は胸へ弱ブレンド）
-    const arm = (s, ua, fa) => tube([
-      { x: s * 0.30, y: 1.53, r: 0.058, c: 0, b: [B.che, 0.55, ua, 0.45] },
-      { x: s * 0.30, y: 1.45, r: 0.068, c: 0, b: [ua, 1] },
-      { x: s * 0.30, y: 1.37, r: 0.060, c: 2, b: [ua, 1] },
-      { x: s * 0.30, y: 1.26, r: 0.056, c: 2, b: [ua, 0.62, fa, 0.38] },
-      { x: s * 0.30, y: 1.20, r: 0.053, c: 2, b: [ua, 0.3, fa, 0.7] },
-      { x: s * 0.30, y: 1.10, r: 0.050, c: 2, b: [fa, 1] },
-      { x: s * 0.30, y: 0.97, r: 0.044, c: 2, b: [fa, 1] },
-      { x: s * 0.30, y: 0.925, r: 0.034, c: 2, b: [fa, 1] },
-    ], 8);
+    // 腕（肩デルトイド→上腕→肘→前腕→手首の連続チューブ＋ミトン手）。付け根は胸へブレンドし肩ヨークに接続。
+    const arm = (s, ua, fa) => {
+      tube([
+        { x: s * 0.30, y: 1.545, rx: 0.072, rz: 0.070, c: 0, b: [B.che, 0.45, ua, 0.55] }, // デルトイド（肩ヨークに接続）
+        { x: s * 0.30, y: 1.46, rx: 0.070, rz: 0.068, c: 0, b: [ua, 1] },
+        { x: s * 0.30, y: 1.37, rx: 0.061, rz: 0.060, c: 2, b: [ua, 1] },                // 袖→肌
+        { x: s * 0.30, y: 1.26, rx: 0.056, rz: 0.056, c: 2, b: [ua, 0.62, fa, 0.38] },
+        { x: s * 0.30, y: 1.20, rx: 0.053, rz: 0.053, c: 2, b: [ua, 0.3, fa, 0.7] },
+        { x: s * 0.30, y: 1.10, rx: 0.050, rz: 0.050, c: 2, b: [fa, 1] },
+        { x: s * 0.30, y: 0.99, rx: 0.044, rz: 0.045, c: 2, b: [fa, 1] },
+        { x: s * 0.30, y: 0.945, rx: 0.038, rz: 0.040, c: 2, b: [fa, 1] },               // 手首
+      ], 8);
+      // ミトン手（指なしの手のひら塊・前腕ボーン追従・腕が筒で終わらない）
+      blob(s * 0.30, 0.895, 0.010, 0.050, 0.072, 0.062, fa, 2, 4, 6);
+    };
     arm(-1, B.uaL, B.faL);
     arm(1, B.uaR, B.faR);
     return {
@@ -247,6 +282,12 @@
     }
     return out;
   };
+  // #155 選手ごとの決定論的な体格差（身長・横幅の小幅スケール・キー由来）— 全員同一体型の回避。
+  // 足接地は base 原点(y=0)スケールで保存・番号も同スケールに乗る。
+  const bodyVarOf = (key) => ({
+    h: 0.955 + N.hash2(N.seedOf(key + "|h"), 17) * 0.095,   // 身長 0.955..1.05
+    w: 0.945 + N.hash2(N.seedOf(key + "|w"), 41) * 0.11,    // 横幅 0.945..1.055
+  });
 
   const quadMesh = () => ({
     pos: new Float32Array([-0.5,0,-0.5, 0.5,0,-0.5, 0.5,0,0.5, -0.5,0,0.5]),
@@ -317,7 +358,7 @@
   }`;
   const FS_SKIN = `#version 300 es
   precision highp float; in vec3 vNor; in vec3 vWorld; flat in int vCid; out vec4 o;
-  uniform vec3 uPal[5]; uniform vec3 uEye; uniform float uEmiss, uFogD, uAlpha;
+  uniform vec3 uPal[6]; uniform vec3 uEye; uniform float uEmiss, uFogD, uAlpha;
   void main(){
     vec3 n = normalize(vNor);
     vec3 L1 = normalize(vec3(0.35,0.8,0.45)), L2 = normalize(vec3(-0.5,0.6,-0.4));
@@ -610,7 +651,7 @@
   /* ============================== renderer ============================== */
   R.render3d = {};
   // #154 テスト用の純データ/純関数（DOM/GL非依存 — node --test が骨格・メッシュ・ポーズを検証）
-  R.render3d._skin = { SKEL, buildBodyMesh, poseSkin, BODY_MESH };
+  R.render3d._skin = { SKEL, buildBodyMesh, poseSkin, bodyVarOf, BODY_MESH };
   R.render3d.create = (canvas, matchInit) => {
     let match = matchInit;
     const gl = canvas.getContext("webgl2", {
@@ -1138,20 +1179,25 @@
       return P.f.v;
     };
     // #154 新経路: 単一スキンドメッシュ1回描画（関節球なし・膝/肘/股/脊椎で表面が連続）
-    const skinPal = new Float32Array(15);
+    const skinPal = new Float32Array(18);       // 6色 × vec3
+    const BOOT_COL = [0.09, 0.09, 0.105];
     const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
       const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex);
       const legC = legMix(tone, shorts);
-      skinPal.set(shirt, 0); skinPal.set(shorts, 3); skinPal.set(tone.skin, 6); skinPal.set(tone.hair, 9); skinPal.set(legC, 12);
+      skinPal.set(shirt, 0); skinPal.set(shorts, 3); skinPal.set(tone.skin, 6);
+      skinPal.set(tone.hair, 9); skinPal.set(legC, 12); skinPal.set(BOOT_COL, 15);
       const bones = poseSkin({
         lean: P.lean, twist: P.twist,
         hipL: P.L.hip, kneeL: P.L.knee, hipR: P.R.hip, kneeR: P.R.knee,
         swL: P.L.armSw, elL: P.L.elbow, swR: P.R.armSw, elR: P.R.elbow,
       });
-      useSkin(P.base, bones, skinPal, { emiss: 0.04, alpha });
+      // 体格スケールを base に折り込む（足接地=原点なので接地は保存・番号も同スケールに乗る）
+      const bv = bodyVarOf(key);
+      const sbase = M4.chain(P.base, M4.scale(bv.w, bv.h, bv.w));
+      useSkin(sbase, bones, skinPal, { emiss: 0.04, alpha });
       drawMesh(mSkinBody);
       // 背番号は胸ボーンに追従（bones の chest=index2 スキン行列で胴の傾き/ひねりに乗る）
-      drawKitNum(kitNumSkinned(P.base, bones.slice(2 * 16, 2 * 16 + 16)), numTx, P.jump, alpha);
+      drawKitNum(kitNumSkinned(sbase, bones.slice(2 * 16, 2 * 16 + 16)), numTx, P.jump, alpha);
       return P.f.v;
     };
     let figCapsuleMode = false;   // frame() で scene.options.figCapsule から更新（切り戻しフラグ）
