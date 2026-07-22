@@ -1127,7 +1127,7 @@
       const shield = ex && ex.shield ? ex.shield : null;
       const jump = ex && ex.jump ? ex.jump : 0;          // 0..1 ジャンプ弧の高さ（空中戦）
       const header = !!(ex && ex.header);                // 勝者=ヘディングの前傾
-      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
+      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; f.pv = 0; f.acc = 0; }   // スクラブ・ジャンプ（#156: 加速度状態もリセット＝テレポート後のリーン揺れ回避）
       else if (dt > 0) {
         const vInst = Math.min(dist / dt, 10);
         f.v += (vInst - f.v) * Math.min(1, dt * 5);
@@ -1195,13 +1195,14 @@
       // フットIK: ストライドを速度から算出（支持脚を世界固定＝スケーティング解消・footPlace が核）
       const REST_ANKLE = 0.085;
       const ikOf = (s) => {
-        // キック足: フライト開始で前方へ振り抜く（接地IKを上書き）
-        if (kick > 0.02 && s === kickLeg) {
-          const swing = Math.sin(clamp(kick, 0, 1) * Math.PI);          // 0→1→0 の振り
-          return { hip: -1.25 * swing, knee: 0.15 + 0.7 * (1 - kick) * swing };
-        }
         const ft = footPlace(f.phase, f.v, s);
         const r = solveLegIK(0.94 + swayY, swayZ, REST_ANKLE + ft.fy, swayZ + ft.fz);
+        // キック足: フライト開始で前方へ振り抜く。IK姿勢から swing で補間（swing=0 の開始/終端は
+        // IK姿勢に一致＝入りも抜けも連続・#156 の1フレーム飛びを解消）。
+        if (kick > 0.02 && s === kickLeg) {
+          const swing = Math.sin(clamp(kick, 0, 1) * Math.PI);          // 0→1→0 の振り
+          return { hip: lerp(r.hip, -1.25, swing), knee: lerp(r.knee, 0.15, swing) };
+        }
         return { hip: r.hip, knee: r.knee };
       };
       const ikL = normalMode ? ikOf(-1) : { hip: L.hip, knee: L.knee };
