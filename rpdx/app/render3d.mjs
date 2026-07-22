@@ -455,6 +455,44 @@
   void main(){ gl_Position = uLightMVP * (uModel * vec4(aPos,1.0)); }`;
   const FS_DEPTH = `#version 300 es
   precision highp float; void main(){}`;
+  // #159 ポストプロセス: フルスクリーン三角形（頂点属性なし・gl_VertexID駆動）
+  const VS_POST = `#version 300 es
+  out vec2 vT;
+  void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); vT = p; gl_Position = vec4(p*2.0-1.0, 0.0, 1.0); }`;
+  const FS_BRIGHT = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o; uniform sampler2D uTex; uniform float uThresh;
+  void main(){ vec3 c = texture(uTex, vT).rgb; float l = dot(c, vec3(0.2126,0.7152,0.0722));
+    o = vec4(c * clamp((l - uThresh) / max(l, 1e-4), 0.0, 1.0), 1.0); }`;
+  const FS_BLUR = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o; uniform sampler2D uTex; uniform vec2 uDir;
+  void main(){ vec3 s = texture(uTex,vT).rgb*0.227
+    + texture(uTex, vT+uDir*1.384).rgb*0.316 + texture(uTex, vT-uDir*1.384).rgb*0.316
+    + texture(uTex, vT+uDir*3.231).rgb*0.070 + texture(uTex, vT-uDir*3.231).rgb*0.070;
+    o = vec4(s, 1.0); }`;
+  // トーンマップ（控えめフィルミック）＋グレーディング（コントラスト/彩度/ビネット）＋任意bloom＋軽量FXAA
+  const FS_POST = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o;
+  uniform sampler2D uTex, uBloom; uniform vec2 uTexel;
+  uniform float uBloomOn, uContrast, uSat, uVig, uExposure, uTonemap;
+  vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+  float lum(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
+  void main(){
+    vec3 c = texture(uTex, vT).rgb;
+    // 軽量FXAA: 強いエッジのみ近傍平均（オフスクリーンでMSAA喪失の補償・過度にぼかさない）
+    vec3 nw=texture(uTex,vT+vec2(-uTexel.x,-uTexel.y)).rgb, ne=texture(uTex,vT+vec2(uTexel.x,-uTexel.y)).rgb;
+    vec3 sw=texture(uTex,vT+vec2(-uTexel.x,uTexel.y)).rgb, se=texture(uTex,vT+vec2(uTexel.x,uTexel.y)).rgb;
+    float lc=lum(c), l0=lum(nw),l1=lum(ne),l2=lum(sw),l3=lum(se);
+    float lmin=min(lc,min(min(l0,l1),min(l2,l3))), lmax=max(lc,max(max(l0,l1),max(l2,l3)));
+    if (lmax-lmin > 0.20) c = (c*2.0 + nw+ne+sw+se) / 6.0;
+    if (uBloomOn > 0.5) c += texture(uBloom, vT).rgb * 0.85;   // Cinematic: bloom 加算
+    c *= uExposure;
+    c = mix(c, aces(c), uTonemap);                             // 控えめトーンマップ（既存の作り込みを濁さない）
+    c = (c - 0.5) * uContrast + 0.5;                           // コントラスト
+    c = mix(vec3(lum(c)), c, uSat);                            // 彩度
+    float vig = smoothstep(1.4, 0.82, length(vT - 0.5));       // ビネット（外周のみ・中央や UI 帯は暗くしない）
+    c *= mix(1.0, vig, uVig);
+    o = vec4(clamp(c, 0.0, 1.0), 1.0);
+  }`;
   const FS_TEX = `#version 300 es
   precision highp float; in vec2 vUv; in vec3 vWorld; in vec4 vLightPos; out vec4 o;
   uniform sampler2D uTex; uniform vec3 uEye, uTint; uniform float uAlpha, uFogD, uEmiss, uShadowRecv;
@@ -762,7 +800,49 @@
     const prSky = compile(gl, VS_SKY, FS_SKY);
     const prPart = compile(gl, VS_PART, FS_PART);
     const prDepth = compile(gl, VS_DEPTH, FS_DEPTH);   // #157 影の深度パス（プロキシ）
+    const prBright = compile(gl, VS_POST, FS_BRIGHT);  // #159 bloom 輝度抽出
+    const prBlur = compile(gl, VS_POST, FS_BLUR);      // #159 ガウスブラー
+    const prPost = compile(gl, VS_POST, FS_POST);      // #159 トーンマップ+グレーディング+FXAA
     const U = (pr, n) => gl.getUniformLocation(pr, n);
+
+    // #159 ポストプロセスの資源: シーンを色テクスチャへ描画→フルスクリーンで整える。
+    // 失敗（FBO不完全/非対応）時は post = null → 直接描画フォールバック（従来動作）。
+    const emptyVAO = gl.createVertexArray();   // フルスクリーン三角形用（属性なし）
+    let post = null;   // { w,h, fbo, tex, depth, bloomFBO[2], bloomTex[2] }
+    const makeColorTex = (w, h) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    };
+    const ensurePost = (w, h) => {
+      if (post && post.w === w && post.h === h) return post;
+      if (post) { gl.deleteFramebuffer(post.fbo); gl.deleteTexture(post.tex); gl.deleteRenderbuffer(post.depth); post.bloomFBO.forEach(f => gl.deleteFramebuffer(f)); post.bloomTex.forEach(t => gl.deleteTexture(t)); }
+      try {
+        const tex = makeColorTex(w, h);
+        const depth = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+        const fbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+        const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        const bw = Math.max(1, w >> 1), bh = Math.max(1, h >> 1);   // bloom は半解像度
+        const bloomTex = [makeColorTex(bw, bh), makeColorTex(bw, bh)];
+        const bloomFBO = bloomTex.map((t) => { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0); return f; });
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        post = ok ? { w, h, bw, bh, fbo, tex, depth, bloomFBO, bloomTex } : null;
+      } catch (_) { post = null; }
+      return post;
+    };
+    const drawFS = () => { gl.bindVertexArray(emptyVAO); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.bindVertexArray(null); };
+    let urlPost = true;   // #159 既定ON・?post=0 で無効（比較/デバッグ用）
+    try { urlPost = new URLSearchParams(location.search).get("post") !== "0"; } catch (_) { /* 非ブラウザ */ }
 
     // #157 シャドウマップの資源（Cinematic tier のみ使用・非対応/失敗時は null → 円盤影へ安全フォールバック）
     const SHADOW_RES = 1536;
@@ -1596,6 +1676,10 @@
         gl.activeTexture(gl.TEXTURE0);
       }
 
+      // #159 ポスト有効時はシーンをオフスクリーンへ（?post=0・shotframes無関係で常時可）
+      const postOn = urlPost && ensurePost(canvas.width, canvas.height);
+      if (postOn) { gl.bindFramebuffer(gl.FRAMEBUFFER, post.fbo); gl.viewport(0, 0, post.w, post.h); }
+
       gl.clearColor(0.043, 0.066, 0.118, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
@@ -1971,6 +2055,40 @@
         }
         gl.depthMask(true);
         gl.disable(gl.BLEND);
+      }
+
+      // #159 ポストプロセス: オフスクリーン → （Cinematic: bloom）→ トーンマップ/グレーディング/FXAA → 画面
+      if (postOn) {
+        gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+        const bloomOn = !!(R.quality && R.quality.flags && R.quality.flags.bloom);
+        if (bloomOn) {
+          gl.viewport(0, 0, post.bw, post.bh);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[0]);   // 輝度抽出
+          gl.useProgram(prBright);
+          gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, post.tex);
+          gl.uniform1i(U(prBright, "uTex"), 0); gl.uniform1f(U(prBright, "uThresh"), 0.72);
+          drawFS();
+          gl.useProgram(prBlur);                                 // 分離ガウス（横→縦）
+          gl.uniform1i(U(prBlur, "uTex"), 0);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[1]);
+          gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[0]); gl.uniform2f(U(prBlur, "uDir"), 1 / post.bw, 0); drawFS();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[0]);
+          gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[1]); gl.uniform2f(U(prBlur, "uDir"), 0, 1 / post.bh); drawFS();
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(prPost);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, post.tex); gl.uniform1i(U(prPost, "uTex"), 0);
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[0]); gl.uniform1i(U(prPost, "uBloom"), 2);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(U(prPost, "uTexel"), 1 / post.w, 1 / post.h);
+        gl.uniform1f(U(prPost, "uBloomOn"), bloomOn ? 1 : 0);
+        gl.uniform1f(U(prPost, "uExposure"), 1.06);
+        gl.uniform1f(U(prPost, "uTonemap"), 0.45);   // 控えめ（既存の作り込みを濁さない）
+        gl.uniform1f(U(prPost, "uContrast"), 1.05);
+        gl.uniform1f(U(prPost, "uSat"), 1.08);
+        gl.uniform1f(U(prPost, "uVig"), 0.24);
+        drawFS();
       }
     };
 

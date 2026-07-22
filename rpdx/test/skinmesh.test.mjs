@@ -37,6 +37,18 @@ const vertsWhere = (m, pred) => {
 };
 const maxAbsX = (verts) => verts.reduce((mx, p) => Math.max(mx, Math.abs(p.x)), 0);
 
+test("#159 ポストプロセス: トーンマップ/グレーディング/bloom/FXAA の配線がある", () => {
+  const src = readFileSync(join(root, "app", "render3d.mjs"), "utf8");
+  assert.ok(/const FS_POST = /.test(src), "トーンマップ・シェーダ");
+  assert.ok(/aces\(/.test(src), "フィルミック(ACES)トーンマップ");
+  assert.ok(/const FS_BRIGHT = /.test(src) && /const FS_BLUR = /.test(src), "bloom(輝度抽出+ブラー)");
+  assert.ok(/ensurePost\(/.test(src), "オフスクリーンFBO管理");
+  assert.ok(/urlPost/.test(src) && /"post"/.test(src), "?post=0 フォールバック");
+  assert.ok(/flags && R\.quality\.flags\.bloom/.test(src), "bloom は Cinematic(quality.flags.bloom)");
+  // ビネットは外周のみ（中央/UI帯を暗くしない値域）
+  assert.ok(/smoothstep\(1\.[0-9], 0\.[78]/.test(src), "ビネットは外周のみ");
+});
+
 test("#158 材質差別化: FS_SKIN が材質別スペキュラ（肌/布/革/髪）を持つ", () => {
   const src = readFileSync(join(root, "app", "render3d.mjs"), "utf8");
   const fs = src.match(/const FS_SKIN = `([\s\S]*?)`;/)[1];
