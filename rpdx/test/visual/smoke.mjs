@@ -159,6 +159,26 @@ const main = async () => {
     check("S3: 背番号テクスチャの描画寄与（OFF起動で画素が変わる）", numDiff > 40, `${numDiff}px`);
   }
 
+  // --- S4: Cinematic tier — 方向性キャストシャドウ（#157・VIS-00 の初消費）+ golden ---
+  // 既定の自動判定は CI(SwiftShader)で lightweight のため、?tier=cinematic で影経路を強制的に走らせる。
+  const s4 = await runScenario(browser, { name: "cinematic_shadow_t1732", query: `?t=1732&play=0&cam=pitch&shotframes=${FRAMES}&tier=cinematic` });
+  {
+    // 影経路が実際に有効か（Cinematic 確定 + shadowMap フラグ）
+    const page = await browser.newPage({ width: 1280, height: 800 });
+    await page.navigate(`file://${distHtml}?t=1732&play=0&cam=pitch&shotframes=${FRAMES}&tier=cinematic`);
+    for (let i = 0; i < 60; i++) { await sleep(200); if ((await page.evaluate("globalThis.__RPDX_SHOT_DONE||0")) === FRAMES) break; }
+    const flag = await page.evaluate("(function(){try{var q=RPDX.quality.state();return q.tier+'/'+RPDX.quality.flags.shadowMap}catch(e){return 'err'}})()");
+    await page.dispose();
+    check("S4: Cinematic で影フラグが有効", flag === "cinematic/true", `flags=${flag}`);
+    // Lightweight(円盤影)との差分が影領域に出る＝影経路が別の絵を描いている
+    const d = diffCount(s4, s3a, GOLDEN_TOL);
+    console.log(`  S4 計測: cinematic vs lightweight 差分=${(d.ratio * 100).toFixed(2)}%`);
+    // 実測: CI(SwiftShader)=0.50% / ローカル=0.60%。影経路が実際に別の絵を描いている証明。
+    // >0.3% は影なし(≈0%+ノイズ)と明確に分離しつつ両環境で成立する閾値。
+    check("S4: 影ありは影なしと有意に異なる", !d.sizeMismatch && d.ratio > 0.003, `diff=${(d.ratio * 100).toFixed(2)}%`);
+    compareGolden("cinematic_shadow_t1732", s4, readFileSync(join(outDir, "cinematic_shadow_t1732.png")));
+  }
+
   await browser.close();
   console.log(failures === 0 ? "\n視覚スモーク: 全チェック合格" : `\n視覚スモーク: ${failures} 件失敗（out/ に実画像あり）`);
   process.exit(failures === 0 ? 0 : 1);

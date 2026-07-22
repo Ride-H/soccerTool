@@ -8258,6 +8258,12 @@ window.addEventListener("error", (e) => {
       o[14] = (2 * far * near) / (near - far);
       return o;
     },
+    ortho(l, r, b, t, near, far) {   // #157 シャドウマップ用の平行投影（-1..1 クリップ）
+      const o = new Float32Array(16);
+      o[0] = 2 / (r - l); o[5] = 2 / (t - b); o[10] = -2 / (far - near); o[15] = 1;
+      o[12] = -(r + l) / (r - l); o[13] = -(t + b) / (t - b); o[14] = -(far + near) / (far - near);
+      return o;
+    },
     lookAt(eye, at, up) {
       let zx = eye[0]-at[0], zy = eye[1]-at[1], zz = eye[2]-at[2];
       let zl = Math.hypot(zx, zy, zz) || 1; zx/=zl; zy/=zl; zz/=zl;
@@ -8358,8 +8364,9 @@ window.addEventListener("error", (e) => {
   // #155 造形: 楕円断面（rx=横半径/rz=前後半径）で V字テーパー・胸郭/腹部絞り・平たい背中を表現。
   const buildBodyMesh = () => {
     const B = { pel: 0, spi: 1, che: 2, nec: 3, hea: 4, thL: 5, shL: 6, foL: 7, thR: 8, shR: 9, foR: 10, uaL: 11, faL: 12, uaR: 13, faR: 14 };
-    const pos = [], nor = [], bidx = [], bw = [], cid = [], idx = [];
-    // 縦軸チューブ: ring={x?,y,z?,rx,rz(またはr),c,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの
+    const pos = [], nor = [], bidx = [], bw = [], cid = [], ao = [], idx = [];
+    // #157 頂点ベイクAO: ring.ao（既定1.0・小さいほど暗い）を接触遮蔽域（腋/股/顎下/内側）に置く。
+    // 縦軸チューブ: ring={x?,y,z?,rx,rz(またはr),c,ao?,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの
     // 重みブレンドが「連続して曲がる皮膚」を作る。法線は楕円勾配＋縦半径勾配の解析式（円の場合は従来と一致）。
     const tube = (rings, seg) => {
       const start = pos.length / 3;
@@ -8379,7 +8386,7 @@ window.addEventListener("error", (e) => {
           nor.push(nx / nl, ny / nl, nz / nl);
           bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
           bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
-          cid.push(rg.c);
+          cid.push(rg.c); ao.push(rg.ao ?? 1);
         }
         if (ri > 0) {
           const a0 = start + (ri - 1) * seg, b0 = start + ri * seg;
@@ -8396,7 +8403,7 @@ window.addEventListener("error", (e) => {
         nor.push(0, up ? 1 : -1, 0);
         bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
         bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
-        cid.push(rg.c);
+        cid.push(rg.c); ao.push(rg.ao ?? 1);
         const r0 = start + ri * seg;
         for (let si = 0; si < seg; si++) {
           const s1 = (si + 1) % seg;
@@ -8408,7 +8415,7 @@ window.addEventListener("error", (e) => {
       cap(0, false);
     };
     // 単骨に固定する楕円体（ミトン手・ブーツ）: 腕/足が筒で終わらないための塊。
-    const blob = (cx, cy, cz, rx, ry, rz, bone, color, latSeg, lonSeg) => {
+    const blob = (cx, cy, cz, rx, ry, rz, bone, color, latSeg, lonSeg, aoV) => {
       const start = pos.length / 3;
       for (let la = 0; la <= latSeg; la++) {
         const phi = (la / latSeg) * Math.PI - Math.PI / 2, cphi = Math.cos(phi), sphi = Math.sin(phi);
@@ -8418,7 +8425,7 @@ window.addEventListener("error", (e) => {
           let nx = (cphi * cs) / rx, ny = sphi / ry, nz = (cphi * sn) / rz;
           const nl = Math.hypot(nx, ny, nz) || 1;
           nor.push(nx / nl, ny / nl, nz / nl);
-          bidx.push(bone, 0, 0, 0); bw.push(1, 0, 0, 0); cid.push(color);
+          bidx.push(bone, 0, 0, 0); bw.push(1, 0, 0, 0); cid.push(color); ao.push(aoV ?? 1);
         }
       }
       for (let la = 0; la < latSeg; la++) for (let lo = 0; lo < lonSeg; lo++) {
@@ -8430,18 +8437,18 @@ window.addEventListener("error", (e) => {
     // 胴〜首〜頭（1本のレイズ）: V字テーパー（肩幅>腰幅）＋胸郭の膨らみ＋腹部の絞り＋
     // 僧帽筋スロープ（肩ヨーク→首の急勾配＝首肩の連続）＋顎/面のある頭部。
     tube([
-      { y: 0.84, rx: 0.150, rz: 0.130, c: 1, b: [B.pel, 1] },
-      { y: 0.94, rx: 0.165, rz: 0.140, c: 1, b: [B.pel, 1] },              // 骨盤
-      { y: 1.06, rx: 0.150, rz: 0.118, c: 1, b: [B.pel, 0.75, B.spi, 0.25] }, // 腰＝絞り
+      { y: 0.84, rx: 0.150, rz: 0.130, c: 1, ao: 0.58, b: [B.pel, 1] },    // 股下＝強い接触AO
+      { y: 0.94, rx: 0.165, rz: 0.140, c: 1, ao: 0.72, b: [B.pel, 1] },    // 骨盤/鼠径
+      { y: 1.06, rx: 0.150, rz: 0.118, c: 1, ao: 0.90, b: [B.pel, 0.75, B.spi, 0.25] }, // 腰＝絞り
       { y: 1.14, rx: 0.156, rz: 0.122, c: 0, b: [B.pel, 0.35, B.spi, 0.65] },
       { y: 1.26, rx: 0.176, rz: 0.134, c: 0, b: [B.spi, 0.8, B.che, 0.2] },
       { y: 1.36, rx: 0.196, rz: 0.142, c: 0, b: [B.spi, 0.3, B.che, 0.7] }, // 胸郭
       { y: 1.44, rx: 0.204, rz: 0.140, c: 0, b: [B.che, 1] },
       { y: 1.50, rx: 0.214, rz: 0.126, c: 0, b: [B.che, 1] },              // 肩ヨーク（胸となだらかに接続）
-      { y: 1.55, rx: 0.166, rz: 0.108, c: 0, b: [B.che, 0.7, B.nec, 0.3] }, // 僧帽筋スロープ→首
-      { y: 1.60, rx: 0.072, rz: 0.074, c: 2, b: [B.nec, 1] },              // 首
-      { y: 1.635, rx: 0.064, rz: 0.070, c: 2, b: [B.nec, 0.4, B.hea, 0.6] },
-      { y: 1.675, rx: 0.082, rz: 0.094, c: 2, b: [B.hea, 1] },             // 顎（前後に深い）
+      { y: 1.55, rx: 0.166, rz: 0.108, c: 0, ao: 0.9, b: [B.che, 0.7, B.nec, 0.3] }, // 僧帽筋スロープ→首
+      { y: 1.60, rx: 0.072, rz: 0.074, c: 2, ao: 0.7, b: [B.nec, 1] },     // 首（顎下の接触AO）
+      { y: 1.635, rx: 0.064, rz: 0.070, c: 2, ao: 0.78, b: [B.nec, 0.4, B.hea, 0.6] },
+      { y: 1.675, rx: 0.082, rz: 0.094, c: 2, ao: 0.92, b: [B.hea, 1] },   // 顎（前後に深い）
       { y: 1.73, rx: 0.104, rz: 0.112, c: 2, b: [B.hea, 1] },              // 顔（額〜頬）
       { y: 1.79, rx: 0.110, rz: 0.118, c: 3, b: [B.hea, 1] },              // 後頭部の張り（髪）
       { y: 1.86, rx: 0.082, rz: 0.088, c: 3, b: [B.hea, 1] },
@@ -8450,8 +8457,8 @@ window.addEventListener("error", (e) => {
     // 脚（腿の質量→膝→ふくらはぎ→足首の絞り・紡錘）。ふくらはぎは前後に厚い（rz>rx）。
     const leg = (s, th, sh, ft) => {
       tube([
-        { x: s * 0.13, y: 1.00, rx: 0.098, rz: 0.100, c: 4, b: [th, 1] },
-        { x: s * 0.13, y: 0.88, rx: 0.106, rz: 0.110, c: 4, b: [th, 1] },   // 大腿の質量
+        { x: s * 0.13, y: 1.00, rx: 0.098, rz: 0.100, c: 4, ao: 0.68, b: [th, 1] }, // 腿付け根＝鼠径の接触AO
+        { x: s * 0.13, y: 0.88, rx: 0.106, rz: 0.110, c: 4, ao: 0.9, b: [th, 1] },   // 大腿の質量
         { x: s * 0.13, y: 0.66, rx: 0.093, rz: 0.096, c: 4, b: [th, 1] },
         { x: s * 0.13, y: 0.52, rx: 0.085, rz: 0.088, c: 4, b: [th, 0.65, sh, 0.35] },
         { x: s * 0.13, y: 0.46, rx: 0.082, rz: 0.086, c: 4, b: [th, 0.3, sh, 0.7] },
@@ -8461,16 +8468,16 @@ window.addEventListener("error", (e) => {
         { x: s * 0.13, y: 0.10, rx: 0.048, rz: 0.052, c: 4, b: [ft, 1] },
       ], 10);
       // ブーツ（つま先/踵のある形状・前方に長い楕円体・足ボーン追従）
-      blob(s * 0.13, 0.045, 0.055, 0.056, 0.050, 0.135, ft, 5, 4, 8);
+      blob(s * 0.13, 0.045, 0.055, 0.056, 0.050, 0.135, ft, 5, 4, 8, 0.82);
     };
     leg(-1, B.thL, B.shL, B.foL);
     leg(1, B.thR, B.shR, B.foR);
     // 腕（肩デルトイド→上腕→肘→前腕→手首の連続チューブ＋ミトン手）。付け根は胸へブレンドし肩ヨークに接続。
     const arm = (s, ua, fa) => {
       tube([
-        { x: s * 0.30, y: 1.545, rx: 0.072, rz: 0.070, c: 0, b: [B.che, 0.45, ua, 0.55] }, // デルトイド（肩ヨークに接続）
-        { x: s * 0.30, y: 1.46, rx: 0.070, rz: 0.068, c: 0, b: [ua, 1] },
-        { x: s * 0.30, y: 1.37, rx: 0.061, rz: 0.060, c: 2, b: [ua, 1] },                // 袖→肌
+        { x: s * 0.30, y: 1.545, rx: 0.072, rz: 0.070, c: 0, ao: 0.82, b: [B.che, 0.45, ua, 0.55] }, // デルトイド（肩ヨーク接続）
+        { x: s * 0.30, y: 1.46, rx: 0.070, rz: 0.068, c: 0, ao: 0.7, b: [ua, 1] },       // 腋の接触AO
+        { x: s * 0.30, y: 1.37, rx: 0.061, rz: 0.060, c: 2, ao: 0.88, b: [ua, 1] },      // 袖→肌
         { x: s * 0.30, y: 1.26, rx: 0.056, rz: 0.056, c: 2, b: [ua, 0.62, fa, 0.38] },
         { x: s * 0.30, y: 1.20, rx: 0.053, rz: 0.053, c: 2, b: [ua, 0.3, fa, 0.7] },
         { x: s * 0.30, y: 1.10, rx: 0.050, rz: 0.050, c: 2, b: [fa, 1] },
@@ -8478,14 +8485,14 @@ window.addEventListener("error", (e) => {
         { x: s * 0.30, y: 0.945, rx: 0.038, rz: 0.040, c: 2, b: [fa, 1] },               // 手首
       ], 8);
       // ミトン手（指なしの手のひら塊・前腕ボーン追従・腕が筒で終わらない）
-      blob(s * 0.30, 0.895, 0.010, 0.050, 0.072, 0.062, fa, 2, 4, 6);
+      blob(s * 0.30, 0.895, 0.010, 0.050, 0.072, 0.062, fa, 2, 4, 6, 0.9);
     };
     arm(-1, B.uaL, B.faL);
     arm(1, B.uaR, B.faR);
     return {
       pos: new Float32Array(pos), nor: new Float32Array(nor),
       bidx: new Float32Array(bidx), bw: new Float32Array(bw), cid: new Float32Array(cid),
-      idx: new Uint16Array(idx), boneCount: SKEL.length, tri: idx.length / 3,
+      ao: new Float32Array(ao), idx: new Uint16Array(idx), boneCount: SKEL.length, tri: idx.length / 3,
     };
   };
   const BODY_MESH = buildBodyMesh();
@@ -8596,9 +8603,24 @@ window.addEventListener("error", (e) => {
   /* ------------------------------ shaders ------------------------------ */
   const VS_BASE = `#version 300 es
   layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor; layout(location=2) in vec2 aUv;
-  uniform mat4 uProj, uView, uModel; out vec3 vNor; out vec2 vUv; out vec3 vWorld;
+  uniform mat4 uProj, uView, uModel, uLightMVP; out vec3 vNor; out vec2 vUv; out vec3 vWorld; out vec4 vLightPos;
   void main(){ vec4 w = uModel * vec4(aPos,1.0); vWorld = w.xyz; gl_Position = uProj*uView*w;
-    vNor = mat3(uModel)*aNor; vUv = aUv; }`;
+    vNor = mat3(uModel)*aNor; vUv = aUv; vLightPos = uLightMVP * w; }`;   // #157 光源空間座標（影受け）
+  // #157 PCF シャドウ係数（0=影/1=非影）: 深度テクスチャを 3×3 で比較・範囲外や無効時は 1。
+  const GLSL_SHADOW = `
+  uniform highp sampler2D uShadow; uniform float uShadowOn; uniform vec2 uShadowTexel;
+  float shadowF(vec4 lp, vec3 n, vec3 ldir){
+    if (uShadowOn < 0.5) return 1.0;
+    vec3 p = lp.xyz / lp.w * 0.5 + 0.5;
+    if (p.x<0.0||p.x>1.0||p.y<0.0||p.y>1.0||p.z>1.0) return 1.0;
+    float bias = max(0.0035 * (1.0 - clamp(dot(n, ldir),0.0,1.0)), 0.0012);
+    float s = 0.0;
+    for (int i=-1;i<=1;i++) for (int j=-1;j<=1;j++){
+      float d = texture(uShadow, p.xy + vec2(float(i),float(j))*uShadowTexel).r;
+      s += (p.z - bias > d) ? 0.0 : 1.0;
+    }
+    return mix(1.0, s/9.0, 0.78);   // 影の濃さ 0.78（完全な黒にしない）
+  }`;
   const FS_LAMBERT = `#version 300 es
   precision highp float; in vec3 vNor; in vec3 vWorld; out vec4 o;
   uniform vec3 uColor, uColor2, uEye; uniform float uSplit, uEmiss, uFogD, uAlpha;
@@ -8620,8 +8642,9 @@ window.addEventListener("error", (e) => {
   const VS_SKIN = `#version 300 es
   layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
   layout(location=3) in vec4 aBIdx; layout(location=4) in vec4 aBW; layout(location=5) in float aCid;
+  layout(location=6) in float aAo;
   uniform mat4 uProj, uView, uModel; uniform mat4 uBones[15];
-  out vec3 vNor; out vec3 vWorld; flat out int vCid;
+  out vec3 vNor; out vec3 vWorld; out float vAo; flat out int vCid;
   void main(){
     mat4 S = uBones[int(aBIdx.x)]*aBW.x + uBones[int(aBIdx.y)]*aBW.y
            + uBones[int(aBIdx.z)]*aBW.z + uBones[int(aBIdx.w)]*aBW.w;
@@ -8629,28 +8652,39 @@ window.addEventListener("error", (e) => {
     vWorld = w.xyz; gl_Position = uProj*uView*w;
     vNor = mat3(uModel) * (mat3(S) * aNor);
     vCid = int(aCid + 0.5);   // flat: 三角形内は補間しない（材質境界＝ハードエッジ・中間値化を防ぐ）
+    vAo = aAo;                // #157 接触AO（滑らかに補間＝ソフトな遮蔽グラデ）
   }`;
   const FS_SKIN = `#version 300 es
-  precision highp float; in vec3 vNor; in vec3 vWorld; flat in int vCid; out vec4 o;
+  precision highp float; in vec3 vNor; in vec3 vWorld; in float vAo; flat in int vCid; out vec4 o;
   uniform vec3 uPal[6]; uniform vec3 uEye; uniform float uEmiss, uFogD, uAlpha;
   void main(){
     vec3 n = normalize(vNor);
     vec3 L1 = normalize(vec3(0.35,0.8,0.45)), L2 = normalize(vec3(-0.5,0.6,-0.4));
     float d = clamp(dot(n,L1),0.0,1.0)*0.72 + clamp(dot(n,L2),0.0,1.0)*0.38 + 0.34;
+    float ao = clamp(vAo, 0.0, 1.0);              // #157 接触遮蔽（腋/股/顎下/内側を暗く＝一体感・セルフ遮蔽の近似）
     vec3 base = uPal[vCid];
     vec3 V = normalize(uEye - vWorld);
     float rim = pow(1.0 - clamp(dot(n,V),0.0,1.0), 2.5);
-    vec3 c = base * d + vec3(rim * 0.35) + base * uEmiss;
+    vec3 c = base * (d * ao) + vec3(rim * 0.35 * ao) + base * uEmiss;   // 拡散とリムにAOを乗算（発光は除外）
     float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
   }`;
+  // #157 深度パス用（影キャスターのプロキシを光源空間へ）: 深度のみ書き込む・非スキンド
+  const VS_DEPTH = `#version 300 es
+  layout(location=0) in vec3 aPos; uniform mat4 uModel, uLightMVP;
+  void main(){ gl_Position = uLightMVP * (uModel * vec4(aPos,1.0)); }`;
+  const FS_DEPTH = `#version 300 es
+  precision highp float; void main(){}`;
   const FS_TEX = `#version 300 es
-  precision highp float; in vec2 vUv; in vec3 vWorld; out vec4 o;
-  uniform sampler2D uTex; uniform vec3 uEye, uTint; uniform float uAlpha, uFogD, uEmiss;
+  precision highp float; in vec2 vUv; in vec3 vWorld; in vec4 vLightPos; out vec4 o;
+  uniform sampler2D uTex; uniform vec3 uEye, uTint; uniform float uAlpha, uFogD, uEmiss, uShadowRecv;
+  ${GLSL_SHADOW}
   void main(){
     vec4 t = texture(uTex, vUv);
     vec3 c = t.rgb * uTint * (1.0 + uEmiss);
+    // #157 芝の投影影（受け手のみ・uShadowRecv=1）: 人型のキャストシャドウ
+    if (uShadowRecv > 0.5) c *= mix(1.0, shadowF(vLightPos, vec3(0.0,1.0,0.0), normalize(vec3(0.35,0.8,0.45))), 0.9);
     float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), t.a * uAlpha);
     if (o.a < 0.01) discard;
@@ -8743,6 +8777,7 @@ window.addEventListener("error", (e) => {
     if (mesh.bidx) buf(3, mesh.bidx, 4);   // #154 スキニング: ボーン番号（floatで供給）
     if (mesh.bw) buf(4, mesh.bw, 4);       //                    ボーン重み
     if (mesh.cid) buf(5, mesh.cid, 1);     //                    色ID（パレット参照）
+    if (mesh.ao) buf(6, mesh.ao, 1);       // #157 頂点ベイクAO（接触遮蔽）
     const ib = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.idx, gl.STATIC_DRAW);
@@ -8947,7 +8982,48 @@ window.addEventListener("error", (e) => {
     const prFlat = compile(gl, VS_BASE, FS_FLAT);
     const prSky = compile(gl, VS_SKY, FS_SKY);
     const prPart = compile(gl, VS_PART, FS_PART);
+    const prDepth = compile(gl, VS_DEPTH, FS_DEPTH);   // #157 影の深度パス（プロキシ）
     const U = (pr, n) => gl.getUniformLocation(pr, n);
+
+    // #157 シャドウマップの資源（Cinematic tier のみ使用・非対応/失敗時は null → 円盤影へ安全フォールバック）
+    const SHADOW_RES = 1536;
+    let shadowFBO = null, shadowTex = null;
+    try {
+      shadowTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_RES, SHADOW_RES, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      shadowFBO = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowTex, 0);
+      gl.drawBuffers([gl.NONE]); gl.readBuffer(gl.NONE);   // 深度専用（色出力なし）— ドライバ互換
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { shadowFBO = null; shadowTex = null; }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    } catch (_) { shadowFBO = null; shadowTex = null; }   // 深度テクスチャ非対応環境
+    // 光源（ディレクショナル）: FS の L1 と同方向。ピッチ全域を覆う平行投影で選手をキャスト。
+    const SHADOW_DIR = (() => { const v = [0.35, 0.8, 0.45], l = Math.hypot(...v); return [v[0]/l, v[1]/l, v[2]/l]; })();
+    const lightMVP = (() => {
+      const dist = 70, c = [0, 0, 0];
+      const lp = [c[0] + SHADOW_DIR[0]*dist, c[1] + SHADOW_DIR[1]*dist, c[2] + SHADOW_DIR[2]*dist];
+      const lv = M4.lookAt(lp, c, [0, 1, 0]);
+      const lo = M4.ortho(-62, 62, -46, 46, 1, 140);   // ピッチ全域＋余白
+      return M4.mul(lo, lv);
+    })();
+    const IDENT16 = M4.ident();
+    let shadowOn = false;   // 毎フレーム quality.flags.shadowMap から更新
+    // 影ユニフォームを program に設定（uShadowOn=0 のときは lightMVP/tex を触らない＝安全）
+    const setShadow = (pr) => {
+      gl.uniformMatrix4fv(U(pr, "uLightMVP"), false, shadowOn ? lightMVP : IDENT16);
+      gl.uniform1f(U(pr, "uShadowOn"), shadowOn ? 1 : 0);
+      if (shadowOn) {
+        gl.uniform1i(U(pr, "uShadow"), 1);
+        gl.uniform2f(U(pr, "uShadowTexel"), 1 / SHADOW_RES, 1 / SHADOW_RES);
+      }
+    };
 
     /* ---- 粒子インスタンス基盤 ---- */
     const PART_CAP = 9000, PART_STRIDE = 9;   // x,y,z, size,phase, r,g,b,a
@@ -9277,6 +9353,7 @@ window.addEventListener("error", (e) => {
       gl.uniform1f(U(prSkin, "uEmiss"), opts.emiss ?? 0);
       gl.uniform1f(U(prSkin, "uFogD"), FOG);
       gl.uniform1f(U(prSkin, "uAlpha"), opts.alpha ?? 1);
+      setShadow(prSkin);   // #157 セルフ/被キャスト影
     };
     const drawMesh = (m) => {
       gl.bindVertexArray(m.vao);
@@ -9296,6 +9373,8 @@ window.addEventListener("error", (e) => {
       gl.uniform1f(U(prTex, "uAlpha"), opts.alpha ?? 1);
       gl.uniform1f(U(prTex, "uEmiss"), opts.emiss ?? 0);
       gl.uniform1f(U(prTex, "uFogD"), opts.fog ?? FOG);
+      gl.uniform1f(U(prTex, "uShadowRecv"), opts.shadowRecv ? 1 : 0);   // #157 ピッチのみ影を受ける
+      setShadow(prTex);
     };
     const useFlat = (model, color, opts = {}) => {
       gl.useProgram(prFlat);
@@ -9575,8 +9654,8 @@ window.addEventListener("error", (e) => {
       gl.bindVertexArray(null);
       gl.enable(gl.DEPTH_TEST);
 
-      // ピッチ
-      useTex(M4.trs(0, 0, 0, 118, 1, 80), txPitch);
+      // ピッチ（#157: 影を受ける = 選手の人型キャストシャドウ）
+      useTex(M4.trs(0, 0, 0, 118, 1, 80), txPitch, { shadowRecv: 1 });
       drawMesh(mQuad);
 
       // スタンド（4面 + 角度）
@@ -9710,6 +9789,32 @@ window.addEventListener("error", (e) => {
         view = M4.lookAt(eye, [eye[0] + cy * cp, eye[1] + spt, eye[2] + sy * cp], [0, 1, 0]);
       } else {
         view = M4.lookAt(eye, cam.target, [0, 1, 0]);
+      }
+
+      // #157 影の深度パス（Cinematic tier のみ・FBO あり）: 選手プロキシ（胴＋頭）を光源空間で深度描画。
+      // これで芝が人型のキャストシャドウを受ける。セルフ遮蔽は頂点AOが担う（プロキシ自己影の破綻回避）。
+      shadowOn = !!(shadowFBO && R.quality && R.quality.flags && R.quality.flags.shadowMap);
+      if (shadowOn) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+        gl.viewport(0, 0, SHADOW_RES, SHADOW_RES);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+        gl.useProgram(prDepth);
+        gl.uniformMatrix4fv(U(prDepth, "uLightMVP"), false, lightMVP);
+        for (const p of state.players) {
+          if (!p.onPitch || (p.leaving && p.leaving > 0.9)) continue;
+          const px = p.x, pz = -p.y;
+          // 胴＋脚のプロキシ（立ち姿ベース）＋頭。ポーズ追従はしないが体型の人型影になる。
+          gl.uniformMatrix4fv(U(prDepth, "uModel"), false, M4.trs(px, 0.95, pz, 0.28, 0.95, 0.24));
+          drawMesh(mCapsule);
+          gl.uniformMatrix4fv(U(prDepth, "uModel"), false, M4.trs(px, 1.72, pz, 0.14, 0.16, 0.14));
+          drawMesh(mSphere);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.activeTexture(gl.TEXTURE1);              // ユニット1に影テクスチャを常設
+        gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+        gl.activeTexture(gl.TEXTURE0);
       }
 
       gl.clearColor(0.043, 0.066, 0.118, 1);
@@ -9938,8 +10043,8 @@ window.addEventListener("error", (e) => {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 });
-        drawMesh(mQuad);
+        // #157 円盤影はシャドウマップ無効時のみ（有効時はキャストシャドウと二重にしない）
+        if (!shadowOn) { useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 }); drawMesh(mQuad); }
         // 危険度リング（攻撃寄与）
         const cv = contribMap.get(p.team + p.no) || 0;
         if (cv > 0.12) {
