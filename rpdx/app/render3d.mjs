@@ -429,12 +429,22 @@
   void main(){
     vec3 n = normalize(vNor);
     vec3 L1 = normalize(vec3(0.35,0.8,0.45)), L2 = normalize(vec3(-0.5,0.6,-0.4));
-    float d = clamp(dot(n,L1),0.0,1.0)*0.72 + clamp(dot(n,L2),0.0,1.0)*0.38 + 0.34;
+    float ndl = clamp(dot(n,L1),0.0,1.0);
+    float d = ndl*0.72 + clamp(dot(n,L2),0.0,1.0)*0.38 + 0.34;
     float ao = clamp(vAo, 0.0, 1.0);              // #157 接触遮蔽（腋/股/顎下/内側を暗く＝一体感・セルフ遮蔽の近似）
     vec3 base = uPal[vCid];
     vec3 V = normalize(uEye - vWorld);
+    // #158 材質差別化（cid: 0/1=布 2/4=肌 3=髪 5=革）: スペキュラの強さ/鋭さを材質別に。
+    float specStr, shin, subs;
+    if (vCid==2 || vCid==4){ specStr=0.18; shin=14.0; subs=1.0; }   // 肌: 広く柔らかい＋サブサーフェス
+    else if (vCid==5){ specStr=0.5; shin=46.0; subs=0.0; }          // 革（ブーツ）: 鋭い反射
+    else if (vCid==3){ specStr=0.12; shin=22.0; subs=0.0; }         // 髪: 弱い光沢
+    else { specStr=0.05; shin=8.0; subs=0.0; }                      // 布（ジャージ）: ほぼマット＋微光沢
+    vec3 H = normalize(L1 + V);
+    float spec = pow(clamp(dot(n,H),0.0,1.0), shin) * specStr * ndl;  // 裏面スペキュラを ndl で抑制
+    vec3 sss = subs * vec3(0.16,0.03,0.0) * (1.0 - ndl) * ndl * 2.0;  // 肌: 明暗境界の暖色（安価なSSS近似）
     float rim = pow(1.0 - clamp(dot(n,V),0.0,1.0), 2.5);
-    vec3 c = base * (d * ao) + vec3(rim * 0.35 * ao) + base * uEmiss;   // 拡散とリムにAOを乗算（発光は除外）
+    vec3 c = base * (d * ao) + sss * ao + vec3(spec * ao) + vec3(rim * 0.35 * ao) + base * uEmiss;
     float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
