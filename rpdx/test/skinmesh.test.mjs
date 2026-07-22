@@ -37,6 +37,15 @@ const vertsWhere = (m, pred) => {
 };
 const maxAbsX = (verts) => verts.reduce((mx, p) => Math.max(mx, Math.abs(p.x)), 0);
 
+test("#158 材質差別化: FS_SKIN が材質別スペキュラ（肌/布/革/髪）を持つ", () => {
+  const src = readFileSync(join(root, "app", "render3d.mjs"), "utf8");
+  const fs = src.match(/const FS_SKIN = `([\s\S]*?)`;/)[1];
+  assert.ok(/specStr/.test(fs) && /shin/.test(fs), "材質パラメータ(specStr/shin)がある");
+  assert.ok(/vCid==5/.test(fs) && /46\.0|4[0-9]\.0/.test(fs), "革(ブーツ)=鋭いスペキュラ");
+  assert.ok(/vCid==2/.test(fs) && /subs/.test(fs), "肌=サブサーフェス近似");
+  assert.ok(/pow\(clamp\(dot\(n,H\)/.test(fs), "Blinn-Phong スペキュラ");
+});
+
 test("#157 頂点AO: 接触遮蔽域（腋/股/顎下）が暗く・顔/胸は明るい・全域[0,1]", () => {
   const m = S.BODY_MESH;
   const nv = m.pos.length / 3;
