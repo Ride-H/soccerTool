@@ -18,7 +18,7 @@ const CORE = [
   "src/engine.mjs", "src/danger.mjs", "src/subs.mjs", "src/sim.mjs", "src/psy.mjs",
   "src/duel.mjs", "src/physio.mjs", "src/filter.mjs", "src/uq.mjs", "src/tactics.mjs", "src/opponent.mjs", "src/scenlib.mjs", "src/policy.mjs", "src/layers.mjs", "src/generic.mjs",
 ];
-const APP = ["app/quality.mjs", "app/render3d.mjs", "app/ui.mjs"];
+const APP = ["app/quality.mjs", "app/character.mjs", "app/render3d.mjs", "app/ui.mjs"];
 
 const prelude = `
 /* 実行時エラーの可視化（ヘッドレス検証用） */

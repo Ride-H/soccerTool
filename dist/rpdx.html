@@ -8228,21 +8228,18 @@ window.addEventListener("error", (e) => {
 })();
 
 
-/* ===== app/render3d.mjs ===== */
+/* ===== app/character.mjs ===== */
 /* =========================================================================
-   RPDX.render3d — 依存ゼロ WebGL2 スタジアム・レンダラ
-   ナイター照明の NRG スタジアム / 選手カプセル+背番号ビルボード /
-   D²-Field ヒートマップ / 軌跡 / 5種カメラ（VR風フリーフライト含む）
+   RPDX.character — 選手キャラの共有中核モジュール（単一の真実源・依存ゼロ・GL/DOM 非依存）
+   骨格 / 手続きメッシュ生成(接触AO込み) / スキニング / ポーズ / 2ボーン解析IK / 歩容 /
+   材質シェーダ(GLSL文字列)。レンダラ(render3d.mjs)はこのモジュールを参照し重複定義しない。
    ========================================================================= */
 (() => {
   const R = (globalThis.RPDX ??= {});
-  const N = R.noise;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, u) => a + (b - a) * u;
-  // #153: 決定論シーケンシャル乱数 — 視覚要素に素の乱数関数は使わない（視覚回帰の再現性契約・visualgate.test が走査）
-  const seqRand = (seed) => { let s = seed | 0; return () => N.hash((s = (s + 0x9e3779b9) | 0)); };
 
-  /* ------------------------------ mat4 ------------------------------ */
+  // 自己完結の数学（render3d.mjs の M4 サブセットと bit 同一）
   const M4 = {
     ident: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
     mul(a, b) {
@@ -8296,53 +8293,24 @@ window.addEventListener("error", (e) => {
     chain(...ms) { let o = ms[0]; for (let i = 1; i < ms.length; i++) o = M4.mul(o, ms[i]); return o; },
   };
 
-  /* ------------------------------ meshes ------------------------------ */
-  const capsuleMesh = (seg = 14, rings = 5) => {
-    // 高さ1・半径1の正規化カプセル（y 0..1）。scaleで体格
-    const pos = [], nor = [], idx = [];
-    const push = (p, n) => { pos.push(...p); nor.push(...n); };
-    const rows = [];
-    for (let r = 0; r <= rings; r++) { // bottom hemi
-      const a = (r / rings) * Math.PI / 2;
-      rows.push({ y: 0.18 - Math.cos(a) * 0.18, rr: Math.sin(a), ny: -Math.cos(a) });
-    }
-    rows.push({ y: 0.82, rr: 1, ny: 0 });
-    for (let r = 1; r <= rings; r++) { // top hemi
-      const a = (r / rings) * Math.PI / 2;
-      rows.push({ y: 0.82 + Math.sin(a) * 0.18, rr: Math.cos(a), ny: Math.sin(a) });
-    }
-    for (let r = 0; r < rows.length; r++) {
-      for (let i = 0; i <= seg; i++) {
-        const th = (i / seg) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
-        const row = rows[r];
-        push([c * row.rr, row.y, s * row.rr], [c * (1 - Math.abs(row.ny)), row.ny, s * (1 - Math.abs(row.ny))]);
-      }
-    }
-    const W = seg + 1;
-    for (let r = 0; r < rows.length - 1; r++) for (let i = 0; i < seg; i++) {
-      const a = r * W + i;
-      idx.push(a, a + 1, a + W, a + 1, a + W + 1, a + W);
-    }
-    return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+  // 決定論ハッシュ（noise.mjs L8-33 から verbatim・自己完結）
+  const N = {};
+  N.hash = (n) => {
+    n = (n ^ 61) ^ (n >>> 16);
+    n = (n + (n << 3)) | 0;
+    n = n ^ (n >>> 4);
+    n = Math.imul(n, 0x27d4eb2d);
+    n = n ^ (n >>> 15);
+    return (n >>> 0) / 4294967295;
   };
-  const sphereMesh = (seg = 16) => {
-    const pos = [], nor = [], idx = [];
-    for (let r = 0; r <= seg; r++) for (let i = 0; i <= seg; i++) {
-      const ph = (r / seg) * Math.PI, th = (i / seg) * Math.PI * 2;
-      const x = Math.sin(ph) * Math.cos(th), y = Math.cos(ph), z = Math.sin(ph) * Math.sin(th);
-      pos.push(x, y, z); nor.push(x, y, z);
-    }
-    const W = seg + 1;
-    for (let r = 0; r < seg; r++) for (let i = 0; i < seg; i++) {
-      const a = r * W + i;
-      idx.push(a, a + 1, a + W, a + 1, a + W + 1, a + W);
-    }
-    return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+  N.hash2 = (a, b) => N.hash((Math.imul(a, 73856093) ^ Math.imul(b, 19349663)) | 0);
+  N.seedOf = (str) => {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h | 0;
   };
-  /* ------- #154 スキンドボディ（LBS・単一連続メッシュ・プロシージャル生成） ------- */
-  // ボーン: [親idx, バインド頭位置x, y, z]（直立・腕は体側に垂下のバインド姿勢）。
-  // 15ボーン=脊椎5+脚3×2+腕2×2。RPDX.quality.flags.playerBoneBudget の予算内で運用する。
-  // バインド回転は恒等（純並進）なので inverseBind = T(-head) となり一般逆行列が不要。
+
+  // ------------------------ キャラ中核（render3d から抽出）------------------------
   const SKEL = [
     [-1, 0, 0.94, 0],      // 0 pelvis
     [0, 0, 1.24, 0],       // 1 spine
@@ -8570,6 +8538,176 @@ window.addEventListener("error", (e) => {
     return { fz: -stride * 0.5 + stride * e, fy: Math.sin(t * Math.PI) * (0.045 + 0.10 * clamp(v / 6, 0, 1)), stance: false, stride };
   };
 
+  // ------------------------ 材質/スキニング・シェーダ（GLSL）------------------------
+  const VS_SKIN = `#version 300 es
+  layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
+  layout(location=3) in vec4 aBIdx; layout(location=4) in vec4 aBW; layout(location=5) in float aCid;
+  layout(location=6) in float aAo;
+  uniform mat4 uProj, uView, uModel; uniform mat4 uBones[15];
+  out vec3 vNor; out vec3 vWorld; out float vAo; flat out int vCid;
+  void main(){
+    mat4 S = uBones[int(aBIdx.x)]*aBW.x + uBones[int(aBIdx.y)]*aBW.y
+           + uBones[int(aBIdx.z)]*aBW.z + uBones[int(aBIdx.w)]*aBW.w;
+    vec4 w = uModel * (S * vec4(aPos,1.0));
+    vWorld = w.xyz; gl_Position = uProj*uView*w;
+    vNor = mat3(uModel) * (mat3(S) * aNor);
+    vCid = int(aCid + 0.5);   // flat: 三角形内は補間しない（材質境界＝ハードエッジ・中間値化を防ぐ）
+    vAo = aAo;                // #157 接触AO（滑らかに補間＝ソフトな遮蔽グラデ）
+  }`;
+  const FS_SKIN = `#version 300 es
+  precision highp float; in vec3 vNor; in vec3 vWorld; in float vAo; flat in int vCid; out vec4 o;
+  uniform vec3 uPal[6]; uniform vec3 uEye; uniform float uEmiss, uFogD, uAlpha;
+  void main(){
+    vec3 n = normalize(vNor);
+    vec3 L1 = normalize(vec3(0.35,0.8,0.45)), L2 = normalize(vec3(-0.5,0.6,-0.4));
+    float ndl = clamp(dot(n,L1),0.0,1.0);
+    float d = ndl*0.72 + clamp(dot(n,L2),0.0,1.0)*0.38 + 0.34;
+    float ao = clamp(vAo, 0.0, 1.0);              // #157 接触遮蔽（腋/股/顎下/内側を暗く＝一体感・セルフ遮蔽の近似）
+    vec3 base = uPal[vCid];
+    vec3 V = normalize(uEye - vWorld);
+    // #158 材質差別化（cid: 0/1=布 2/4=肌 3=髪 5=革）: スペキュラの強さ/鋭さを材質別に。
+    float specStr, shin, subs;
+    if (vCid==2 || vCid==4){ specStr=0.18; shin=14.0; subs=1.0; }   // 肌: 広く柔らかい＋サブサーフェス
+    else if (vCid==5){ specStr=0.5; shin=46.0; subs=0.0; }          // 革（ブーツ）: 鋭い反射
+    else if (vCid==3){ specStr=0.12; shin=22.0; subs=0.0; }         // 髪: 弱い光沢
+    else { specStr=0.05; shin=8.0; subs=0.0; }                      // 布（ジャージ）: ほぼマット＋微光沢
+    vec3 H = normalize(L1 + V);
+    float spec = pow(clamp(dot(n,H),0.0,1.0), shin) * specStr * ndl;  // 裏面スペキュラを ndl で抑制
+    vec3 sss = subs * vec3(0.16,0.03,0.0) * (1.0 - ndl) * ndl * 2.0;  // 肌: 明暗境界の暖色（安価なSSS近似）
+    float rim = pow(1.0 - clamp(dot(n,V),0.0,1.0), 2.5);
+    vec3 c = base * (d * ao) + sss * ao + vec3(spec * ao) + vec3(rim * 0.35 * ao) + base * uEmiss;
+    float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
+    float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
+    o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
+  }`;
+
+  R.character = {
+    SKEL, buildBodyMesh, BODY_MESH, poseSkin, bodyVarOf,
+    solveLegIK, legFK, footPlace, PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2,
+    VS_SKIN, FS_SKIN,
+    _M4: M4, _N: N, clamp, lerp,   // 内部数学/ハッシュも参照可能に（ビューア等の補助用）
+  };
+})();
+
+
+/* ===== app/render3d.mjs ===== */
+/* =========================================================================
+   RPDX.render3d — 依存ゼロ WebGL2 スタジアム・レンダラ
+   ナイター照明の NRG スタジアム / 選手カプセル+背番号ビルボード /
+   D²-Field ヒートマップ / 軌跡 / 5種カメラ（VR風フリーフライト含む）
+   ========================================================================= */
+(() => {
+  const R = (globalThis.RPDX ??= {});
+  const N = R.noise;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const lerp = (a, b, u) => a + (b - a) * u;
+  // #char-lab: キャラ中核は共有コア character.mjs（単一の真実源）から取得。ここで再定義しない。
+  const { SKEL, buildBodyMesh, BODY_MESH, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace,
+    PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2, VS_SKIN, FS_SKIN } = R.character;
+  // #153: 決定論シーケンシャル乱数 — 視覚要素に素の乱数関数は使わない（視覚回帰の再現性契約・visualgate.test が走査）
+  const seqRand = (seed) => { let s = seed | 0; return () => N.hash((s = (s + 0x9e3779b9) | 0)); };
+
+  /* ------------------------------ mat4 ------------------------------ */
+  const M4 = {
+    ident: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    mul(a, b) {
+      const o = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+        o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+      }
+      return o;
+    },
+    persp(fov, asp, near, far) {
+      const f = 1 / Math.tan(fov / 2), o = new Float32Array(16);
+      o[0] = f / asp; o[5] = f; o[10] = (far + near) / (near - far); o[11] = -1;
+      o[14] = (2 * far * near) / (near - far);
+      return o;
+    },
+    ortho(l, r, b, t, near, far) {   // #157 シャドウマップ用の平行投影（-1..1 クリップ）
+      const o = new Float32Array(16);
+      o[0] = 2 / (r - l); o[5] = 2 / (t - b); o[10] = -2 / (far - near); o[15] = 1;
+      o[12] = -(r + l) / (r - l); o[13] = -(t + b) / (t - b); o[14] = -(far + near) / (far - near);
+      return o;
+    },
+    lookAt(eye, at, up) {
+      let zx = eye[0]-at[0], zy = eye[1]-at[1], zz = eye[2]-at[2];
+      let zl = Math.hypot(zx, zy, zz) || 1; zx/=zl; zy/=zl; zz/=zl;
+      let xx = up[1]*zz - up[2]*zy, xy = up[2]*zx - up[0]*zz, xz = up[0]*zy - up[1]*zx;
+      let xl = Math.hypot(xx, xy, xz) || 1; xx/=xl; xy/=xl; xz/=xl;
+      const yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+      return new Float32Array([
+        xx, yx, zx, 0,  xy, yy, zy, 0,  xz, yz, zz, 0,
+        -(xx*eye[0]+xy*eye[1]+xz*eye[2]), -(yx*eye[0]+yy*eye[1]+yz*eye[2]), -(zx*eye[0]+zy*eye[1]+zz*eye[2]), 1,
+      ]);
+    },
+    trs(x, y, z, sx, sy, sz, ry = 0) {
+      const c = Math.cos(ry), s = Math.sin(ry);
+      return new Float32Array([c*sx,0,-s*sx,0, 0,sy,0,0, s*sz,0,c*sz,0, x,y,z,1]);
+    },
+    rotX(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+    },
+    roty(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    },
+    t(x, y, z) {
+      return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+    },
+    scale(sx, sy, sz) {
+      return new Float32Array([sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1]);
+    },
+    chain(...ms) { let o = ms[0]; for (let i = 1; i < ms.length; i++) o = M4.mul(o, ms[i]); return o; },
+  };
+
+  /* ------------------------------ meshes ------------------------------ */
+  const capsuleMesh = (seg = 14, rings = 5) => {
+    // 高さ1・半径1の正規化カプセル（y 0..1）。scaleで体格
+    const pos = [], nor = [], idx = [];
+    const push = (p, n) => { pos.push(...p); nor.push(...n); };
+    const rows = [];
+    for (let r = 0; r <= rings; r++) { // bottom hemi
+      const a = (r / rings) * Math.PI / 2;
+      rows.push({ y: 0.18 - Math.cos(a) * 0.18, rr: Math.sin(a), ny: -Math.cos(a) });
+    }
+    rows.push({ y: 0.82, rr: 1, ny: 0 });
+    for (let r = 1; r <= rings; r++) { // top hemi
+      const a = (r / rings) * Math.PI / 2;
+      rows.push({ y: 0.82 + Math.sin(a) * 0.18, rr: Math.cos(a), ny: Math.sin(a) });
+    }
+    for (let r = 0; r < rows.length; r++) {
+      for (let i = 0; i <= seg; i++) {
+        const th = (i / seg) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+        const row = rows[r];
+        push([c * row.rr, row.y, s * row.rr], [c * (1 - Math.abs(row.ny)), row.ny, s * (1 - Math.abs(row.ny))]);
+      }
+    }
+    const W = seg + 1;
+    for (let r = 0; r < rows.length - 1; r++) for (let i = 0; i < seg; i++) {
+      const a = r * W + i;
+      idx.push(a, a + 1, a + W, a + 1, a + W + 1, a + W);
+    }
+    return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+  };
+  const sphereMesh = (seg = 16) => {
+    const pos = [], nor = [], idx = [];
+    for (let r = 0; r <= seg; r++) for (let i = 0; i <= seg; i++) {
+      const ph = (r / seg) * Math.PI, th = (i / seg) * Math.PI * 2;
+      const x = Math.sin(ph) * Math.cos(th), y = Math.cos(ph), z = Math.sin(ph) * Math.sin(th);
+      pos.push(x, y, z); nor.push(x, y, z);
+    }
+    const W = seg + 1;
+    for (let r = 0; r < seg; r++) for (let i = 0; i < seg; i++) {
+      const a = r * W + i;
+      idx.push(a, a + 1, a + W, a + 1, a + W + 1, a + W);
+    }
+    return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+  };
+  /* ------- #154 スキンドボディ（LBS・単一連続メッシュ・プロシージャル生成） ------- */
+  // ボーン: [親idx, バインド頭位置x, y, z]（直立・腕は体側に垂下のバインド姿勢）。
+  // 15ボーン=脊椎5+脚3×2+腕2×2。RPDX.quality.flags.playerBoneBudget の予算内で運用する。
+  // バインド回転は恒等（純並進）なので inverseBind = T(-head) となり一般逆行列が不要。
   const quadMesh = () => ({
     pos: new Float32Array([-0.5,0,-0.5, 0.5,0,-0.5, 0.5,0,0.5, -0.5,0,0.5]),
     nor: new Float32Array([0,1,0, 0,1,0, 0,1,0, 0,1,0]),
@@ -8634,49 +8772,6 @@ window.addEventListener("error", (e) => {
     vec3 c = base * d + vec3(rim * 0.35) + base * uEmiss;
     float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     // 透明感: フレネル縁は不透明に残す（ガラス質の量感）
-    float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
-    o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
-  }`;
-  // #154 スキニング: 頂点を最大2ボーン（vec4枠は4）で変形。ボーンは回転+並進のみ
-  // なので法線は mat3(S) の直接変換で正確（逆転置不要）。
-  const VS_SKIN = `#version 300 es
-  layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
-  layout(location=3) in vec4 aBIdx; layout(location=4) in vec4 aBW; layout(location=5) in float aCid;
-  layout(location=6) in float aAo;
-  uniform mat4 uProj, uView, uModel; uniform mat4 uBones[15];
-  out vec3 vNor; out vec3 vWorld; out float vAo; flat out int vCid;
-  void main(){
-    mat4 S = uBones[int(aBIdx.x)]*aBW.x + uBones[int(aBIdx.y)]*aBW.y
-           + uBones[int(aBIdx.z)]*aBW.z + uBones[int(aBIdx.w)]*aBW.w;
-    vec4 w = uModel * (S * vec4(aPos,1.0));
-    vWorld = w.xyz; gl_Position = uProj*uView*w;
-    vNor = mat3(uModel) * (mat3(S) * aNor);
-    vCid = int(aCid + 0.5);   // flat: 三角形内は補間しない（材質境界＝ハードエッジ・中間値化を防ぐ）
-    vAo = aAo;                // #157 接触AO（滑らかに補間＝ソフトな遮蔽グラデ）
-  }`;
-  const FS_SKIN = `#version 300 es
-  precision highp float; in vec3 vNor; in vec3 vWorld; in float vAo; flat in int vCid; out vec4 o;
-  uniform vec3 uPal[6]; uniform vec3 uEye; uniform float uEmiss, uFogD, uAlpha;
-  void main(){
-    vec3 n = normalize(vNor);
-    vec3 L1 = normalize(vec3(0.35,0.8,0.45)), L2 = normalize(vec3(-0.5,0.6,-0.4));
-    float ndl = clamp(dot(n,L1),0.0,1.0);
-    float d = ndl*0.72 + clamp(dot(n,L2),0.0,1.0)*0.38 + 0.34;
-    float ao = clamp(vAo, 0.0, 1.0);              // #157 接触遮蔽（腋/股/顎下/内側を暗く＝一体感・セルフ遮蔽の近似）
-    vec3 base = uPal[vCid];
-    vec3 V = normalize(uEye - vWorld);
-    // #158 材質差別化（cid: 0/1=布 2/4=肌 3=髪 5=革）: スペキュラの強さ/鋭さを材質別に。
-    float specStr, shin, subs;
-    if (vCid==2 || vCid==4){ specStr=0.18; shin=14.0; subs=1.0; }   // 肌: 広く柔らかい＋サブサーフェス
-    else if (vCid==5){ specStr=0.5; shin=46.0; subs=0.0; }          // 革（ブーツ）: 鋭い反射
-    else if (vCid==3){ specStr=0.12; shin=22.0; subs=0.0; }         // 髪: 弱い光沢
-    else { specStr=0.05; shin=8.0; subs=0.0; }                      // 布（ジャージ）: ほぼマット＋微光沢
-    vec3 H = normalize(L1 + V);
-    float spec = pow(clamp(dot(n,H),0.0,1.0), shin) * specStr * ndl;  // 裏面スペキュラを ndl で抑制
-    vec3 sss = subs * vec3(0.16,0.03,0.0) * (1.0 - ndl) * ndl * 2.0;  // 肌: 明暗境界の暖色（安価なSSS近似）
-    float rim = pow(1.0 - clamp(dot(n,V),0.0,1.0), 2.5);
-    vec3 c = base * (d * ao) + sss * ao + vec3(spec * ao) + vec3(rim * 0.35 * ao) + base * uEmiss;
-    float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
   }`;
