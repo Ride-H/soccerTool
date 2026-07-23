@@ -9,6 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // render3d は先頭で R.noise を参照するため noise → quality → render3d の順に評価
 (0, eval)(readFileSync(join(root, "src", "noise.mjs"), "utf8"));
 (0, eval)(readFileSync(join(root, "app", "quality.mjs"), "utf8"));
+(0, eval)(readFileSync(join(root, "app", "character.mjs"), "utf8"));   // #char-lab: 共有コア（render3d より前）
 (0, eval)(readFileSync(join(root, "app", "render3d.mjs"), "utf8"));
 const R = globalThis.RPDX;
 const S = R.render3d._skin;
@@ -50,7 +51,7 @@ test("#159 ポストプロセス: トーンマップ/グレーディング/bloom
 });
 
 test("#158 材質差別化: FS_SKIN が材質別スペキュラ（肌/布/革/髪）を持つ", () => {
-  const src = readFileSync(join(root, "app", "render3d.mjs"), "utf8");
+  const src = readFileSync(join(root, "app", "character.mjs"), "utf8");   // #char-lab: FS_SKIN は共有コアへ移設
   const fs = src.match(/const FS_SKIN = `([\s\S]*?)`;/)[1];
   assert.ok(/specStr/.test(fs) && /shin/.test(fs), "材質パラメータ(specStr/shin)がある");
   assert.ok(/vCid==5/.test(fs) && /46\.0|4[0-9]\.0/.test(fs), "革(ブーツ)=鋭いスペキュラ");
