@@ -307,6 +307,30 @@
     return { fz: -stride * 0.5 + stride * e, fy: Math.sin(t * Math.PI) * (0.045 + 0.10 * clamp(v / 6, 0, 1)), stance: false, stride };
   };
 
+  // 純粋な直進歩容ポーズ（位相・速度 → poseSkin が食う全ポーズ引数）。脚はフットIK、腕/胴は正弦。
+  // 直進ロコモーションの正典。文脈駆動（注視・キック・後退等）はレンダラ/オーサリング側で上乗せする。
+  const REST_ANKLE = 0.085;
+  const gaitPose = (phase, speed, opts = {}) => {
+    const run = clamp(speed / 6, 0, 1), kick = opts.kick || 0, kickLeg = opts.kickLeg ?? 1;
+    const swayY = Math.abs(Math.cos(phase)) * (0.012 + 0.055 * run);
+    const swayX = Math.sin(phase) * 0.018 * run, swayZ = 0;
+    const twist = Math.sin(phase) * (0.05 + 0.16 * run);
+    const legOf = (s) => {
+      if (kick > 0.02 && s === kickLeg) { const sw = Math.sin(clamp(kick, 0, 1) * Math.PI); return { hip: -1.25 * sw, knee: 0.15 + 0.7 * (1 - kick) * sw }; }
+      const ft = footPlace(phase, speed, s);
+      const r = solveLegIK(0.94 + swayY, swayZ, REST_ANKLE + ft.fy, swayZ + ft.fz);
+      return { hip: r.hip, knee: r.knee };
+    };
+    const armOf = (s) => ({ sw: -s * Math.sin(phase) * (0.10 + 0.78 * run), el: 0.45 + run * 1.05 });
+    const L = legOf(-1), Rg = legOf(1), aL = armOf(-1), aR = armOf(1);
+    return {
+      lean: 0.03 + run * run * 0.36 + (kick > 0.02 ? 0.22 * Math.sin(clamp(kick, 0, 1) * Math.PI) : 0),
+      twist, swayX, swayY, swayZ, lookYaw: 0, lookPitch: 0,
+      hipL: L.hip, kneeL: L.knee, hipR: Rg.hip, kneeR: Rg.knee,
+      swL: aL.sw, elL: aL.el, swR: aR.sw, elR: aR.el,
+    };
+  };
+
   // ------------------------ 材質/スキニング・シェーダ（GLSL）------------------------
   const VS_SKIN = `#version 300 es
   layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
@@ -352,7 +376,7 @@
 
   R.character = {
     SKEL, buildBodyMesh, BODY_MESH, poseSkin, bodyVarOf,
-    solveLegIK, legFK, footPlace, PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2,
+    solveLegIK, legFK, footPlace, gaitPose, PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2,
     VS_SKIN, FS_SKIN,
     _M4: M4, _N: N, clamp, lerp,   // 内部数学/ハッシュも参照可能に（ビューア等の補助用）
   };
