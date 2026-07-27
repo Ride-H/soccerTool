@@ -8323,6 +8323,8 @@ window.addEventListener("error", (e) => {
     sole: 0, ankle: 0.0751, knee: 0.5486, crotch: 0.9336, hip: 1.0203,
     lumbar: 1.3172, thorax: 1.5152, sternum: 1.5450, shoulder: 1.5346, acromion: 1.5746,
     elbow: 1.2127, wrist: 0.9336, neck: 1.6124, chin: 1.6747, headPivot: 1.70, top: 1.905,
+    // 顔の割り付け（顎→鼻の付け根→眉＝おおよそ三等分）。頭は幅 0.155・奥行 0.195・高さ 0.230（人体標準）。
+    mouth: 1.7020, noseBase: 1.7220, noseTip: 1.7360, eye: 1.7500, brow: 1.7640, hairline: 1.8090,
   };
   const L = (a, b, t) => LM[a] + (LM[b] - LM[a]) * t;   // ランドマーク間の内分（メッシュのリング位置に使う）
   const HIP_X = 0.11, ARM_X = 0.20, CLAV_X = 0.03;      // 左右の関節位置（前額面）
@@ -8492,10 +8494,99 @@ window.addEventListener("error", (e) => {
       };
       cap(rings.length - 1, true); cap(0, false);
     };
+    // 顔の造形（#05）。リングを積むのは他と同じだが、**各頂点**の前後の出っ張り・色・AO を
+    // 「顔の中心からの角度」の関数で変えられるようにして、正面だけに鼻・眉・眼窩・口の窪み、
+    // そして髪の生え際（前は額まで下がらず、横〜後ろは耳の高さまで下がる）を作る。
+    // 法線は生成した点の差分の外積で求めるので、凹凸を入れても陰影が破綻しない。
+    const headMesh = (B) => {
+      const seg = 16, start = pos.length / 3;
+      const lerpN = (a, b, t) => a + (b - a) * clamp(t, 0, 1);
+      // 顔の正面（+Z）からの角度差。0=正面・±π=真後ろ。
+      const front = (th) => { let d = th - Math.PI / 2; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+      const bump = (d, w) => (Math.abs(d) >= w ? 0 : Math.cos((d / w) * (Math.PI / 2)) ** 2);   // 角度の山（±w で 0）
+      const near = (y, y0, h) => (Math.abs(y - y0) >= h ? 0 : Math.cos(((y - y0) / h) * (Math.PI / 2)) ** 2);   // 高さの山
+      // 髪の生え際: 正面は額（hairline）まで、横〜後ろは耳の高さまで下りる
+      const hairY = (d) => { const a = Math.abs(d); return a < 1.0 ? LM.hairline : lerpN(LM.hairline, LM.eye - 0.01, (a - 1.0) / 0.8); };
+      const rings = [
+        { y: 1.6470, rx: 0.062, rz: 0.070, zc: 0.004, ao: 0.72, b: [B.nec, 0.55, B.hea, 0.45] },   // 顎の下（首と重なる）
+        { y: 1.6647, rx: 0.057, rz: 0.078, zc: 0.014, ao: 0.86, b: [B.nec, 0.2, B.hea, 0.8] },     // 顎先
+        { y: 1.6850, rx: 0.070, rz: 0.084, zc: 0.005, ao: 0.94, b: [B.hea, 1] },                   // 顎のライン
+        { y: LM.mouth, rx: 0.074, rz: 0.089, zc: 0.002, b: [B.hea, 1] },                           // 口
+        { y: LM.noseBase, rx: 0.076, rz: 0.092, b: [B.hea, 1] },                                   // 鼻の付け根・頬
+        { y: LM.noseTip, rx: 0.0770, rz: 0.094, b: [B.hea, 1] },                                   // 鼻先の高さ
+        { y: 1.7440, rx: 0.0774, rz: 0.0955, b: [B.hea, 1] },                                      // 目の下（頬骨）
+        { y: LM.eye, rx: 0.0775, rz: 0.0960, b: [B.hea, 1] },                                      // 目
+        { y: 1.7560, rx: 0.0774, rz: 0.0965, b: [B.hea, 1] },                                      // 目の上
+        { y: LM.brow, rx: 0.0770, rz: 0.0975, b: [B.hea, 1] },                                     // 眉弓
+        { y: 1.7850, rx: 0.0757, rz: 0.0968, b: [B.hea, 1] },                                      // 額
+        { y: LM.hairline, rx: 0.0750, rz: 0.0958, b: [B.hea, 1] },                                 // 生え際
+        // 頭蓋は 1.84 を最大幅とする四分楕円のドーム（円錐にしない）
+        { y: 1.8400, rx: 0.0745, rz: 0.0950, b: [B.hea, 1] },
+        { y: 1.8600, rx: 0.0724, rz: 0.0923, b: [B.hea, 1] },
+        { y: 1.8800, rx: 0.0658, rz: 0.0839, b: [B.hea, 1] },
+        { y: 1.8980, rx: 0.0545, rz: 0.0695, b: [B.hea, 1] },
+        { y: 1.9120, rx: 0.0394, rz: 0.0502, b: [B.hea, 1] },
+      ];
+      const P = [], C = [], A = [];
+      for (const rg of rings) {
+        const row = [], crow = [], arow = [];
+        for (let si = 0; si < seg; si++) {
+          const th = (si / seg) * Math.PI * 2, d = front(th), ad = Math.abs(d);
+          let rx = rg.rx, rz = rg.rz, dz = 0, ao = rg.ao ?? 1, cid = 2;
+          if (ad < 0.95) { rx *= 0.985; rz *= 0.985; }                       // 顔の前面は平たい面にする
+          dz += 0.0045 * bump(d, 0.80) * near(rg.y, LM.brow, 0.016);         // 眉弓
+          dz += 0.024 * bump(d, 0.75) * near(rg.y, LM.noseTip, 0.030);       // 鼻梁〜鼻先（隣の頂点まで届く幅にする）
+          dz -= 0.005 * (bump(d - 0.42, 0.30) + bump(d + 0.42, 0.30)) * near(rg.y, LM.noseBase, 0.010);   // 小鼻の脇の窪み
+          dz -= 0.007 * (bump(d - 0.40, 0.26) + bump(d + 0.40, 0.26)) * near(rg.y, LM.eye, 0.014);   // 眼窩
+          dz -= 0.008 * bump(d, 0.60) * near(rg.y, LM.mouth, 0.010);         // 口元の窪み
+          if (near(rg.y, LM.mouth, 0.010) > 0.35 && ad < 0.62) ao = 0.78;    // 口の影
+          if (rg.y >= hairY(d) - 1e-9) cid = 3;                              // 髪（生え際より上・横〜後ろは低い）
+          row.push([Math.cos(th) * rx, rg.y, (rg.zc || 0) + Math.sin(th) * rz + dz]);
+          crow.push(cid); arow.push(ao);
+        }
+        P.push(row); C.push(crow); A.push(arow);
+      }
+      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      for (let ri = 0; ri < rings.length; ri++) {
+        for (let si = 0; si < seg; si++) {
+          const p0 = P[ri][si];
+          const tTh = sub(P[ri][(si + 1) % seg], P[ri][(si - 1 + seg) % seg]);
+          const tY = sub(P[Math.min(rings.length - 1, ri + 1)][si], P[Math.max(0, ri - 1)][si]);
+          let nv = cross(tTh, tY);
+          const out = [p0[0], 0, p0[2] - (rings[ri].zc || 0)];
+          if (nv[0] * out[0] + nv[2] * out[2] < 0) nv = [-nv[0], -nv[1], -nv[2]];
+          const nl = Math.hypot(nv[0], nv[1], nv[2]) || 1;
+          pos.push(p0[0], p0[1], p0[2]); nor.push(nv[0] / nl, nv[1] / nl, nv[2] / nl);
+          bidx.push(rings[ri].b[0], rings[ri].b[2] ?? 0, 0, 0);
+          bw.push(rings[ri].b[1], rings[ri].b[3] ?? 0, 0, 0);
+          cid.push(C[ri][si]); ao.push(A[ri][si]);
+          if (ri > 0) {
+            const a0 = start + (ri - 1) * seg, b0 = start + ri * seg, s1 = (si + 1) % seg;
+            idx.push(a0 + si, b0 + si, a0 + s1, a0 + s1, b0 + si, b0 + s1);
+          }
+        }
+      }
+      const cap = (ri, up) => {   // 頭頂と顎下（顎下は首の内側に隠れる）
+        const rg = rings[ri], ci = pos.length / 3;
+        pos.push(0, rg.y + (up ? 0.013 : -0.008), rg.zc || 0); nor.push(0, up ? 1 : -1, 0);
+        bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0); bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
+        cid.push(up ? 3 : 2); ao.push(up ? 1 : 0.7);
+        const r0 = start + ri * seg;
+        for (let si = 0; si < seg; si++) { const s1 = (si + 1) % seg; if (up) idx.push(r0 + si, ci, r0 + s1); else idx.push(r0 + si, r0 + s1, ci); }
+      };
+      cap(rings.length - 1, true); cap(0, false);
+      // 目（眼窩に収まる暗色の小球）と耳（頭の側面）
+      for (const s of [-1, 1]) blob(s * 0.0285, LM.eye, 0.0855, 0.0115, 0.0092, 0.0085, B.hea, 3, 4, 6, 0.8);
+      for (const s of [-1, 1]) blob(s * 0.076, LM.eye - 0.004, -0.006, 0.010, 0.026, 0.019, B.hea, 2, 4, 6, 0.88);
+    };
     // 胴〜首〜頭（1本のレイズ）: V字テーパー（肩幅>腰幅）＋胸郭の膨らみ＋腹部の絞り＋
     // 僧帽筋スロープ（肩ヨーク→首の急勾配＝首肩の連続）＋顎/面のある頭部。
     tube([
-      { y: LM.crotch, rx: 0.150, rz: 0.130, c: 1, ao: 0.58, b: [B.pel, 1] },    // 股下＝強い接触AO
+      // 股は内腿の間に収まる幅まで絞る（太い胴が平らな底で終わると、脚との間に空洞が見える）。
+      // 下端キャップは左右の腿の内側に隠れる。
+      { y: LM.crotch, rx: 0.106, rz: 0.112, c: 1, ao: 0.50, b: [B.pel, 1] },    // 股下＝強い接触AO
+      { y: L("crotch", "hip", 0.42), rx: 0.152, rz: 0.134, c: 1, ao: 0.62, b: [B.pel, 1] },   // 臀部/腿の付け根の張り
       { y: LM.hip, rx: 0.165, rz: 0.140, c: 1, ao: 0.72, b: [B.pel, 1] },       // 骨盤/鼠径（＝股関節の高さ）
       { y: L("hip", "lumbar", 0.40), rx: 0.150, rz: 0.118, c: 1, ao: 0.90, b: [B.pel, 0.75, B.spi, 0.25] }, // 腰＝絞り
       { y: L("hip", "lumbar", 0.667), rx: 0.156, rz: 0.122, c: 0, b: [B.pel, 0.35, B.spi, 0.65] },
@@ -8504,19 +8595,17 @@ window.addEventListener("error", (e) => {
       { y: LM.thorax, rx: 0.204, rz: 0.140, c: 0, b: [B.che, 1] },
       { y: LM.acromion, rx: 0.214, rz: 0.126, c: 0, b: [B.che, 1] },            // 肩ヨーク＝肩峰の高さ
       { y: L("acromion", "neck", 0.5), rx: 0.166, rz: 0.108, c: 0, ao: 0.9, b: [B.che, 0.7, B.nec, 0.3] }, // 僧帽筋スロープ→首
-      { y: LM.neck, rx: 0.072, rz: 0.074, c: 2, ao: 0.7, b: [B.nec, 1] },       // 首（顎下の接触AO）
-      { y: L("neck", "chin", 0.36), rx: 0.064, rz: 0.070, c: 2, ao: 0.78, b: [B.nec, 0.4, B.hea, 0.6] },
-      { y: LM.chin, rx: 0.082, rz: 0.094, c: 2, ao: 0.92, b: [B.hea, 1] },      // 顎（前後に深い）
-      { y: 1.73, rx: 0.104, rz: 0.112, c: 2, b: [B.hea, 1] },                   // 顔（額〜頬）
-      { y: 1.79, rx: 0.110, rz: 0.118, c: 3, b: [B.hea, 1] },                   // 後頭部の張り（髪）
-      { y: 1.86, rx: 0.082, rz: 0.088, c: 3, b: [B.hea, 1] },
-      { y: LM.top, rx: 0.034, rz: 0.036, c: 3, b: [B.hea, 1] },
+      { y: LM.neck, rx: 0.059, rz: 0.064, c: 2, ao: 0.7, b: [B.nec, 1] },       // 首（顎下の接触AO）
+      { y: L("neck", "chin", 0.36), rx: 0.056, rz: 0.062, c: 2, ao: 0.78, b: [B.nec, 0.4, B.hea, 0.6] },
     ], 14);
+    headMesh(B);   // 頭部は顔の造形（面・鼻・目・生え際）のため専用のロフトで作る
     // 脚（腿の質量→膝→ふくらはぎ→足首の絞り・紡錘）。ふくらはぎは前後に厚い（rz>rx）。
     const leg = (s, th, sh, ft, to) => {
       tube([
-        { x: s * HIP_X, y: L("hip", "knee", -0.126), rx: 0.098, rz: 0.100, c: 4, ao: 0.68, b: [th, 1] }, // 腿付け根＝鼠径の接触AO
-        { x: s * HIP_X, y: L("hip", "knee", 0.110), rx: 0.106, rz: 0.110, c: 4, ao: 0.9, b: [th, 1] },   // 大腿の質量
+        // 付け根は太くして左右の腿が正中で接するようにする（骨盤の下端が脚の間から見えないため）
+        { x: s * HIP_X, y: L("hip", "knee", -0.126), rx: 0.112, rz: 0.108, c: 1, ao: 0.60, b: [th, 1] }, // 腿付け根＝鼠径の接触AO
+        { x: s * HIP_X, y: L("hip", "knee", 0.110), rx: 0.118, rz: 0.118, c: 1, ao: 0.85, b: [th, 1] },  // 大腿の質量（ショーツに覆われる）
+        { x: s * HIP_X, y: L("hip", "knee", 0.34), rx: 0.104, rz: 0.106, c: 1, ao: 0.95, b: [th, 1] },   // ショーツの裾
         { x: s * HIP_X, y: L("hip", "knee", 0.571), rx: 0.093, rz: 0.096, c: 4, b: [th, 1] },
         { x: s * HIP_X, y: L("hip", "knee", 0.871), rx: 0.085, rz: 0.088, c: 4, b: [th, 0.65, sh, 0.35] },
         { x: s * HIP_X, y: LM.knee, rx: 0.082, rz: 0.086, c: 4, b: [th, 0.3, sh, 0.7] },
@@ -8556,7 +8645,7 @@ window.addEventListener("error", (e) => {
         { x: s * (ARM_X - 0.025), y: LM.acromion - 0.005, rx: 0.055, rz: 0.054, c: 0, ao: 0.95, b: [B.che, 0.75, ua, 0.25] }, // 肩の頂点（中心を内へ寄せて肩ヨークの奥に埋める）
         { x: s * ARM_X, y: LM.sternum, rx: 0.072, rz: 0.070, c: 0, ao: 0.88, b: [cl, 0.5, ua, 0.5] },
         { x: s * ARM_X, y: LM.shoulder - 0.025, rx: 0.075, rz: 0.072, c: 0, ao: 0.82, b: [cl, 0.2, ua, 0.8] },  // 三角筋の膨らみ
-        { x: s * ARM_X, y: L("shoulder", "wrist", 0.072), rx: 0.070, rz: 0.068, c: 0, ao: 0.7, b: [ua, 1] },   // 腋の接触AO
+        { x: s * ARM_X, y: L("shoulder", "wrist", 0.072), rx: 0.067, rz: 0.066, c: 0, ao: 0.58, b: [ua, 1] },  // 腋＝胴と交わる高さ。接触AOを深めて折り目として読ませる
         { x: s * ARM_X, y: L("shoulder", "wrist", 0.234), rx: 0.061, rz: 0.060, c: 2, ao: 0.88, b: [ua, 1] },  // 袖→肌
         { x: s * ARM_X, y: L("shoulder", "wrist", 0.432), rx: 0.056, rz: 0.056, c: 2, b: [ua, 0.62, fa, 0.38] },
         { x: s * ARM_X, y: LM.elbow, rx: 0.053, rz: 0.053, c: 2, b: [ua, 0.3, fa, 0.7] },
@@ -8582,7 +8671,7 @@ window.addEventListener("error", (e) => {
   // 足首は正がつま先下げ、外転・内外旋・鎖骨の挙上は解剖学的な向きが正（左右の符号は poseSkin が吸収）。
   const ROM = {
     lean: [-0.40, 1.50], twist: [-0.90, 0.90], sideLean: [-0.45, 0.45], pelvisYaw: [-0.60, 0.60],
-    lookYaw: [-1.40, 1.40], lookPitch: [-0.60, 0.60],
+    lookYaw: [-1.40, 1.40], lookPitch: [-0.60, 0.60], pelvisRoll: [-0.25, 0.25],
     hip: [-2.10, 0.50], hipAbd: [-0.35, 0.80], hipRot: [-0.70, 0.70],
     knee: [0, 2.40], ankle: [-0.45, 0.70], ankleTilt: [-0.35, 0.35], toe: [-1.20, 0.50],
     sw: [-3.00, 1.00], el: [0, 2.60], armAbd: [-0.60, 2.90], armRot: [-1.50, 1.50],
@@ -8611,11 +8700,17 @@ window.addEventListener("error", (e) => {
       ? M4.t(p.swayX || 0, p.swayY || 0, p.swayZ || 0) : null;
     // 骨盤回旋（水平面）: 骨盤メッシュだけを回し、脚には逆回転で打ち消して伝播させない。
     // 脚が世界の矢状面に留まるので、股関節が動いても接地足が横滑りしない（フットIKは矢状2Dのまま）。
-    const pyaw = p.pelvisYaw || 0;
-    const pelvis = pyaw ? (sway ? M4.mul(sway, M4.roty(pyaw)) : M4.roty(pyaw)) : sway;
+    // 骨盤リスト（前額面の傾き・正=右腰が上がり左腰が下がる）も同じ扱い。股関節の位置だけが動く。
+    const pyaw = p.pelvisYaw || 0, proll = p.pelvisRoll || 0;
+    let pelvis = sway;
+    if (pyaw) pelvis = pelvis ? M4.mul(pelvis, M4.roty(pyaw)) : M4.roty(pyaw);
+    if (proll) pelvis = pelvis ? M4.mul(pelvis, M4.rotZ(proll)) : M4.rotZ(proll);
+    // 打ち消しは骨盤の合成 roty(yaw)·rotZ(roll) の逆順（回転は可換でないので順序を守らないと脚が僅かに傾く）
     const legRot = (s, flex, abd, axial) => {
-      const m = limbRot(s, flex, abd, axial);
-      return pyaw ? M4.mul(M4.roty(-pyaw), m) : m;
+      let m = limbRot(s, flex, abd, axial);
+      if (pyaw) m = M4.mul(M4.roty(-pyaw), m);
+      if (proll) m = M4.mul(M4.rotZ(-proll), m);
+      return m;
     };
     // 前額面の傾き（体重を支持脚へ預ける上体の倒れ・+=右(+X)へ倒れる）。脚より上だけに効く。
     const side = p.sideLean || 0;
@@ -8794,23 +8889,32 @@ window.addEventListener("error", (e) => {
     const split = splitAt(phase);
     const twist = split * (0.06 + 0.17 * run);              // 胸郭: 右足前で左肩前
     const pelvisYaw = -split * (0.05 + 0.10 * run);         // 骨盤: 前に出る脚側の腰が前（＝胸郭と反位相）
-    // (a) 体重移動: 左右は上体の傾きで預ける（股関節に外転が無いリグでは骨盤を横に振ると接地足が滑るため）
-    const swayX = Math.sin(phase) * 0.018 * run;
-    const sideLean = Math.sin(phase) * (0.02 + 0.05 * run) * loco;
+    // (a) 体重移動（前額面）: 支持脚側へ骨盤を寄せ、遊脚側の腰を落とす。脚が横に流れる分は股関節の
+    // 外転で戻すので、接地足は動かない（外転の自由度が入ったので骨盤を実際に動かせるようになった）。
+    const swayX = Math.sin(phase) * (0.014 + 0.024 * run) * loco;
+    const pelvisRoll = Math.sin(phase) * (0.040 + 0.055 * run) * loco;   // 正=右腰が上がる＝右支持で左（遊脚）側が落ちる
+    const sideLean = Math.sin(phase) * (0.015 + 0.035 * run) * loco;     // 上体は支持脚側へわずかに預ける
     // 前後の微動＝足のロールによる制動/押し出し。左右の平均を使う（支持脚を切り替えても連続）。
     const swayZ = (legs[0].pitch + legs[1].pitch) * 0.5 * 0.03;
-    const hipZ = (s) => swayZ - HIP_X * s * Math.sin(pelvisYaw);   // 骨盤回旋で股関節が前後にずれる分
+    const hipZ = (s) => swayZ - HIP_X * s * Math.sin(pelvisYaw) * Math.cos(pelvisRoll);   // 骨盤回旋で股関節が前後にずれる分
+    const hipDY = (s) => HIP_X * s * Math.sin(pelvisRoll);        // 骨盤リストで股関節が上下にずれる分
+    // 骨盤の横移動を打ち消す外転。脚を外転させると足は「股関節から足首までの高さ×sin」だけ横へ動くので、
+    // 打ち消し角はその高さ（脚長ではなく実際の落差）から決める。
     let hipY = Infinity, hipMax = Infinity;
     for (const L of legs) if (!L.free) {
       const dz = (L.tZ - hipZ(L.s)) ** 2;
-      hipY = Math.min(hipY, L.tY + Math.sqrt(Math.max(L.len * L.len - dz, 0)));
-      hipMax = Math.min(hipMax, L.tY + Math.sqrt(Math.max(REACH_MAX * REACH_MAX - dz, 0)));
+      hipY = Math.min(hipY, L.tY + Math.sqrt(Math.max(L.len * L.len - dz, 0)) - hipDY(L.s));
+      hipMax = Math.min(hipMax, L.tY + Math.sqrt(Math.max(REACH_MAX * REACH_MAX - dz, 0)) - hipDY(L.s));
     }
     hipY = Math.min(hipY + (opts.bob || 0), hipMax);        // 脚が届く以上には持ち上がらない
     const legOf = (L) => {
-      if (L.free) return { hip: -1.25 * kickSw, knee: 0.15 + 0.7 * (1 - kick) * kickSw, ankle: 0, toe: 0 };
-      const r = solveLegIK(hipY, hipZ(L.s), L.tY, L.tZ);
-      return { hip: r.hip, knee: r.knee, ankle: clamp(L.pitch - (r.hip + r.knee), ROM.ankle[0], ROM.ankle[1]), toe: L.toe };
+      if (L.free) return { hip: -1.25 * kickSw, knee: 0.15 + 0.7 * (1 - kick) * kickSw, ankle: 0, toe: 0, abd: 0 };
+      const hy = hipY + hipDY(L.s);
+      const abd = -L.s * Math.asin(clamp(swayX / Math.max(hy - L.tY, 0.2), -0.4, 0.4));
+      // 外転で脚が傾く分、矢状面の到達距離が cos(外転) 倍に縮むので、その分だけ深く解く（接地は厳密に保つ）
+      const tY = hy - (hy - L.tY) / Math.cos(abd);
+      const r = solveLegIK(hy, hipZ(L.s), tY, L.tZ);
+      return { hip: r.hip, knee: r.knee, ankle: clamp(L.pitch - (r.hip + r.knee), ROM.ankle[0], ROM.ankle[1]), toe: L.toe, abd };
     };
     // (c)(d) 腕の振り＝歩幅/速度に連動＋加速で位相の遅れと後方への流れ
     const lag = clamp(accel * 0.05, -0.12, 0.16);
@@ -8818,9 +8922,9 @@ window.addEventListener("error", (e) => {
     const lg = legOf(legs[0]), rg = legOf(legs[1]);   // L はランドマーク補間に使う名前なので避ける
     return {
       lean: 0.03 + run * run * 0.36 + clamp(accel * 0.06, -0.15, 0.28) + (kicking ? 0.22 * kickSw : 0),
-      twist, pelvisYaw, sideLean, swayX, swayY: hipY - HIP_Y, swayZ, lookYaw: 0, lookPitch: 0,
-      hipL: lg.hip, kneeL: lg.knee, ankleL: lg.ankle, toeL: lg.toe,
-      hipR: rg.hip, kneeR: rg.knee, ankleR: rg.ankle, toeR: rg.toe,
+      twist, pelvisYaw, pelvisRoll, sideLean, swayX, swayY: hipY - HIP_Y, swayZ, lookYaw: 0, lookPitch: 0,
+      hipL: lg.hip, kneeL: lg.knee, ankleL: lg.ankle, toeL: lg.toe, hipAbdL: lg.abd,
+      hipR: rg.hip, kneeR: rg.knee, ankleR: rg.ankle, toeR: rg.toe, hipAbdR: rg.abd,
       swL: -armAmp + trail, elL: 0.45 + run * 1.05, swR: armAmp + trail, elR: 0.45 + run * 1.05,
     };
   };
