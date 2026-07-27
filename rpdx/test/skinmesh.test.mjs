@@ -14,6 +14,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const R = globalThis.RPDX;
 const S = R.render3d._skin;
 const Q = R.quality;
+const BONE = S.BONE, LM = S.LM;   // #char-lab: 骨番号と関節高さは共有コアの表を見る（数値の直書きをやめる）
 
 test("#154 メッシュ: tri/ボーン数が品質予算内・両tierに適合", () => {
   const m = S.BODY_MESH;
@@ -21,7 +22,7 @@ test("#154 メッシュ: tri/ボーン数が品質予算内・両tierに適合",
   assert.ok(m.tri <= Q.BUDGETS.lightweight.playerTriBudget, `LW予算内（${m.tri} ≤ 2500）`);
   assert.ok(m.tri <= Q.BUDGETS.cinematic.playerTriBudget, "Cinematic予算内");
   assert.equal(m.boneCount, S.SKEL.length);
-  assert.ok(m.boneCount <= Q.BUDGETS.lightweight.playerBoneBudget, `LWボーン予算内（${m.boneCount} ≤ 16）`);
+  assert.ok(m.boneCount <= Q.BUDGETS.lightweight.playerBoneBudget, `LWボーン予算内（${m.boneCount} ≤ ${Q.BUDGETS.lightweight.playerBoneBudget}）`);
   assert.ok(m.idx.length % 3 === 0);
 });
 
@@ -72,10 +73,10 @@ test("#157 頂点AO: 接触遮蔽域（腋/股/顎下）が暗く・顔/胸は�
     for (let v = 0; v < nv; v++) { const y = m.pos[v * 3 + 1]; if (y > lo && y < hi && (!pred || pred(v))) { s += m.ao[v]; n++; } }
     return n ? s / n : 1;
   };
-  const groin = bandAo(0.82, 0.90, (v) => m.bidx[v * 4] <= 4);  // 股下（胴カラム＝脚を除外）
+  const groin = bandAo(LM.crotch - 0.05, LM.crotch + 0.03, (v) => m.bidx[v * 4] <= 4);  // 股下（胴カラム＝脚を除外）
   const face = bandAo(1.70, 1.78);        // 顔
-  const chest = bandAo(1.30, 1.44, (v) => m.bidx[v * 4] <= 4);  // 胸（胴カラム）
-  const underChin = bandAo(1.585, 1.615, (v) => m.bidx[v * 4] <= 4);  // 首（顎下）
+  const chest = bandAo(LM.lumbar + 0.05, LM.thorax - 0.02, (v) => m.bidx[v * 4] <= 4);  // 胸（胴カラム）
+  const underChin = bandAo(LM.neck - 0.005, LM.neck + 0.03, (v) => m.bidx[v * 4] <= 4);  // 首（顎下）
   assert.ok(groin < 0.72, `股下が暗い ${groin.toFixed(2)}`);
   assert.ok(underChin < 0.82, `顎下が暗い ${underChin.toFixed(2)}`);
   assert.ok(face > 0.97, `顔は明るい ${face.toFixed(2)}`);
@@ -84,25 +85,27 @@ test("#157 頂点AO: 接触遮蔽域（腋/股/顎下）が暗く・顔/胸は�
 
 test("#155 造形: V字テーパー（肩幅 > 腰幅）", () => {
   const m = S.BODY_MESH;
-  const shoulder = maxAbsX(vertsWhere(m, (p) => p.y > 1.46 && p.y < 1.54 && p.cid === 0));   // 肩ヨーク帯（シャツ）
-  const waist = maxAbsX(vertsWhere(m, (p) => p.y > 1.02 && p.y < 1.10));                       // 腰帯
+  // 胴カラムだけで測る（腕・脚の頂点が帯に入ると幅の比較が意味を失う）
+  const torsoOnly = (p) => p.b0 <= BONE.head && (p.w1 === 0 || p.b1 <= BONE.head);
+  const shoulder = maxAbsX(vertsWhere(m, (p) => p.y > LM.thorax - 0.06 && p.y < LM.acromion + 0.01 && torsoOnly(p)));   // 肩ヨーク帯
+  const waist = maxAbsX(vertsWhere(m, (p) => p.y > LM.hip + 0.09 && p.y < LM.hip + 0.22 && torsoOnly(p)));              // 腰帯
   assert.ok(shoulder > waist * 1.25, `肩幅 ${shoulder.toFixed(3)} > 腰幅 ${waist.toFixed(3)} ×1.25`);
 });
 
 test("#155 造形: 手（ミトン）が前腕の先にある — 腕が筒で終わらない", () => {
   const m = S.BODY_MESH;
-  // 前腕ボーン(12=faL,14=faR)に付き、手首(y0.945)より下＝手のひら塊の頂点
-  for (const [fa, side] of [[12, "L"], [14, "R"]]) {
-    const hand = vertsWhere(m, (p) => p.b0 === fa && p.w0 === 1 && p.y < 0.90);
+  // 前腕ボーンに付き、手首より下＝手のひら塊の頂点
+  for (const [fa, side] of [[BONE.foreArmL, "L"], [BONE.foreArmR, "R"]]) {
+    const hand = vertsWhere(m, (p) => p.b0 === fa && p.w0 === 1 && p.y < LM.wrist - 0.03);
     assert.ok(hand.length >= 8, `${side}手のミトン頂点 ${hand.length}個`);
     const lowest = hand.reduce((mn, p) => Math.min(mn, p.y), 1);
-    assert.ok(lowest < 0.86, `${side}手が手首より下へ張り出す（最下 y=${lowest.toFixed(3)}）`);
+    assert.ok(lowest < LM.wrist - 0.07, `${side}手が手首より下へ張り出す（最下 y=${lowest.toFixed(3)}）`);
   }
 });
 
 test("#155 造形: ブーツ（暗色 cid=5）が足ボーンに付く", () => {
   const m = S.BODY_MESH;
-  for (const [ft, side] of [[7, "L"], [10, "R"]]) {
+  for (const [ft, side] of [[BONE.footL, "L"], [BONE.footR, "R"]]) {
     const boot = vertsWhere(m, (p) => p.cid === 5 && p.b0 === ft);
     assert.ok(boot.length >= 8, `${side}ブーツ頂点 ${boot.length}個`);
     // つま先が前方(+Z)へ伸びる（踵より前が長い）
@@ -115,9 +118,9 @@ test("#155 造形: 首肩が連続（首→僧帽筋→ヨークの段階的な�
   const m = S.BODY_MESH;
   // 胴カラム（ボーン0-4）に限定＝腕デルトイド（ボーン11+）を除外して測る
   const torso = (lo, hi) => maxAbsX(vertsWhere(m, (p) => p.y > lo && p.y < hi && p.b0 <= 4 && (p.w1 === 0 || p.b1 <= 4)));
-  const neck = torso(1.585, 1.615);   // 首
-  const slope = torso(1.535, 1.565);  // 僧帽筋スロープ
-  const yoke = torso(1.485, 1.515);   // 肩ヨーク
+  const neck = torso(LM.neck - 0.005, LM.neck + 0.025);                    // 首
+  const slope = torso(LM.acromion + 0.012, LM.neck - 0.012);               // 僧帽筋スロープ
+  const yoke = torso(LM.acromion - 0.012, LM.acromion + 0.012);            // 肩ヨーク
   assert.ok(neck < slope && slope < yoke, `首 ${neck.toFixed(3)} < スロープ ${slope.toFixed(3)} < ヨーク ${yoke.toFixed(3)}（段階的接続）`);
 });
 
@@ -261,19 +264,19 @@ test("#154 ポーズ: 中立ポーズのスキン行列は恒等（バインド�
 test("#154 ポーズ: 膝・肘・前傾が期待方向に効く（階層合成の検証）", () => {
   // 膝 90°: 足首点(0.13側, y0.06)が後方(+Z…rotX正=足が後ろへ)かつ持ち上がる
   const bent = S.poseSkin({ ...NEUTRAL, kneeR: Math.PI / 2 });
-  const ankle = [0.13, 0.06, 0];
-  const q = xform(bent, 9 * 16, ankle);   // 9 = shinR
+  const ankle = [S.SKEL[BONE.footR][1], LM.ankle, 0];
+  const q = xform(bent, BONE.shinR * 16, ankle);
   assert.ok(q[1] > 0.3, `膝90°で足首が上がる（y=${q[1].toFixed(2)}）`);
   assert.ok(Math.abs(q[2]) > 0.3, `足首が前後へ振れる（z=${q[2].toFixed(2)}）`);
   // 前傾: 頭頂点が前へ出て下がる
   const leanP = S.poseSkin({ ...NEUTRAL, lean: 0.5 });
-  const top = xform(leanP, 4 * 16, [0, 1.9, 0]);   // 4 = head
+  const top = xform(leanP, BONE.head * 16, [0, 1.9, 0]);
   assert.ok(top[1] < 1.9, "前傾で頭頂が下がる");
   assert.ok(Math.abs(top[2]) > 0.05, "前傾で頭頂が前へ出る");
   // 腕スイング: 手首点が動く
   const swing = S.poseSkin({ ...NEUTRAL, swL: -1.2, elL: 0.9 });
-  const wrist = xform(swing, 12 * 16, [-0.30, 0.93, 0]);   // 12 = foreArmL
-  assert.ok(Math.hypot(wrist[1] - 0.93, wrist[2]) > 0.2, "腕振り+肘で手首が大きく動く");
+  const wrist = xform(swing, BONE.foreArmL * 16, [S.SKEL[BONE.foreArmL][1], LM.wrist, 0]);
+  assert.ok(Math.hypot(wrist[1] - LM.wrist, wrist[2]) > 0.2, "腕振り+肘で手首が大きく動く");
 });
 
 test("#154 契約: 予算・切り戻しフラグ・単一情報源の整合", () => {

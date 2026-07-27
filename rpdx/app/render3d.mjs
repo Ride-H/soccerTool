@@ -10,7 +10,7 @@
   const lerp = (a, b, u) => a + (b - a) * u;
   // #char-lab: キャラ中核は共有コア character.mjs（単一の真実源）から取得。ここで再定義しない。
   const { SKEL, buildBodyMesh, BODY_MESH, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace,
-    PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2, VS_SKIN, FS_SKIN } = R.character;
+    PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2, VS_SKIN, FS_SKIN, BONE, LM } = R.character;
   // #153: 決定論シーケンシャル乱数 — 視覚要素に素の乱数関数は使わない（視覚回帰の再現性契約・visualgate.test が走査）
   const seqRand = (seed) => { let s = seed | 0; return () => N.hash((s = (s + 0x9e3779b9) | 0)); };
 
@@ -510,7 +510,7 @@
   /* ============================== renderer ============================== */
   R.render3d = {};
   // #154 テスト用の純データ/純関数（DOM/GL非依存 — node --test が骨格・メッシュ・ポーズを検証）
-  R.render3d._skin = { SKEL, buildBodyMesh, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace, PHASE_RATE, BODY_MESH };
+  R.render3d._skin = { SKEL, BONE, LM, buildBodyMesh, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace, PHASE_RATE, BODY_MESH };
   R.render3d.create = (canvas, matchInit) => {
     let match = matchInit;
     const gl = canvas.getContext("webgl2", {
