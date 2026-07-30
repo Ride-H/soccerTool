@@ -8238,6 +8238,9 @@ window.addEventListener("error", (e) => {
   const R = (globalThis.RPDX ??= {});
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, u) => a + (b - a) * u;
+  // 法線の正規化。長さ 0（半径 0 のリングなど退化した面）でも NaN を返さないための退避を
+  // ここ 1 か所に集約する（各所に `|| 1` を散らすと、どれが効いているのか追えなくなる）。
+  const unit = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
 
   // 自己完結の数学（render3d.mjs の M4 サブセットと bit 同一）
   const M4 = {
@@ -8366,266 +8369,272 @@ window.addEventListener("error", (e) => {
   const SHOE = { heelZ: -0.075, toeZ: 0.215, mtpZ: 0.134, soleR: 0.022, width: 0.056 };
   // 色ID: 0=シャツ / 1=ショーツ / 2=肌 / 3=髪 / 4=脚（肌×ショーツ混合色）/ 5=ブーツ（暗色）
   // #155 造形: 楕円断面（rx=横半径/rz=前後半径）で V字テーパー・胸郭/腹部絞り・平たい背中を表現。
-  const buildBodyMesh = () => {
-    const K = BONE, B = { pel: K.pelvis, spi: K.spine, che: K.chest, nec: K.neck, hea: K.head,
-      thL: K.thighL, shL: K.shinL, foL: K.footL, toL: K.toeL, thR: K.thighR, shR: K.shinR, foR: K.footR, toR: K.toeR,
-      clL: K.clavL, uaL: K.upArmL, faL: K.foreArmL, clR: K.clavR, uaR: K.upArmR, faR: K.foreArmR };
-    const pos = [], nor = [], bidx = [], bw = [], cid = [], ao = [], idx = [];
-    // #157 頂点ベイクAO: ring.ao（既定1.0・小さいほど暗い）を接触遮蔽域（腋/股/顎下/内側）に置く。
-    // 縦軸チューブ: ring={x?,y,z?,rx,rz(またはr),c,ao?,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの
-    // 重みブレンドが「連続して曲がる皮膚」を作る。法線は楕円勾配＋縦半径勾配の解析式（円の場合は従来と一致）。
-    const tube = (rings, seg, capOff = 0.02) => {
-      const start = pos.length / 3;
-      const rX = (r) => r.rx ?? r.r, rZ = (r) => r.rz ?? r.r;
-      for (let ri = 0; ri < rings.length; ri++) {
-        const rg = rings[ri];
-        const rx = rX(rg), rz = rZ(rg);
-        const prev = rings[Math.max(0, ri - 1)], next = rings[Math.min(rings.length - 1, ri + 1)];
-        const dy = (next.y - prev.y) || 1e-4;
-        const rxp = (rX(next) - rX(prev)) / dy, rzp = (rZ(next) - rZ(prev)) / dy;   // dr/dy
-        const nExp = rg.n || 2, e = 2 / nExp, pw = (v) => (nExp === 2 ? v : Math.sign(v) * Math.pow(Math.abs(v), e));
-        const bk = rg.back || 1;   // 背中側（-Z）の平たさ
-        for (let si = 0; si < seg; si++) {
-          const th = (si / seg) * Math.PI * 2, cs0 = Math.cos(th), sn0 = Math.sin(th);
-          const cs = pw(cs0), sn = pw(sn0) * (sn0 < 0 ? bk : 1);
-          pos.push((rg.x || 0) + cs * rx, rg.y, (rg.z || 0) + sn * rz);
-          // 外向き法線 ∝ (rz·cosθ, -(rx·rz'·sin²θ + rz·rx'·cos²θ), rx·sinθ)
-          let nx = rz * cs, ny = -(rx * rzp * sn * sn + rz * rxp * cs * cs), nz = rx * sn;
-          const nl = Math.hypot(nx, ny, nz) || 1;
-          nor.push(nx / nl, ny / nl, nz / nl);
-          bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
-          bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
-          cid.push(rg.c); ao.push(rg.aoAt ? rg.aoAt(th, rg.ao ?? 1) : (rg.ao ?? 1));
-        }
-        if (ri > 0) {
-          const a0 = start + (ri - 1) * seg, b0 = start + ri * seg;
-          for (let si = 0; si < seg; si++) {
-            const s1 = (si + 1) % seg;
-            idx.push(a0 + si, b0 + si, a0 + s1, a0 + s1, b0 + si, b0 + s1);
-          }
-        }
-      }
-      const cap = (ri, up) => {   // 端の極頂点ファン
-        const rg = rings[ri];
-        const ci = pos.length / 3;
-        pos.push((rg.x || 0), rg.y + (up ? capOff : -capOff), (rg.z || 0));
-        nor.push(0, up ? 1 : -1, 0);
+  // メッシュの部品（チューブ/楕円体/前後ロフト＋手・顔）。頂点配列を閉じ込めた組み立て器として
+  // 切り出してあるのは、リングの与え方（同じ高さ・降順・超楕円・キャップの向き）ごとの振る舞いを
+  // 体を作らずに単体テストできるようにするため（形の不具合はほぼ全てここで起きる）。
+  const newMeshBuilder = () => {
+  const K = BONE, B = { pel: K.pelvis, spi: K.spine, che: K.chest, nec: K.neck, hea: K.head,
+    thL: K.thighL, shL: K.shinL, foL: K.footL, toL: K.toeL, thR: K.thighR, shR: K.shinR, foR: K.footR, toR: K.toeR,
+    clL: K.clavL, uaL: K.upArmL, faL: K.foreArmL, clR: K.clavR, uaR: K.upArmR, faR: K.foreArmR };
+  const pos = [], nor = [], bidx = [], bw = [], cid = [], ao = [], idx = [];
+  // #157 頂点ベイクAO: ring.ao（既定1.0・小さいほど暗い）を接触遮蔽域（腋/股/顎下/内側）に置く。
+  // 縦軸チューブ: ring={x?,y,z?,rx,rz(またはr),c,ao?,b:[骨,重み,骨2?,重み2?]}。関節をまたぐリングの
+  // 重みブレンドが「連続して曲がる皮膚」を作る。法線は楕円勾配＋縦半径勾配の解析式（円の場合は従来と一致）。
+  const tube = (rings, seg, capOff = 0.02) => {
+    const start = pos.length / 3;
+    const rX = (r) => r.rx ?? r.r, rZ = (r) => r.rz ?? r.r;
+    for (let ri = 0; ri < rings.length; ri++) {
+      const rg = rings[ri];
+      const rx = rX(rg), rz = rZ(rg);
+      const prev = rings[Math.max(0, ri - 1)], next = rings[Math.min(rings.length - 1, ri + 1)];
+      const dy = (next.y - prev.y) || 1e-4;
+      const rxp = (rX(next) - rX(prev)) / dy, rzp = (rZ(next) - rZ(prev)) / dy;   // dr/dy
+      const nExp = rg.n || 2, e = 2 / nExp, pw = (v) => (nExp === 2 ? v : Math.sign(v) * Math.pow(Math.abs(v), e));
+      const bk = rg.back || 1;   // 背中側（-Z）の平たさ
+      for (let si = 0; si < seg; si++) {
+        const th = (si / seg) * Math.PI * 2, cs0 = Math.cos(th), sn0 = Math.sin(th);
+        const cs = pw(cs0), sn = pw(sn0) * (sn0 < 0 ? bk : 1);
+        pos.push((rg.x || 0) + cs * rx, rg.y, (rg.z || 0) + sn * rz);
+        // 外向き法線 ∝ (rz·cosθ, -(rx·rz'·sin²θ + rz·rx'·cos²θ), rx·sinθ)
+        nor.push(...unit(rz * cs, -(rx * rzp * sn * sn + rz * rxp * cs * cs), rx * sn));
         bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
         bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
-        cid.push(rg.c); ao.push(rg.ao ?? 1);
-        const r0 = start + ri * seg;
+        cid.push(rg.c); ao.push(rg.aoAt ? rg.aoAt(th, rg.ao ?? 1) : (rg.ao ?? 1));
+      }
+      if (ri > 0) {
+        const a0 = start + (ri - 1) * seg, b0 = start + ri * seg;
         for (let si = 0; si < seg; si++) {
           const s1 = (si + 1) % seg;
-          if (up) idx.push(r0 + si, ci, r0 + s1);
-          else idx.push(r0 + si, r0 + s1, ci);
-        }
-      };
-      // リングは昇順・降順どちらでも書けるので、端のふさぎ方は並び順から決める
-      // （降順のまま上下を決め打ちすると、キャップの極がチューブの内側に入って裏返る）。
-      const asc = rings[rings.length - 1].y >= rings[0].y;
-      cap(rings.length - 1, asc);
-      cap(0, !asc);
-    };
-    // 単骨に固定する楕円体（ミトン手・ブーツ）: 腕/足が筒で終わらないための塊。
-    // split={z0,z1,bone} を渡すと、前後方向の位置で第2ボーンへ重みを配る（ブーツのつま先＝前足部の関節）。
-    const blob = (cx, cy, cz, rx, ry, rz, bone, color, latSeg, lonSeg, aoV, split) => {
-      const start = pos.length / 3;
-      for (let la = 0; la <= latSeg; la++) {
-        const phi = (la / latSeg) * Math.PI - Math.PI / 2, cphi = Math.cos(phi), sphi = Math.sin(phi);
-        for (let lo = 0; lo < lonSeg; lo++) {
-          const th = (lo / lonSeg) * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
-          const z = cz + rz * cphi * sn;
-          pos.push(cx + rx * cphi * cs, cy + ry * sphi, z);
-          let nx = (cphi * cs) / rx, ny = sphi / ry, nz = (cphi * sn) / rz;
-          const nl = Math.hypot(nx, ny, nz) || 1;
-          nor.push(nx / nl, ny / nl, nz / nl);
-          const u = split ? clamp((z - split.z0) / (split.z1 - split.z0), 0, 1) : 0;
-          const w2 = u * u * (3 - 2 * u);
-          bidx.push(bone, split ? split.bone : 0, 0, 0); bw.push(1 - w2, w2, 0, 0); cid.push(color); ao.push(aoV ?? 1);
+          idx.push(a0 + si, b0 + si, a0 + s1, a0 + s1, b0 + si, b0 + s1);
         }
       }
-      for (let la = 0; la < latSeg; la++) for (let lo = 0; lo < lonSeg; lo++) {
-        const a = start + la * lonSeg + lo, b = start + la * lonSeg + ((lo + 1) % lonSeg);
-        const c = start + (la + 1) * lonSeg + lo, d = start + (la + 1) * lonSeg + ((lo + 1) % lonSeg);
-        // 極では 1 周の頂点が同じ位置に潰れるので、面積 0 の三角形を出さない
-        if (la > 0) idx.push(a, c, b);
-        if (la < latSeg - 1) idx.push(b, c, d);
+    }
+    const cap = (ri, up) => {   // 端の極頂点ファン
+      const rg = rings[ri];
+      const ci = pos.length / 3;
+      pos.push((rg.x || 0), rg.y + (up ? capOff : -capOff), (rg.z || 0));
+      nor.push(0, up ? 1 : -1, 0);
+      bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0);
+      bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
+      cid.push(rg.c); ao.push(rg.ao ?? 1);
+      const r0 = start + ri * seg;
+      for (let si = 0; si < seg; si++) {
+        const s1 = (si + 1) % seg;
+        if (up) idx.push(r0 + si, ci, r0 + s1);
+        else idx.push(r0 + si, r0 + s1, ci);
       }
     };
-    // 前後方向に断面を並べるロフト（靴のように「長さ方向」がある物体用）。断面は超楕円
-    // （n=3＝底が平らで側面が立つ）。ring={z, bottom, top, w, c, ao?, b:[..], split?}。
-    // 法線は生成した点から差分の外積で求める（どんな断面形でも破綻しない）。
-    const loftZ = (x0, rings, seg, capOff) => {
-      const start = pos.length / 3, n = 3, e = 2 / n;
-      const pw = (v, k) => Math.sign(v) * Math.pow(Math.abs(v), k);
-      const P = [];
-      for (const rg of rings) {
-        const cy = (rg.bottom + rg.top) / 2, ry = (rg.top - rg.bottom) / 2, row = [];
-        for (let si = 0; si < seg; si++) {
-          const th = (si / seg) * Math.PI * 2;
-          row.push([x0 + rg.w * pw(Math.cos(th), e), cy + ry * pw(Math.sin(th), e), rg.z]);
-        }
-        P.push(row);
+    // リングは昇順・降順どちらでも書けるので、端のふさぎ方は並び順から決める
+    // （降順のまま上下を決め打ちすると、キャップの極がチューブの内側に入って裏返る）。
+    const asc = rings[rings.length - 1].y >= rings[0].y;
+    cap(rings.length - 1, asc);
+    cap(0, !asc);
+  };
+  // 単骨に固定する楕円体（ミトン手・ブーツ）: 腕/足が筒で終わらないための塊。
+  // split={z0,z1,bone} を渡すと、前後方向の位置で第2ボーンへ重みを配る（ブーツのつま先＝前足部の関節）。
+  const blob = (cx, cy, cz, rx, ry, rz, bone, color, latSeg, lonSeg, aoV, split) => {
+    const start = pos.length / 3;
+    for (let la = 0; la <= latSeg; la++) {
+      const phi = (la / latSeg) * Math.PI - Math.PI / 2, cphi = Math.cos(phi), sphi = Math.sin(phi);
+      for (let lo = 0; lo < lonSeg; lo++) {
+        const th = (lo / lonSeg) * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+        const z = cz + rz * cphi * sn;
+        pos.push(cx + rx * cphi * cs, cy + ry * sphi, z);
+        nor.push(...unit((cphi * cs) / rx, sphi / ry, (cphi * sn) / rz));
+        const u = split ? clamp((z - split.z0) / (split.z1 - split.z0), 0, 1) : 0;
+        const w2 = u * u * (3 - 2 * u);
+        bidx.push(bone, split ? split.bone : 0, 0, 0); bw.push(1 - w2, w2, 0, 0); cid.push(color); ao.push(aoV ?? 1);
       }
-      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-      for (let ri = 0; ri < rings.length; ri++) {
-        const rg = rings[ri], cy = (rg.bottom + rg.top) / 2;
-        for (let si = 0; si < seg; si++) {
-          const p0 = P[ri][si];
-          const tTh = sub(P[ri][(si + 1) % seg], P[ri][(si - 1 + seg) % seg]);
-          const tZ = sub(P[Math.min(rings.length - 1, ri + 1)][si], P[Math.max(0, ri - 1)][si]);
-          let nv = cross(tZ, tTh);
-          const out = [p0[0] - x0, p0[1] - cy, 0];
-          if (nv[0] * out[0] + nv[1] * out[1] < 0) nv = [-nv[0], -nv[1], -nv[2]];
-          const nl = Math.hypot(nv[0], nv[1], nv[2]) || 1;
-          pos.push(p0[0], p0[1], p0[2]); nor.push(nv[0] / nl, nv[1] / nl, nv[2] / nl);
-          const u = rg.split ? clamp((rg.z - rg.split.z0) / (rg.split.z1 - rg.split.z0), 0, 1) : 0;
-          const w2 = u * u * (3 - 2 * u);
-          bidx.push(rg.b[0], rg.split ? rg.split.bone : 0, 0, 0); bw.push(1 - w2, w2, 0, 0);
-          cid.push(rg.c); ao.push(rg.ao ?? 1);
-          if (ri > 0) {
-            const a0 = start + (ri - 1) * seg, b0 = start + ri * seg, s1 = (si + 1) % seg;
-            idx.push(a0 + si, a0 + s1, b0 + si, b0 + s1, b0 + si, a0 + s1);
-          }
-        }
+    }
+    for (let la = 0; la < latSeg; la++) for (let lo = 0; lo < lonSeg; lo++) {
+      const a = start + la * lonSeg + lo, b = start + la * lonSeg + ((lo + 1) % lonSeg);
+      const c = start + (la + 1) * lonSeg + lo, d = start + (la + 1) * lonSeg + ((lo + 1) % lonSeg);
+      // 極では 1 周の頂点が同じ位置に潰れるので、面積 0 の三角形を出さない
+      if (la > 0) idx.push(a, c, b);
+      if (la < latSeg - 1) idx.push(b, c, d);
+    }
+  };
+  // 前後方向に断面を並べるロフト（靴のように「長さ方向」がある物体用）。断面は超楕円
+  // （n=3＝底が平らで側面が立つ）。ring={z, bottom, top, w, c, ao?, b:[..], split?}。
+  // 法線は生成した点から差分の外積で求める（どんな断面形でも破綻しない）。
+  const loftZ = (x0, rings, seg, capOff) => {
+    const start = pos.length / 3, n = 3, e = 2 / n;
+    const pw = (v, k) => Math.sign(v) * Math.pow(Math.abs(v), k);
+    const P = [];
+    for (const rg of rings) {
+      const cy = (rg.bottom + rg.top) / 2, ry = (rg.top - rg.bottom) / 2, row = [];
+      for (let si = 0; si < seg; si++) {
+        const th = (si / seg) * Math.PI * 2;
+        row.push([x0 + rg.w * pw(Math.cos(th), e), cy + ry * pw(Math.sin(th), e), rg.z]);
       }
-      const cap = (ri, front) => {   // 踵/つま先の端をふさぐ極頂点ファン
-        const rg = rings[ri], ci = pos.length / 3;
-        pos.push(x0, (rg.bottom + rg.top) / 2, rg.z + (front ? capOff : -capOff));
-        nor.push(0, 0, front ? 1 : -1);
+      P.push(row);
+    }
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    for (let ri = 0; ri < rings.length; ri++) {
+      const rg = rings[ri], cy = (rg.bottom + rg.top) / 2;
+      for (let si = 0; si < seg; si++) {
+        const p0 = P[ri][si];
+        const tTh = sub(P[ri][(si + 1) % seg], P[ri][(si - 1 + seg) % seg]);
+        const tZ = sub(P[Math.min(rings.length - 1, ri + 1)][si], P[Math.max(0, ri - 1)][si]);
+        let nv = cross(tZ, tTh);
+        const out = [p0[0] - x0, p0[1] - cy, 0];
+        if (nv[0] * out[0] + nv[1] * out[1] < 0) nv = [-nv[0], -nv[1], -nv[2]];
+        pos.push(p0[0], p0[1], p0[2]); nor.push(...unit(nv[0], nv[1], nv[2]));
         const u = rg.split ? clamp((rg.z - rg.split.z0) / (rg.split.z1 - rg.split.z0), 0, 1) : 0;
         const w2 = u * u * (3 - 2 * u);
         bidx.push(rg.b[0], rg.split ? rg.split.bone : 0, 0, 0); bw.push(1 - w2, w2, 0, 0);
         cid.push(rg.c); ao.push(rg.ao ?? 1);
-        const r0 = start + ri * seg;
-        for (let si = 0; si < seg; si++) {
-          const s1 = (si + 1) % seg;
-          if (front) idx.push(r0 + si, r0 + s1, ci); else idx.push(r0 + s1, r0 + si, ci);
-        }
-      };
-      cap(rings.length - 1, true); cap(0, false);
-    };
-    // 手（#06）。手のひらは前額面に平たい断面（厚み 3cm・幅 9.7cm）、そこから人差し指・3 指・母指が出る。
-    // 指は「握り/開き」を出すため独立したボーンに乗せる。指股には接触AOを置いて分節を読ませる。
-    const handMesh = (s, fa) => {
-      const x0 = s * ARM_X, B2 = BONE;
-      const iB = s < 0 ? B2.indexL : B2.indexR, fB = s < 0 ? B2.fingersL : B2.fingersR, tB = s < 0 ? B2.thumbL : B2.thumbR;
-      // 手のひら（手首→指の付け根）
-      tube([
-        { x: x0, y: LM.wrist, rx: 0.032, rz: 0.038, c: 2, b: [fa, 1] },          // 手首（前腕の断面に合わせる＝明るさの段差を作らない）
-        { x: x0, y: 0.9130, rx: 0.025, rz: 0.044, c: 2, b: [fa, 1] },            // 手根＝ここで平たくなる
-        { x: x0, y: 0.8700, rx: 0.019, rz: 0.048, c: 2, b: [fa, 1] },
-        { x: x0, y: LM.knuckle, rx: 0.017, rz: 0.046, c: 2, ao: 0.97, b: [fa, 1] },
-      ], 8, 0.006);
-      // 人差し指（母指側）と 3 指（中/薬/小）。指股は AO で暗く。
-      const groove = (th, a) => a * (1 - 0.35 * Math.pow(Math.abs(Math.cos(th)), 8));
-      tube([
-        { x: x0, y: LM.knuckle + 0.004, z: 0.030, rx: 0.0135, rz: 0.0135, c: 2, ao: 0.96, b: [fa, 0.5, iB, 0.5] },
-        { x: x0, y: 0.7950, z: 0.031, rx: 0.0130, rz: 0.0130, c: 2, ao: 0.96, b: [iB, 1] },
-        { x: x0, y: 0.7560, z: 0.031, rx: 0.0118, rz: 0.0118, c: 2, b: [iB, 1] },
-        { x: x0, y: LM.fingertip + 0.008, z: 0.030, rx: 0.0090, rz: 0.0090, c: 2, b: [iB, 1] },
-      ], 5, 0.005);
-      tube([
-        { x: x0, y: LM.knuckle + 0.004, z: -0.014, rx: 0.0140, rz: 0.036, c: 2, ao: 0.96, aoAt: groove, b: [fa, 0.5, fB, 0.5] },
-        { x: x0, y: 0.7950, z: -0.014, rx: 0.0135, rz: 0.035, c: 2, ao: 0.96, aoAt: groove, b: [fB, 1] },
-        { x: x0, y: 0.7560, z: -0.013, rx: 0.0120, rz: 0.032, c: 2, aoAt: groove, b: [fB, 1] },
-        { x: x0, y: LM.fingertip, z: -0.012, rx: 0.0090, rz: 0.026, c: 2, aoAt: groove, b: [fB, 1] },
-      ], 8, 0.005);
-      // 母指（手のひらの前方へ・下へ向かう）
-      tube([
-        { x: x0, y: 0.9060, z: 0.040, rx: 0.016, rz: 0.016, c: 2, ao: 0.94, b: [fa, 0.5, tB, 0.5] },
-        { x: x0, y: 0.8840, z: 0.056, rx: 0.0145, rz: 0.0145, c: 2, ao: 0.95, b: [tB, 1] },
-        { x: x0, y: 0.8600, z: 0.068, rx: 0.0110, rz: 0.0110, c: 2, b: [tB, 1] },
-      ], 5, 0.005);
-    };
-    // 顔の造形（#05）。リングを積むのは他と同じだが、**各頂点**の前後の出っ張り・色・AO を
-    // 「顔の中心からの角度」の関数で変えられるようにして、正面だけに鼻・眉・眼窩・口の窪み、
-    // そして髪の生え際（前は額まで下がらず、横〜後ろは耳の高さまで下がる）を作る。
-    // 法線は生成した点の差分の外積で求めるので、凹凸を入れても陰影が破綻しない。
-    const headMesh = (B) => {
-      const seg = 20, start = pos.length / 3;   // 顔の凹凸を作るには 16 では粗い（鼻が 1 頂点になる）
-      const lerpN = (a, b, t) => a + (b - a) * clamp(t, 0, 1);
-      // 顔の正面（+Z）からの角度差。0=正面・±π=真後ろ。
-      const front = (th) => { let d = th - Math.PI / 2; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
-      const bump = (d, w) => (Math.abs(d) >= w ? 0 : Math.cos((d / w) * (Math.PI / 2)) ** 2);   // 角度の山（±w で 0）
-      const near = (y, y0, h) => (Math.abs(y - y0) >= h ? 0 : Math.cos(((y - y0) / h) * (Math.PI / 2)) ** 2);   // 高さの山
-      // 髪の生え際: 正面は額（hairline）まで、横〜後ろは耳の高さまで下りる
-      const hairY = (d) => { const a = Math.abs(d); return a < 1.0 ? LM.hairline : lerpN(LM.hairline, LM.eye - 0.01, (a - 1.0) / 0.8); };
-      const rings = [
-        { y: 1.6470, rx: 0.044, rz: 0.052, zc: 0.002, ao: 0.72, b: [B.nec, 0.55, B.hea, 0.45] },   // 顎の下（首と重なる）
-        { y: 1.6647, rx: 0.052, rz: 0.074, zc: 0.009, ao: 0.86, b: [B.nec, 0.2, B.hea, 0.8] },     // 顎先
-        { y: 1.6850, rx: 0.066, rz: 0.082, zc: 0.005, ao: 0.94, b: [B.hea, 1] },                   // 下顎角（エラ）
-        { y: LM.mouth, rx: 0.074, rz: 0.089, zc: 0.002, b: [B.hea, 1] },                           // 口
-        { y: LM.noseBase, rx: 0.0805, rz: 0.092, b: [B.hea, 1] },                                   // 鼻の付け根・頬
-        { y: LM.noseTip, rx: 0.0815, rz: 0.094, b: [B.hea, 1] },                                   // 鼻先の高さ
-        { y: 1.7440, rx: 0.0819, rz: 0.0955, b: [B.hea, 1] },                                      // 目の下（頬骨）
-        { y: LM.eye, rx: 0.0820, rz: 0.0960, b: [B.hea, 1] },                                      // 目
-        { y: 1.7560, rx: 0.0819, rz: 0.0965, b: [B.hea, 1] },                                      // 目の上
-        { y: LM.brow, rx: 0.0815, rz: 0.0975, b: [B.hea, 1] },                                     // 眉弓
-        { y: 1.7850, rx: 0.0802, rz: 0.0968, b: [B.hea, 1] },                                      // 額
-        { y: LM.hairline - 0.0012, rx: 0.0795, rz: 0.0958, b: [B.hea, 1] },                        // 生え際（下）
-        { y: LM.hairline, rx: 0.0795, rz: 0.0958, b: [B.hea, 1] },                                 // 生え際（上）＝境界を水平線にする
-        // 頭蓋は 1.84 を最大幅とする四分楕円のドーム（円錐にしない）
-        { y: 1.8400, rx: 0.0815, rz: 0.0950, b: [B.hea, 1] },
-        { y: 1.8600, rx: 0.0792, rz: 0.0923, b: [B.hea, 1] },
-        { y: 1.8800, rx: 0.0720, rz: 0.0839, b: [B.hea, 1] },
-        { y: 1.8980, rx: 0.0596, rz: 0.0695, b: [B.hea, 1] },
-        { y: 1.9120, rx: 0.0431, rz: 0.0502, b: [B.hea, 1] },
-      ];
-      const P = [], C = [], A = [];
-      for (const rg of rings) {
-        const row = [], crow = [], arow = [];
-        for (let si = 0; si < seg; si++) {
-          const th = (si / seg) * Math.PI * 2, d = front(th), ad = Math.abs(d);
-          let rx = rg.rx, rz = rg.rz, dz = 0, ao = rg.ao ?? 1, cid = 2;
-          if (ad < 0.95) { rx *= 0.985; rz *= 0.985; }                       // 顔の前面は平たい面にする
-          dz += 0.0075 * bump(d, 0.85) * near(rg.y, LM.brow, 0.018);         // 眉弓
-          dz += 0.022 * bump(d, 0.55) * near(rg.y, LM.noseTip, 0.023);       // 鼻梁〜鼻先（隣の頂点まで届く幅にする）
-          dz -= 0.005 * (bump(d - 0.36, 0.26) + bump(d + 0.36, 0.26)) * near(rg.y, LM.noseBase, 0.010);   // 小鼻の脇の窪み
-          dz -= 0.005 * (bump(d - 0.34, 0.24) + bump(d + 0.34, 0.24)) * near(rg.y, LM.eye, 0.014);   // 眼窩
-          dz -= 0.005 * bump(d, 0.50) * near(rg.y, LM.mouth, 0.010);         // 口元の窪み
-          if (near(rg.y, LM.mouth, 0.010) > 0.35 && ad < 0.55) ao = 0.76;    // 口の影
-          if (rg.y >= hairY(d) - 1e-9) cid = 3;                              // 髪（生え際より上・横〜後ろは低い）
-          row.push([Math.cos(th) * rx, rg.y, (rg.zc || 0) + Math.sin(th) * rz + dz]);
-          crow.push(cid); arow.push(ao);
-        }
-        P.push(row); C.push(crow); A.push(arow);
-      }
-      const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-      for (let ri = 0; ri < rings.length; ri++) {
-        for (let si = 0; si < seg; si++) {
-          const p0 = P[ri][si];
-          const tTh = sub(P[ri][(si + 1) % seg], P[ri][(si - 1 + seg) % seg]);
-          const tY = sub(P[Math.min(rings.length - 1, ri + 1)][si], P[Math.max(0, ri - 1)][si]);
-          let nv = cross(tTh, tY);
-          const out = [p0[0], 0, p0[2] - (rings[ri].zc || 0)];
-          if (nv[0] * out[0] + nv[2] * out[2] < 0) nv = [-nv[0], -nv[1], -nv[2]];
-          const nl = Math.hypot(nv[0], nv[1], nv[2]) || 1;
-          pos.push(p0[0], p0[1], p0[2]); nor.push(nv[0] / nl, nv[1] / nl, nv[2] / nl);
-          bidx.push(rings[ri].b[0], rings[ri].b[2] ?? 0, 0, 0);
-          bw.push(rings[ri].b[1], rings[ri].b[3] ?? 0, 0, 0);
-          cid.push(C[ri][si]); ao.push(A[ri][si]);
-          if (ri > 0) {
-            const a0 = start + (ri - 1) * seg, b0 = start + ri * seg, s1 = (si + 1) % seg;
-            idx.push(a0 + si, b0 + si, a0 + s1, a0 + s1, b0 + si, b0 + s1);
-          }
+        if (ri > 0) {
+          const a0 = start + (ri - 1) * seg, b0 = start + ri * seg, s1 = (si + 1) % seg;
+          idx.push(a0 + si, a0 + s1, b0 + si, b0 + s1, b0 + si, a0 + s1);
         }
       }
-      const cap = (ri, up) => {   // 頭頂と顎下（顎下は首の内側に隠れる）
-        const rg = rings[ri], ci = pos.length / 3;
-        pos.push(0, rg.y + (up ? 0.013 : -0.008), rg.zc || 0); nor.push(0, up ? 1 : -1, 0);
-        bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0); bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
-        cid.push(up ? 3 : 2); ao.push(up ? 1 : 0.7);
-        const r0 = start + ri * seg;
-        for (let si = 0; si < seg; si++) { const s1 = (si + 1) % seg; if (up) idx.push(r0 + si, ci, r0 + s1); else idx.push(r0 + si, r0 + s1, ci); }
-      };
-      cap(rings.length - 1, true); cap(0, false);
-      // 目（眼窩に収まる暗色の小球）と耳（頭の側面）
-      for (const s of [-1, 1]) blob(s * 0.0275, LM.eye, 0.0838, 0.0125, 0.0103, 0.0090, B.hea, 3, 4, 8, 0.8);
-      for (const s of [-1, 1]) blob(s * 0.0805, LM.eye - 0.004, -0.006, 0.010, 0.026, 0.019, B.hea, 2, 4, 6, 0.88);
+    }
+    const cap = (ri, front) => {   // 踵/つま先の端をふさぐ極頂点ファン
+      const rg = rings[ri], ci = pos.length / 3;
+      pos.push(x0, (rg.bottom + rg.top) / 2, rg.z + (front ? capOff : -capOff));
+      nor.push(0, 0, front ? 1 : -1);
+      const u = rg.split ? clamp((rg.z - rg.split.z0) / (rg.split.z1 - rg.split.z0), 0, 1) : 0;
+      const w2 = u * u * (3 - 2 * u);
+      bidx.push(rg.b[0], rg.split ? rg.split.bone : 0, 0, 0); bw.push(1 - w2, w2, 0, 0);
+      cid.push(rg.c); ao.push(rg.ao ?? 1);
+      const r0 = start + ri * seg;
+      for (let si = 0; si < seg; si++) {
+        const s1 = (si + 1) % seg;
+        if (front) idx.push(r0 + si, r0 + s1, ci); else idx.push(r0 + s1, r0 + si, ci);
+      }
     };
+    cap(rings.length - 1, true); cap(0, false);
+  };
+  // 手（#06）。手のひらは前額面に平たい断面（厚み 3cm・幅 9.7cm）、そこから人差し指・3 指・母指が出る。
+  // 指は「握り/開き」を出すため独立したボーンに乗せる。指股には接触AOを置いて分節を読ませる。
+  const handMesh = (s, fa) => {
+    const x0 = s * ARM_X, B2 = BONE;
+    const iB = s < 0 ? B2.indexL : B2.indexR, fB = s < 0 ? B2.fingersL : B2.fingersR, tB = s < 0 ? B2.thumbL : B2.thumbR;
+    // 手のひら（手首→指の付け根）
+    tube([
+      { x: x0, y: LM.wrist, rx: 0.032, rz: 0.038, c: 2, b: [fa, 1] },          // 手首（前腕の断面に合わせる＝明るさの段差を作らない）
+      { x: x0, y: 0.9130, rx: 0.025, rz: 0.044, c: 2, b: [fa, 1] },            // 手根＝ここで平たくなる
+      { x: x0, y: 0.8700, rx: 0.019, rz: 0.048, c: 2, b: [fa, 1] },
+      { x: x0, y: LM.knuckle, rx: 0.017, rz: 0.046, c: 2, ao: 0.97, b: [fa, 1] },
+    ], 8, 0.006);
+    // 人差し指（母指側）と 3 指（中/薬/小）。指股は AO で暗く。
+    const groove = (th, a) => a * (1 - 0.35 * Math.pow(Math.abs(Math.cos(th)), 8));
+    tube([
+      { x: x0, y: LM.knuckle + 0.004, z: 0.030, rx: 0.0135, rz: 0.0135, c: 2, ao: 0.96, b: [fa, 0.5, iB, 0.5] },
+      { x: x0, y: 0.7950, z: 0.031, rx: 0.0130, rz: 0.0130, c: 2, ao: 0.96, b: [iB, 1] },
+      { x: x0, y: 0.7560, z: 0.031, rx: 0.0118, rz: 0.0118, c: 2, b: [iB, 1] },
+      { x: x0, y: LM.fingertip + 0.008, z: 0.030, rx: 0.0090, rz: 0.0090, c: 2, b: [iB, 1] },
+    ], 5, 0.005);
+    tube([
+      { x: x0, y: LM.knuckle + 0.004, z: -0.014, rx: 0.0140, rz: 0.036, c: 2, ao: 0.96, aoAt: groove, b: [fa, 0.5, fB, 0.5] },
+      { x: x0, y: 0.7950, z: -0.014, rx: 0.0135, rz: 0.035, c: 2, ao: 0.96, aoAt: groove, b: [fB, 1] },
+      { x: x0, y: 0.7560, z: -0.013, rx: 0.0120, rz: 0.032, c: 2, aoAt: groove, b: [fB, 1] },
+      { x: x0, y: LM.fingertip, z: -0.012, rx: 0.0090, rz: 0.026, c: 2, aoAt: groove, b: [fB, 1] },
+    ], 8, 0.005);
+    // 母指（手のひらの前方へ・下へ向かう）
+    tube([
+      { x: x0, y: 0.9060, z: 0.040, rx: 0.016, rz: 0.016, c: 2, ao: 0.94, b: [fa, 0.5, tB, 0.5] },
+      { x: x0, y: 0.8840, z: 0.056, rx: 0.0145, rz: 0.0145, c: 2, ao: 0.95, b: [tB, 1] },
+      { x: x0, y: 0.8600, z: 0.068, rx: 0.0110, rz: 0.0110, c: 2, b: [tB, 1] },
+    ], 5, 0.005);
+  };
+  // 顔の造形（#05）。リングを積むのは他と同じだが、**各頂点**の前後の出っ張り・色・AO を
+  // 「顔の中心からの角度」の関数で変えられるようにして、正面だけに鼻・眉・眼窩・口の窪み、
+  // そして髪の生え際（前は額まで下がらず、横〜後ろは耳の高さまで下がる）を作る。
+  // 法線は生成した点の差分の外積で求めるので、凹凸を入れても陰影が破綻しない。
+  const headMesh = (B) => {
+    const seg = 20, start = pos.length / 3;   // 顔の凹凸を作るには 16 では粗い（鼻が 1 頂点になる）
+    const lerpN = (a, b, t) => a + (b - a) * clamp(t, 0, 1);
+    // 顔の正面（+Z）からの角度差。0=正面・±π=真後ろ。th は [0,2π) で来るので巻き戻しは 1 方向。
+    const front = (th) => { const d = th - Math.PI / 2; return d > Math.PI ? d - 2 * Math.PI : d; };
+    const bump = (d, w) => (Math.abs(d) >= w ? 0 : Math.cos((d / w) * (Math.PI / 2)) ** 2);   // 角度の山（±w で 0）
+    const near = (y, y0, h) => (Math.abs(y - y0) >= h ? 0 : Math.cos(((y - y0) / h) * (Math.PI / 2)) ** 2);   // 高さの山
+    // 髪の生え際: 正面は額（hairline）まで、横〜後ろは耳の高さまで下りる
+    const hairY = (d) => { const a = Math.abs(d); return a < 1.0 ? LM.hairline : lerpN(LM.hairline, LM.eye - 0.01, (a - 1.0) / 0.8); };
+    const rings = [
+      { y: 1.6470, rx: 0.044, rz: 0.052, zc: 0.002, ao: 0.72, b: [B.nec, 0.55, B.hea, 0.45] },   // 顎の下（首と重なる）
+      { y: 1.6647, rx: 0.052, rz: 0.074, zc: 0.009, ao: 0.86, b: [B.nec, 0.2, B.hea, 0.8] },     // 顎先
+      { y: 1.6850, rx: 0.066, rz: 0.082, zc: 0.005, ao: 0.94, b: [B.hea, 1] },                   // 下顎角（エラ）
+      { y: LM.mouth, rx: 0.074, rz: 0.089, zc: 0.002, b: [B.hea, 1] },                           // 口
+      { y: LM.noseBase, rx: 0.0805, rz: 0.092, b: [B.hea, 1] },                                   // 鼻の付け根・頬
+      { y: LM.noseTip, rx: 0.0815, rz: 0.094, b: [B.hea, 1] },                                   // 鼻先の高さ
+      { y: 1.7440, rx: 0.0819, rz: 0.0955, b: [B.hea, 1] },                                      // 目の下（頬骨）
+      { y: LM.eye, rx: 0.0820, rz: 0.0960, b: [B.hea, 1] },                                      // 目
+      { y: 1.7560, rx: 0.0819, rz: 0.0965, b: [B.hea, 1] },                                      // 目の上
+      { y: LM.brow, rx: 0.0815, rz: 0.0975, b: [B.hea, 1] },                                     // 眉弓
+      { y: 1.7850, rx: 0.0802, rz: 0.0968, b: [B.hea, 1] },                                      // 額
+      { y: LM.hairline - 0.0012, rx: 0.0795, rz: 0.0958, b: [B.hea, 1] },                        // 生え際（下）
+      { y: LM.hairline, rx: 0.0795, rz: 0.0958, b: [B.hea, 1] },                                 // 生え際（上）＝境界を水平線にする
+      // 頭蓋は 1.84 を最大幅とする四分楕円のドーム（円錐にしない）
+      { y: 1.8400, rx: 0.0815, rz: 0.0950, b: [B.hea, 1] },
+      { y: 1.8600, rx: 0.0792, rz: 0.0923, b: [B.hea, 1] },
+      { y: 1.8800, rx: 0.0720, rz: 0.0839, b: [B.hea, 1] },
+      { y: 1.8980, rx: 0.0596, rz: 0.0695, b: [B.hea, 1] },
+      { y: 1.9120, rx: 0.0431, rz: 0.0502, b: [B.hea, 1] },
+    ];
+    const P = [], C = [], A = [];
+    for (const rg of rings) {
+      const row = [], crow = [], arow = [];
+      for (let si = 0; si < seg; si++) {
+        const th = (si / seg) * Math.PI * 2, d = front(th), ad = Math.abs(d);
+        let rx = rg.rx, rz = rg.rz, dz = 0, ao = rg.ao ?? 1, cid = 2;
+        if (ad < 0.95) { rx *= 0.985; rz *= 0.985; }                       // 顔の前面は平たい面にする
+        dz += 0.0075 * bump(d, 0.85) * near(rg.y, LM.brow, 0.018);         // 眉弓
+        dz += 0.022 * bump(d, 0.55) * near(rg.y, LM.noseTip, 0.023);       // 鼻梁〜鼻先（隣の頂点まで届く幅にする）
+        dz -= 0.005 * (bump(d - 0.36, 0.26) + bump(d + 0.36, 0.26)) * near(rg.y, LM.noseBase, 0.010);   // 小鼻の脇の窪み
+        dz -= 0.005 * (bump(d - 0.34, 0.24) + bump(d + 0.34, 0.24)) * near(rg.y, LM.eye, 0.014);   // 眼窩
+        dz -= 0.005 * bump(d, 0.50) * near(rg.y, LM.mouth, 0.010);         // 口元の窪み
+        if (near(rg.y, LM.mouth, 0.010) > 0.35 && ad < 0.55) ao = 0.76;    // 口の影
+        if (rg.y >= hairY(d) - 1e-9) cid = 3;                              // 髪（生え際より上・横〜後ろは低い）
+        row.push([Math.cos(th) * rx, rg.y, (rg.zc || 0) + Math.sin(th) * rz + dz]);
+        crow.push(cid); arow.push(ao);
+      }
+      P.push(row); C.push(crow); A.push(arow);
+    }
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    for (let ri = 0; ri < rings.length; ri++) {
+      for (let si = 0; si < seg; si++) {
+        const p0 = P[ri][si];
+        const tTh = sub(P[ri][(si + 1) % seg], P[ri][(si - 1 + seg) % seg]);
+        const tY = sub(P[Math.min(rings.length - 1, ri + 1)][si], P[Math.max(0, ri - 1)][si]);
+        let nv = cross(tTh, tY);
+        const out = [p0[0], 0, p0[2] - (rings[ri].zc || 0)];
+        if (nv[0] * out[0] + nv[2] * out[2] < 0) nv = [-nv[0], -nv[1], -nv[2]];
+        pos.push(p0[0], p0[1], p0[2]); nor.push(...unit(nv[0], nv[1], nv[2]));
+        bidx.push(rings[ri].b[0], rings[ri].b[2] ?? 0, 0, 0);
+        bw.push(rings[ri].b[1], rings[ri].b[3] ?? 0, 0, 0);
+        cid.push(C[ri][si]); ao.push(A[ri][si]);
+        if (ri > 0) {
+          const a0 = start + (ri - 1) * seg, b0 = start + ri * seg, s1 = (si + 1) % seg;
+          idx.push(a0 + si, b0 + si, a0 + s1, a0 + s1, b0 + si, b0 + s1);
+        }
+      }
+    }
+    const cap = (ri, up) => {   // 頭頂と顎下（顎下は首の内側に隠れる）
+      const rg = rings[ri], ci = pos.length / 3;
+      pos.push(0, rg.y + (up ? 0.013 : -0.008), rg.zc || 0); nor.push(0, up ? 1 : -1, 0);
+      bidx.push(rg.b[0], rg.b[2] ?? 0, 0, 0); bw.push(rg.b[1], rg.b[3] ?? 0, 0, 0);
+      cid.push(up ? 3 : 2); ao.push(up ? 1 : 0.7);
+      const r0 = start + ri * seg;
+      for (let si = 0; si < seg; si++) { const s1 = (si + 1) % seg; if (up) idx.push(r0 + si, ci, r0 + s1); else idx.push(r0 + si, r0 + s1, ci); }
+    };
+    cap(rings.length - 1, true); cap(0, false);
+    // 目（眼窩に収まる暗色の小球）と耳（頭の側面）
+    for (const s of [-1, 1]) blob(s * 0.0275, LM.eye, 0.0838, 0.0125, 0.0103, 0.0090, B.hea, 3, 4, 8, 0.8);
+    for (const s of [-1, 1]) blob(s * 0.0805, LM.eye - 0.004, -0.006, 0.010, 0.026, 0.019, B.hea, 2, 4, 6, 0.88);
+  };
+    const finish = () => ({
+      pos: new Float32Array(pos), nor: new Float32Array(nor),
+      bidx: new Float32Array(bidx), bw: new Float32Array(bw), cid: new Float32Array(cid),
+      ao: new Float32Array(ao), idx: new Uint16Array(idx), boneCount: SKEL.length, tri: idx.length / 3,
+    });
+    return { B, tube, blob, loftZ, handMesh, headMesh, finish };
+  };
+  const buildBodyMesh = () => {
+    const { B, tube, blob, loftZ, handMesh, headMesh, finish } = newMeshBuilder();
     // 胴〜首〜頭（1本のレイズ）: V字テーパー（肩幅>腰幅）＋胸郭の膨らみ＋腹部の絞り＋
     // 僧帽筋スロープ（肩ヨーク→首の急勾配＝首肩の連続）＋顎/面のある頭部。
     tube([
@@ -8726,11 +8735,7 @@ window.addEventListener("error", (e) => {
     };
     arm(-1, B.clL, B.uaL, B.faL);
     arm(1, B.clR, B.uaR, B.faR);
-    return {
-      pos: new Float32Array(pos), nor: new Float32Array(nor),
-      bidx: new Float32Array(bidx), bw: new Float32Array(bw), cid: new Float32Array(cid),
-      ao: new Float32Array(ao), idx: new Uint16Array(idx), boneCount: SKEL.length, tri: idx.length / 3,
-    };
+    return finish();
   };
   const BODY_MESH = buildBodyMesh();
   // 関節の可動域（rad・人体の範囲を目安に設定）。**オーサリング（スライダ・クリップ）が必ずこの表を通る**ので、
@@ -8839,8 +8844,9 @@ window.addEventListener("error", (e) => {
   // 頂点/ボーンの所属から「軸の位置」と「太さの倍率」を決める
   const partOf = (bone) => (LEG_BONES.includes(bone) ? "leg" : ARM_BONES.includes(bone) ? "arm" : HEAD_BONES.includes(bone) ? "head" : "torso");
   const axisX = (part, x, sp) => {
-    if (part === "leg") return Math.sign(x || 1) * HIP_X * sp.h;
-    if (part === "arm") return Math.sign(x || 1) * ARM_X * sp.h * sp.shoulder;
+    const side = x < 0 ? -1 : 1;
+    if (part === "leg") return side * HIP_X * sp.h;
+    if (part === "arm") return side * ARM_X * sp.h * sp.shoulder;
     return 0;
   };
   const girth = (part, sp) => (part === "leg" || part === "arm" ? sp.limb : part === "head" ? sp.head : sp.torso);
@@ -8862,9 +8868,8 @@ window.addEventListener("error", (e) => {
       pos[i * 3 + 1] = src.pos[i * 3 + 1] * sp.h;
       pos[i * 3 + 2] = src.pos[i * 3 + 2] * g;
       // 法線は非一様スケールの逆数で変換して正規化（潰した方向の陰影が狂わないように）
-      let nx = src.nor[i * 3] / g, ny = src.nor[i * 3 + 1] / sp.h, nz = src.nor[i * 3 + 2] / g;
-      const nl = Math.hypot(nx, ny, nz) || 1;
-      nor[i * 3] = nx / nl; nor[i * 3 + 1] = ny / nl; nor[i * 3 + 2] = nz / nl;
+      const n = unit(src.nor[i * 3] / g, src.nor[i * 3 + 1] / sp.h, src.nor[i * 3 + 2] / g);
+      nor[i * 3] = n[0]; nor[i * 3 + 1] = n[1]; nor[i * 3 + 2] = n[2];
     }
     return { spec: sp, skel, mesh: { ...src, pos, nor } };
   };
@@ -9115,12 +9120,12 @@ window.addEventListener("error", (e) => {
   }`;
 
   R.character = {
-    SKEL, BONE, LM, H, ROM, romOf, clampPose, SHOE, buildBodyMesh, ARCHETYPES, buildArchetype, BODY_MESH, poseSkin, bodyVarOf,
+    SKEL, BONE, LM, H, ROM, romOf, clampPose, SHOE, buildBodyMesh, newMeshBuilder, ARCHETYPES, buildArchetype, BODY_MESH, poseSkin, bodyVarOf,
     solveLegIK, legFK, footPlace, cycleOf, gaitPose, PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2,
     soleDrop, footPitch, LEG_EFF,
     solveArmIK, armFK, IK_A1, IK_A2,
     VS_SKIN, FS_SKIN,
-    _M4: M4, _N: N, clamp, lerp,   // 内部数学/ハッシュも参照可能に（ビューア等の補助用）
+    _M4: M4, _N: N, clamp, lerp, unit,   // 内部数学/ハッシュも参照可能に（ビューア等の補助用）
   };
 })();
 

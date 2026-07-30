@@ -3,11 +3,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { evalFile } from "./load.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-(0, eval)(readFileSync(join(root, "app", "quality.mjs"), "utf8"));
+evalFile(join(root, "app", "quality.mjs"));
 const Q = globalThis.RPDX.quality;
 
 // GPU文字列は decideTier 側で小文字比較されるため、フィクスチャも小文字で与える

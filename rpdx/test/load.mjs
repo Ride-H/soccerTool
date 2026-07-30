@@ -1,5 +1,8 @@
-// テスト用ローダ: src の各モジュール（グローバル名前空間方式）を順に評価
+// テスト用ローダ: src の各モジュール（グローバル名前空間方式）を順に評価。
+// (0, eval) ではなくファイル名付きの vm 評価にしてある。無名スクリプトだと V8 の
+// カバレッジがソース行に紐づかず、「何がテストされていないか」を測れないため。
 import { readFileSync, readdirSync } from "node:fs";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -10,9 +13,8 @@ export const SRC_ORDER = [
   "engine.mjs", "danger.mjs", "subs.mjs", "sim.mjs", "psy.mjs",
   "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "policy.mjs", "layers.mjs", "generic.mjs",
 ];
-for (const f of SRC_ORDER) {
-  (0, eval)(readFileSync(join(dir, f), "utf8"));
-}
+export const evalFile = (path) => vm.runInThisContext(readFileSync(path, "utf8"), { filename: path });
+for (const f of SRC_ORDER) evalFile(join(dir, f));
 export const RPDX = globalThis.RPDX;
 export const MATCH = RPDX.data.MATCH;
 export const MATCHES = RPDX.data.MATCHES;

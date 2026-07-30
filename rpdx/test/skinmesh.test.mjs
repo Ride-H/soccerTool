@@ -2,15 +2,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { evalFile } from "./load.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // render3d は先頭で R.noise を参照するため noise → quality → render3d の順に評価
-(0, eval)(readFileSync(join(root, "src", "noise.mjs"), "utf8"));
-(0, eval)(readFileSync(join(root, "app", "quality.mjs"), "utf8"));
-(0, eval)(readFileSync(join(root, "app", "character.mjs"), "utf8"));   // #char-lab: 共有コア（render3d より前）
-(0, eval)(readFileSync(join(root, "app", "render3d.mjs"), "utf8"));
+evalFile(join(root, "src", "noise.mjs"));
+evalFile(join(root, "app", "quality.mjs"));
+evalFile(join(root, "app", "character.mjs"));   // #char-lab: 共有コア（render3d より前）
+evalFile(join(root, "app", "render3d.mjs"));
 const R = globalThis.RPDX;
 const S = R.render3d._skin;
 const Q = R.quality;
