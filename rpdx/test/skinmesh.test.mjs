@@ -75,7 +75,8 @@ test("#157 頂点AO: 接触遮蔽域（腋/股/顎下）が暗く・顔/胸は�
   };
   const groin = bandAo(LM.crotch - 0.05, LM.crotch + 0.03, (v) => m.bidx[v * 4] <= 4);  // 股下（胴カラム＝脚を除外）
   const face = bandAo(1.70, 1.78);        // 顔（#char-lab 顔の造形以降、口/目/耳の陰影を持つ）
-  const chest = bandAo(LM.lumbar + 0.05, LM.thorax - 0.02, (v) => m.bidx[v * 4] <= 4);  // 胸（胴カラム）
+  // 胸は正中付近だけを見る（#char-lab 以降、胴の側面は腕との接触で意図的に暗い）
+  const chest = bandAo(LM.lumbar + 0.05, LM.thorax - 0.02, (v) => m.bidx[v * 4] <= 4 && Math.abs(m.pos[v * 3]) < 0.10);
   const underChin = bandAo(LM.neck - 0.005, LM.neck + 0.03, (v) => m.bidx[v * 4] <= 4);  // 首（顎下）
   assert.ok(groin < 0.72, `股下が暗い ${groin.toFixed(2)}`);
   assert.ok(underChin < 0.82, `顎下が暗い ${underChin.toFixed(2)}`);

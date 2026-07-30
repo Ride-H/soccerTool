@@ -30,14 +30,14 @@ test("#152 tier判定: デスクトップ=cinematic / モバイル=lightweight /
 test("#152 予算表: 基準値が仕様どおり（暫定・要再検証の提案値）", () => {
   const lw = Q.flagsFor("lightweight"), cin = Q.flagsFor("cinematic");
   // Lightweight（#152 基準表・boneBudget は #154 実装実測で 12→16 に改定）
-  assert.equal(lw.playerTriBudget, 2500); assert.equal(lw.playerBoneBudget, 20);
+  assert.equal(lw.playerTriBudget, 3300); assert.equal(lw.playerBoneBudget, 26);
   assert.equal(lw.drawCallBudget, 400); assert.equal(lw.textureMemBudgetMB, 64);
   assert.equal(lw.cpuAnimBudgetMs, 6);
   assert.equal(lw.shadowMap, false); assert.equal(lw.bloom, false);
   assert.equal(lw.hdrTonemap, false); assert.equal(lw.crowd3D, false);
   assert.ok(Math.abs(lw.frameBudgetMs - 33.4) < 0.2 && lw.frameFloorMs > lw.frameBudgetMs, "30fps目標・24fps床");
   // Cinematic（#152 基準表）
-  assert.equal(cin.playerTriBudget, 15000); assert.equal(cin.playerBoneBudget, 24);
+  assert.equal(cin.playerTriBudget, 15000); assert.equal(cin.playerBoneBudget, 30);
   assert.equal(cin.drawCallBudget, 1500); assert.equal(cin.textureMemBudgetMB, 512);
   assert.equal(cin.cpuAnimBudgetMs, 3);
   assert.equal(cin.shadowMap, true); assert.equal(cin.shadowMapRes, 2048);
@@ -60,7 +60,7 @@ test("#152 劣化ラダー: 仕様順（DOF→bloom→shadow→SSAO→群衆→L
   const floor = Q.applyLadder(base, Q.ladderIds.length);
   assert.equal(floor.shadowMap, false); assert.equal(floor.bloom, false);
   assert.equal(floor.dof, false); assert.equal(floor.ssao, false); assert.equal(floor.crowd3D, false);
-  assert.equal(floor.playerTriBudget, 2500); assert.equal(floor.animIkFull, false); assert.equal(floor.animUpdateStride, 2);
+  assert.equal(floor.playerTriBudget, 3300); assert.equal(floor.animIkFull, false); assert.equal(floor.animUpdateStride, 2);
   // lightweight 基点は大半が no-op でもエラーなく単調
   const lwFloor = Q.applyLadder(Q.flagsFor("lightweight"), Q.ladderIds.length);
   assert.equal(lwFloor.animUpdateStride, 2);
@@ -151,7 +151,7 @@ test("#152 init/refineGpu: 環境注入で公開・GPU補正は降格のみ・fl
   const st2 = Q.refineGpu("Google SwiftShader 4.1");
   assert.equal(st2.tier, "lightweight");
   assert.equal(Q.flags, flagsRef, "flags は同一オブジェクト");
-  assert.equal(flagsRef.playerTriBudget, 2500, "中身は軽量予算へ更新");
+  assert.equal(flagsRef.playerTriBudget, 3300, "中身は軽量予算へ更新");
   // 軽量 → デスクトップGPU文字列でも昇格しない（保守側のみ）
   const st3 = Q.refineGpu("NVIDIA GeForce RTX 4070");
   assert.equal(st3.tier, "lightweight", "昇格はしない");

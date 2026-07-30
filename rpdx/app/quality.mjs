@@ -23,7 +23,7 @@
       crowd3D: false, crowdInstances: 2000,
       // boneBudget は #154 実装で 12→16 に改定（暫定値の初回更新）: 最小の自然な人型が
       // 脊椎5+脚3×2+腕2×2=15ボーンで、16×mat4=64vec4 は WebGL2 最低保証内で全デバイス安全。
-      playerTriBudget: 2500, playerBoneBudget: 20,   // #char-lab: 骨格 15→19（鎖骨/前足部を追加）
+      playerTriBudget: 3300, playerBoneBudget: 26,   // #char-lab: 骨格 25（手の指を含む）・顔/関節/手の造形ぶん増
       textureMemBudgetMB: 64, drawCallBudget: 400,
       animIkFull: true, animUpdateStride: 1,
     },
@@ -33,7 +33,7 @@
       shadowMap: true, shadowMapRes: 2048, ssao: false,   // SSAO/DOFは任意機能（既定OFF・許可はtier）
       bloom: true, bloomPasses: 3, hdrTonemap: true, dof: false,
       crowd3D: true, crowdInstances: 5000,
-      playerTriBudget: 15000, playerBoneBudget: 24,
+      playerTriBudget: 15000, playerBoneBudget: 30,
       textureMemBudgetMB: 512, drawCallBudget: 1500,
       animIkFull: true, animUpdateStride: 1,
     },
@@ -53,7 +53,7 @@
     { id: "ssao-off",        apply: (f) => f.ssao && ((f.ssao = false), true) },
     { id: "crowd-half",      apply: (f) => f.crowdInstances > 800 && ((f.crowdInstances = Math.round(f.crowdInstances / 2)), true) },
     { id: "crowd-3d-off",    apply: (f) => f.crowd3D && ((f.crowd3D = false), true) },
-    { id: "player-lod",      apply: (f) => f.playerTriBudget > 2500 && ((f.playerTriBudget = 2500), (f.playerBoneBudget = 20), true) },
+    { id: "player-lod",      apply: (f) => f.playerTriBudget > 3300 && ((f.playerTriBudget = 3300), (f.playerBoneBudget = 26), true) },
     { id: "anim-ik-simple",  apply: (f) => f.animIkFull && ((f.animIkFull = false), true) },
     { id: "anim-stride-2",   apply: (f) => f.animUpdateStride < 2 && ((f.animUpdateStride = 2), true) },
   ];

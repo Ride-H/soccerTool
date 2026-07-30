@@ -1178,9 +1178,11 @@
     const BOOT_COL = [0.09, 0.09, 0.105];
     const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time) => {
       const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time);
-      const legC = legMix(tone, shorts);
+      // cid4 は膝下のソックス（腿は素肌）。旧カプセル経路の脚色（肌×ショーツの混色）を
+      // そのまま使うと素肌の腿まで濁って「肌の色が場所で違う」に見えるため、布の色にする。
+      const sockC = [shorts[0] * 1.15 + 0.02, shorts[1] * 1.15 + 0.02, shorts[2] * 1.15 + 0.02];
       skinPal.set(shirt, 0); skinPal.set(shorts, 3); skinPal.set(tone.skin, 6);
-      skinPal.set(tone.hair, 9); skinPal.set(legC, 12); skinPal.set(BOOT_COL, 15);
+      skinPal.set(tone.hair, 9); skinPal.set(sockC, 12); skinPal.set(BOOT_COL, 15);
       const bones = poseSkin({
         lean: P.lean, twist: P.twist,
         swayX: P.swayX, swayY: P.swayY, swayZ: P.swayZ,      // #156 重心スウェイ（bob込み・呼吸）
