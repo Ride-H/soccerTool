@@ -9,7 +9,8 @@
 // 端末幅は既定でスマートフォン（390×844）。ライブ実況はスタンドで使う想定のため。
 import { launch } from "../test/visual/cdp.mjs";
 
-const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
+const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); // 値に = を含む（URL 等）ので split は使わない
+  return a ? a.slice(a.indexOf("=") + 1) : d; };
 const W = +arg("w", 390), H = +arg("h", 844);
 const URL_ = arg("url", `file://${new URL("../../dist/rpdx.html", import.meta.url).pathname}?live=1&play=0`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -18,7 +18,8 @@ import { RPDX, MATCHES } from "../test/load.mjs";
 import { isKnown } from "../spec/replay-known.mjs";
 
 const { engine: E, danger: D, tactics: T } = RPDX;
-const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
+const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); // 値に = を含む（URL 等）ので split は使わない
+  return a ? a.slice(a.indexOf("=") + 1) : d; };
 const DT = Number(arg("dt", 0.5));          // 運動学の刻み[s]
 const DT_SLOW = Number(arg("dtSlow", 6));   // 危険度・助言の刻み[s]（重いので粗く）
 const ONLY = arg("match", null);

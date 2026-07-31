@@ -382,6 +382,18 @@ export const REQUIREMENTS = [
     note: "復帰した時計は必ず停止状態（読み込んだ瞬間に試合時刻が走り出さない）",
   },
 
+  {
+    id: "OPS-07", area: "ux", status: "held",
+    text: "画面層は prompt/confirm/alert を使わず、端末内へ書くキーは登録制（保存機構を重複させない）",
+    source: "指摘 2026-08-01",
+    checks: [
+      { kind: "test", file: "uicontract.test.mjs", name: "prompt/confirm/alert を使わない" },
+      { kind: "test", file: "uicontract.test.mjs", name: "端末内へ書くキーは登録済みのものだけ" },
+      { kind: "test", file: "uicontract.test.mjs", name: "操作要素には説明" },
+    ],
+    note: "prompt 等はスマホで使えずヘッドレス検証も止まる。保存キーの登録制は「既存の仕組みで足りないか」を一度考えさせるため",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "open", issue: 105,
