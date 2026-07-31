@@ -1882,7 +1882,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   };
   $("#bundleExport") && ($("#bundleExport").onclick = () => {
     const sc = activeScenario();
-    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null);
+    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null, { live: liveState.session });
     try {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -1905,7 +1905,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   const LS_KEY = "rpdx.scenario.v1";
   $("#bundleStore") && ($("#bundleStore").onclick = () => {
     try {
-      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null));
+      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null, { live: liveState.session }));
       bMsg("この端末に保存しました（localStorage・送信なし）");
     } catch (e) { bMsg("⚠ 端末保存に失敗: " + (e && e.message), true); }
   });
@@ -1932,6 +1932,32 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   const liveTimeNow = () => (liveState.session ? R.live.tAt(liveState.session, Date.now()) : 0);
 
+  // 自動保存: 形式は既存のバンドルそのまま。手動保存（#bundleStore）を上書きしないよう
+  // スロットだけ分ける。ライブは試合中に画面を閉じられるので、入力のたびに書く。
+  const LIVE_LS = "rpdx.live.autosave.v1";
+  const liveSave = () => {
+    if (!liveState.session) return;
+    try {
+      localStorage.setItem(LIVE_LS, R.scenlib.serializeBundle(App.match, E.actualScenario(App.match), null, { live: liveState.session }));
+    } catch { /* 保存不可の端末でも動作は続ける */ }
+  };
+  const liveHasSaved = () => { try { return !!localStorage.getItem(LIVE_LS); } catch { return false; } };
+  const liveRestore = () => {
+    let text = null;
+    try { text = localStorage.getItem(LIVE_LS); } catch { /* ignore */ }
+    if (!text) { liveLog("この端末に保存されたライブはありません"); return false; }
+    let obj = null;
+    try { obj = JSON.parse(text); } catch { liveLog("保存の読み取りに失敗しました"); return false; }
+    if (obj.customMatch) { try { setMatch(G.createMatch(obj.customMatch)); } catch { /* 既定のまま */ } }
+    const r = R.scenlib.parseBundle(App.match, obj);
+    if (!r || !r.live) { liveLog("保存にライブの記録が入っていません"); return false; }
+    liveState.session = r.live;
+    liveState.team = null;
+    liveRebuild(); liveRenderBar();
+    liveLog(`前回の続きから復帰しました（${E.clockAt(App.match, R.live.tAt(liveState.session, Date.now())).disp}・停止中）`);
+    return true;
+  };
+
   const liveRebuild = () => {
     const m = R.live.matchOf(liveState.session);
     liveState.lastBuilt = m;
@@ -1950,6 +1976,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     bar.classList.toggle("running", running);
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
+    $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
     // チーム選択（どちらの出来事かを先に選ぶ＝入力は 2 タップで完了）
     const tg = $("#liveTeams");
     if (tg.dataset.built !== App.match.meta.id) {
@@ -2004,7 +2031,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       if (out != null) row("入る選手（in）", bench, (n) => {
         liveState.session = R.live.withSub(liveState.session, { t, team, out, in: n });
         wrap.style.display = "none"; wrap.innerHTML = "";
-        liveRebuild(); liveRenderBar();
+        liveRebuild(); liveSave(); liveRenderBar();
         liveLog(`${App.match.teams[team].name} #${out} → #${n} の交代（${E.clockAt(App.match, t).disp}）を記録`);
       }, null);
       const cancel = document.createElement("button");
@@ -2023,6 +2050,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const t = liveTimeNow();
     liveState.session = R.live.withEvent(liveState.session, { t, type: ev.type, team: liveState.team, label: ev.label });
     liveRebuild();
+    liveSave();
     liveLog(`${App.match.teams[liveState.team].name} の ${ev.label}（${E.clockAt(App.match, t).disp}）を記録`);
     liveRenderBar();
   };
@@ -2033,7 +2061,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     liveState.team = null;
     liveRebuild();
     liveRenderBar();
-    liveLog("チームを選び、開始を押してから、起きたことをタップしてください");
+    liveLog(liveHasSaved()
+      ? "チームを選んで開始してください（前回の続きは「続きから」で戻せます）"
+      : "チームを選び、開始を押してから、起きたことをタップしてください");
   };
 
   const liveExit = () => {
@@ -2049,21 +2079,51 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").onclick = () => {
       const running = R.live.isRunning(liveState.session);
       liveState.session = R.live.withClock(liveState.session, running ? "pause" : (liveState.session.clock.length ? "resume" : "start"), Date.now());
-      liveRenderBar();
+      liveSave(); liveRenderBar();
     };
+    // 時計合わせは画面内で完結させる（スマホで prompt は押しにくく、
+    // 自動検証でも画面が止まるため使わない）
     $("#liveSync").onclick = () => {
-      const cur = Math.round(liveTimeNow() / 60);
-      const min = prompt("中継の経過時間（分）を入れてください", String(cur));
-      if (min == null) return;
-      const v = Number(min);
-      if (!Number.isFinite(v) || v < 0 || v > 130) { liveLog("0〜130 の数字で入れてください"); return; }
-      liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
-      liveLog(`時計を ${v} 分に合わせました`);
-      liveRenderBar();
+      const wrap = $("#liveSubPick");
+      const draw = () => {
+        const cur = Math.round(liveTimeNow() / 60);
+        wrap.innerHTML = "";
+        const h = document.createElement("div"); h.className = "hint";
+        h.textContent = `中継の経過時間に合わせる（いま ${cur} 分）`;
+        wrap.appendChild(h);
+        const g = document.createElement("div"); g.className = "live-nums";
+        const step = (d, label) => {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = label;
+          b.onclick = () => {
+            const v = Math.max(0, Math.min(130, cur + d));
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
+            liveSave(); liveLog(`時計を ${v} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        };
+        step(-5, "−5分"); step(-1, "−1分"); step(1, "+1分"); step(5, "+5分");
+        for (const m2 of [0, 45, 90]) {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = m2 + "分";
+          b.onclick = () => {
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), m2 * 60);
+            liveSave(); liveLog(`時計を ${m2} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        }
+        wrap.appendChild(g);
+        const done = document.createElement("button");
+        done.className = "btn"; done.textContent = "閉じる";
+        done.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+        wrap.appendChild(done);
+      };
+      wrap.style.display = ""; draw();
     };
+    $("#liveResume").onclick = () => liveRestore();
     $("#liveUndo").onclick = () => {
       liveState.session = R.live.undo(liveState.session);
-      liveRebuild(); liveRenderBar(); liveLog("直前の入力を取り消しました");
+      liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
     };
     $("#liveExit").onclick = liveExit;
   };

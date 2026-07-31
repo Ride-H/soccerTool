@@ -165,6 +165,24 @@
     };
   };
 
+  /* ---------------- 保存・復帰（#181）----------------
+     保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための
+     「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
+     （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
+  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate })),
+    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
+
+  L.fromObj = (o, wallMs) => {
+    if (!o || !o.cfg) return null;
+    const s = { cfg: o.cfg, clock: [], events: (o.events || []).map((e) => ({ ...e })).sort((a, b) => a.t - b.t),
+      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t) };
+    // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
+    const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
+    const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
+    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0 }];
+    return s;
+  };
+
   // 壁時計の「いま」を 1 回で取る（UI から毎フレーム呼ぶ想定）
   L.stateAt = (s, wallMs) => {
     const match = L.matchOf(s);

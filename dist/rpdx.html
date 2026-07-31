@@ -768,6 +768,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     <span class="eyebrow" id="liveState">停止中</span>
     <button class="btn live-btn" id="liveStart" aria-label="試合開始 / 一時停止（start or pause）">▶ 開始</button>
     <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
+    <button class="btn live-btn" id="liveResume" style="display:none" aria-label="前回の続きから復帰（resume saved live）">⏱ 続きから</button>
     <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
     <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
   </div>
@@ -7379,7 +7380,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
          frame?: <serializeFrame の中身> }                                        // 任意の編集フレーム座標 */
   const ATTR_RANGE = { pac: [40, 99], sta: [40, 99], def: [20, 99], att: [20, 99], tec: [40, 99], aer: [30, 99] };
 
-  SCN.serializeBundle = (match, scenario, editFrame) => {
+  SCN.serializeBundle = (match, scenario, editFrame, opts) => {
     const ov = {};
     if (scenario.subs) {
       const subs = {};
@@ -7422,6 +7423,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       };
     }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
+    // #181 ライブセッション: 専用の保存機構は作らず、このバンドルに同梱する。
+    // 時計の区間列は壁時計の絶対値を持つので、保存時刻も一緒に残して復帰時に解決する。
+    if (opts && opts.live && R.live) { bundle.live = R.live.toObj(opts.live); bundle.live.savedAt = Date.now(); }
     return JSON.stringify(bundle, null, 2);
   };
 
@@ -7506,7 +7510,10 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
     const validation = S.validateScenario(match, sc);
     const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
-    return { scenario: sc, validation, frame, match: o.match || null };
+    // #181 ライブセッションが同梱されていれば復元して返す（時計は必ず停止状態）。
+    // 世界の作り直しは呼び出し側（UI）の仕事なので、ここは値を戻すだけ。
+    const live = (o.live && R.live) ? R.live.fromObj(o.live) : null;
+    return { scenario: sc, validation, frame, match: o.match || null, ...(live ? { live } : {}) };
   };
 
   /* ---- #80(B): 巻き返しシナリオ・ビルダー ----
@@ -8246,6 +8253,24 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
         seedId: `live-${s.cfg.seed || kA + kB}`, score, live: true, calibrated: false },
       events, ballAnchors, possessionKP, subsActual,
     };
+  };
+
+  /* ---------------- 保存・復帰（#181）----------------
+     保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための
+     「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
+     （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
+  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate })),
+    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
+
+  L.fromObj = (o, wallMs) => {
+    if (!o || !o.cfg) return null;
+    const s = { cfg: o.cfg, clock: [], events: (o.events || []).map((e) => ({ ...e })).sort((a, b) => a.t - b.t),
+      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t) };
+    // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
+    const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
+    const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
+    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0 }];
+    return s;
   };
 
   // 壁時計の「いま」を 1 回で取る（UI から毎フレーム呼ぶ想定）
@@ -13233,7 +13258,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   };
   $("#bundleExport") && ($("#bundleExport").onclick = () => {
     const sc = activeScenario();
-    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null);
+    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null, { live: liveState.session });
     try {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -13256,7 +13281,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   const LS_KEY = "rpdx.scenario.v1";
   $("#bundleStore") && ($("#bundleStore").onclick = () => {
     try {
-      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null));
+      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null, { live: liveState.session }));
       bMsg("この端末に保存しました（localStorage・送信なし）");
     } catch (e) { bMsg("⚠ 端末保存に失敗: " + (e && e.message), true); }
   });
@@ -13283,6 +13308,32 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   const liveTimeNow = () => (liveState.session ? R.live.tAt(liveState.session, Date.now()) : 0);
 
+  // 自動保存: 形式は既存のバンドルそのまま。手動保存（#bundleStore）を上書きしないよう
+  // スロットだけ分ける。ライブは試合中に画面を閉じられるので、入力のたびに書く。
+  const LIVE_LS = "rpdx.live.autosave.v1";
+  const liveSave = () => {
+    if (!liveState.session) return;
+    try {
+      localStorage.setItem(LIVE_LS, R.scenlib.serializeBundle(App.match, E.actualScenario(App.match), null, { live: liveState.session }));
+    } catch { /* 保存不可の端末でも動作は続ける */ }
+  };
+  const liveHasSaved = () => { try { return !!localStorage.getItem(LIVE_LS); } catch { return false; } };
+  const liveRestore = () => {
+    let text = null;
+    try { text = localStorage.getItem(LIVE_LS); } catch { /* ignore */ }
+    if (!text) { liveLog("この端末に保存されたライブはありません"); return false; }
+    let obj = null;
+    try { obj = JSON.parse(text); } catch { liveLog("保存の読み取りに失敗しました"); return false; }
+    if (obj.customMatch) { try { setMatch(G.createMatch(obj.customMatch)); } catch { /* 既定のまま */ } }
+    const r = R.scenlib.parseBundle(App.match, obj);
+    if (!r || !r.live) { liveLog("保存にライブの記録が入っていません"); return false; }
+    liveState.session = r.live;
+    liveState.team = null;
+    liveRebuild(); liveRenderBar();
+    liveLog(`前回の続きから復帰しました（${E.clockAt(App.match, R.live.tAt(liveState.session, Date.now())).disp}・停止中）`);
+    return true;
+  };
+
   const liveRebuild = () => {
     const m = R.live.matchOf(liveState.session);
     liveState.lastBuilt = m;
@@ -13301,6 +13352,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     bar.classList.toggle("running", running);
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
+    $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
     // チーム選択（どちらの出来事かを先に選ぶ＝入力は 2 タップで完了）
     const tg = $("#liveTeams");
     if (tg.dataset.built !== App.match.meta.id) {
@@ -13355,7 +13407,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       if (out != null) row("入る選手（in）", bench, (n) => {
         liveState.session = R.live.withSub(liveState.session, { t, team, out, in: n });
         wrap.style.display = "none"; wrap.innerHTML = "";
-        liveRebuild(); liveRenderBar();
+        liveRebuild(); liveSave(); liveRenderBar();
         liveLog(`${App.match.teams[team].name} #${out} → #${n} の交代（${E.clockAt(App.match, t).disp}）を記録`);
       }, null);
       const cancel = document.createElement("button");
@@ -13374,6 +13426,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const t = liveTimeNow();
     liveState.session = R.live.withEvent(liveState.session, { t, type: ev.type, team: liveState.team, label: ev.label });
     liveRebuild();
+    liveSave();
     liveLog(`${App.match.teams[liveState.team].name} の ${ev.label}（${E.clockAt(App.match, t).disp}）を記録`);
     liveRenderBar();
   };
@@ -13384,7 +13437,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     liveState.team = null;
     liveRebuild();
     liveRenderBar();
-    liveLog("チームを選び、開始を押してから、起きたことをタップしてください");
+    liveLog(liveHasSaved()
+      ? "チームを選んで開始してください（前回の続きは「続きから」で戻せます）"
+      : "チームを選び、開始を押してから、起きたことをタップしてください");
   };
 
   const liveExit = () => {
@@ -13400,21 +13455,51 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").onclick = () => {
       const running = R.live.isRunning(liveState.session);
       liveState.session = R.live.withClock(liveState.session, running ? "pause" : (liveState.session.clock.length ? "resume" : "start"), Date.now());
-      liveRenderBar();
+      liveSave(); liveRenderBar();
     };
+    // 時計合わせは画面内で完結させる（スマホで prompt は押しにくく、
+    // 自動検証でも画面が止まるため使わない）
     $("#liveSync").onclick = () => {
-      const cur = Math.round(liveTimeNow() / 60);
-      const min = prompt("中継の経過時間（分）を入れてください", String(cur));
-      if (min == null) return;
-      const v = Number(min);
-      if (!Number.isFinite(v) || v < 0 || v > 130) { liveLog("0〜130 の数字で入れてください"); return; }
-      liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
-      liveLog(`時計を ${v} 分に合わせました`);
-      liveRenderBar();
+      const wrap = $("#liveSubPick");
+      const draw = () => {
+        const cur = Math.round(liveTimeNow() / 60);
+        wrap.innerHTML = "";
+        const h = document.createElement("div"); h.className = "hint";
+        h.textContent = `中継の経過時間に合わせる（いま ${cur} 分）`;
+        wrap.appendChild(h);
+        const g = document.createElement("div"); g.className = "live-nums";
+        const step = (d, label) => {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = label;
+          b.onclick = () => {
+            const v = Math.max(0, Math.min(130, cur + d));
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
+            liveSave(); liveLog(`時計を ${v} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        };
+        step(-5, "−5分"); step(-1, "−1分"); step(1, "+1分"); step(5, "+5分");
+        for (const m2 of [0, 45, 90]) {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = m2 + "分";
+          b.onclick = () => {
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), m2 * 60);
+            liveSave(); liveLog(`時計を ${m2} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        }
+        wrap.appendChild(g);
+        const done = document.createElement("button");
+        done.className = "btn"; done.textContent = "閉じる";
+        done.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+        wrap.appendChild(done);
+      };
+      wrap.style.display = ""; draw();
     };
+    $("#liveResume").onclick = () => liveRestore();
     $("#liveUndo").onclick = () => {
       liveState.session = R.live.undo(liveState.session);
-      liveRebuild(); liveRenderBar(); liveLog("直前の入力を取り消しました");
+      liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
     };
     $("#liveExit").onclick = liveExit;
   };

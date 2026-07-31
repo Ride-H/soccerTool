@@ -76,3 +76,60 @@ test("ライブの世界は決定論（同じセッション・同じ壁時計�
   assert.deepEqual(a.state.players.map((p) => [p.no, p.x, p.y]), b.state.players.map((p) => [p.no, p.x, p.y]));
   assert.equal(a.t, b.t);
 });
+
+// #181 保存・復帰は**既存のバンドル**に載せる（ライブ専用の保存機構を作らない）。
+// ここでは「往復して世界が bit 一致すること」「復帰した時計が止まっていること」
+// 「従来のバンドルが引き続き読めること」を固定する。
+test("保存・復帰: 既存のバンドルへ載せて往復し、世界が bit 一致する", () => {
+  const SCN = RPDX.scenlib;
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  const KS = E.teamKeys(L.matchOf(s));
+  s = L.withEvent(s, { t: 1200, type: "goal", team: KS[0], no: 9 });
+  s = L.withEvent(s, { t: 1800, type: "corner", team: KS[1] });
+  const on = E.stateAt(L.matchOf(s), E.actualScenario(L.matchOf(s)), 2000).players
+    .filter((p) => p.team === KS[0] && p.onPitch).map((p) => p.no);
+  const bench = L.matchOf(s).teams[KS[0]].squad.map((p) => p.no).find((n) => !on.includes(n));
+  s = L.withSub(s, { t: 2000, team: KS[0], out: on[5], in: bench });
+
+  const m = L.matchOf(s), sc = E.actualScenario(m);
+  const json = SCN.serializeBundle(m, sc, null, { live: s });
+  const bundle = JSON.parse(json);
+  assert.ok(bundle.live, "バンドルに live セクションが入る");
+  assert.ok(bundle.customMatch, "未較正なのでロスターも同梱される（既存の仕組み）");
+
+  const r = SCN.parseBundle(m, json);
+  assert.ok(r.live, "復帰できる");
+  assert.equal(L.isRunning(r.live), false, "復帰した時計は止まっている（勝手に進み出さない）");
+  const m2 = L.matchOf(r.live);
+  assert.deepEqual(m2.events.map((e) => `${e.t}${e.type}`), m.events.map((e) => `${e.t}${e.type}`));
+  assert.deepEqual(m2.subsActual, m.subsActual);
+  assert.deepEqual(m2.meta.score, m.meta.score);
+  const pos = (mm) => E.stateAt(mm, E.actualScenario(mm), 900).players.map((p) => [p.no, p.x, p.y]);
+  assert.deepEqual(pos(m2), pos(m), "復帰後の世界が保存前と bit 一致");
+});
+
+test("保存・復帰: 従来のバンドル（live なし）は今までどおり読める", () => {
+  const SCN = RPDX.scenlib;
+  const m = G.templateMatch(), sc = E.actualScenario(m);
+  const r = SCN.parseBundle(m, SCN.serializeBundle(m, sc, null));
+  assert.equal(r.live, undefined, "live が無ければ live キーも付かない");
+  assert.ok(r.scenario && r.validation, "従来の戻り値はそのまま");
+});
+
+test("保存・復帰: 時計の続きから再開できる（保存時点の試合時刻を保つ）", () => {
+  const SCN = RPDX.scenlib;
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  s = L.withClock(s, "sync", T0 + 60_000, 2400);          // 40 分に合わせて進行中
+  const m = L.matchOf(s);
+  const saved = JSON.parse(SCN.serializeBundle(m, E.actualScenario(m), null, { live: s }));
+  saved.live.savedAt = T0 + 60_000;                        // 保存した瞬間＝試合 2400s
+  // 復帰の壁時計を指定できる形で呼ぶ（parseBundle は実時刻を使う。ここは検証のため固定）
+  assert.ok(SCN.parseBundle(m, saved).live, "parseBundle からも復帰できる");
+  const restored = L.fromObj(saved.live, T0 + 999_999);
+  const t = L.tAt(restored, T0 + 999_999);
+  assert.ok(Math.abs(t - 2400) < 1, `保存時点の試合時刻から再開できる（${t}）`);
+  assert.equal(L.isRunning(restored), false, "復帰直後は止まっている");
+  const resumed = L.withClock(restored, "resume", T0 + 999_999);
+  assert.ok(L.isRunning(resumed));
+  assert.ok(Math.abs(L.tAt(resumed, T0 + 1_009_999) - 2410) < 1, "再開後は進む");
+});

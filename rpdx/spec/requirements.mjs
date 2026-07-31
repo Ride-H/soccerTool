@@ -370,6 +370,18 @@ export const REQUIREMENTS = [
     note: "目視だけに頼らず実測する。標的の重なりは elementFromPoint で検査（大きさだけ見ても覆われていたら押せない）",
   },
 
+  {
+    id: "LIVE-08", area: "ux", status: "held",
+    text: "ライブの入力は既存のバンドルへ載って保存・復帰・共有できる（専用の保存機構を作らない）",
+    source: "issue#181",
+    checks: [
+      { kind: "test", file: "liveui.test.mjs", name: "保存・復帰: 既存のバンドルへ載せて往復し、世界が bit 一致する" },
+      { kind: "test", file: "liveui.test.mjs", name: "保存・復帰: 従来のバンドル（live なし）は今までどおり読める" },
+      { kind: "test", file: "liveui.test.mjs", name: "保存・復帰: 時計の続きから再開できる" },
+    ],
+    note: "復帰した時計は必ず停止状態（読み込んだ瞬間に試合時刻が走り出さない）",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "open", issue: 105,
