@@ -2513,6 +2513,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       };
     }
     renderer.frame(now / 1000, dt, {
+      // #179: 人型の歩容は「試合時間で何 m 進んだか」で決まる。壁時計の dt を渡すと
+      // 再生倍率のぶんだけ速度入力が水増しされ、×12 では常に全力疾走のまま脚だけ追いつかない
+      // （＝滑る）。カメラの慣性は壁時計のままでよいので、別の値として渡す。
+      dtMatch: App.t - t0,
       state,
       field: App.options.fieldMode !== "off" ? App.lastField : null,
       zone: App.options.zones ? App.lastZone : null,

@@ -1017,7 +1017,8 @@
     // 両描画経路が共有する。数式は従来 drawFigure から移設（挙動・文脈ポーズは不変）。
     // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
     // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
-    const figPose = (key, px, pz, dt, defYaw, bx, bz, ex, time) => {
+    // dt: 試合時間の刻み（速度推定・ケイデンス＝世界の量）／ dtView: 壁時計の刻み（向きの追従＝表示の慣性）
+    const figPose = (key, px, pz, dt, defYaw, bx, bz, ex, time, dtView) => {
       const f = figOf(key);
       if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
       const dx = px - f.lx, dz = pz - f.lz;
@@ -1029,22 +1030,26 @@
       const shield = ex && ex.shield ? ex.shield : null;
       const jump = ex && ex.jump ? ex.jump : 0;          // 0..1 ジャンプ弧の高さ（空中戦）
       const header = !!(ex && ex.header);                // 勝者=ヘディングの前傾
-      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; f.pv = 0; f.acc = 0; }   // スクラブ・ジャンプ（#156: 加速度状態もリセット＝テレポート後のリーン揺れ回避）
-      else if (dt > 0) {
-        const vInst = Math.min(dist / dt, 10);
+      const dv = dtView != null ? dtView : dt;   // 向きの追従は停止中も進める（一時停止で首が固まらない）
+      // テレポート判定は「1 フレームで進みうる距離」を基準にする。固定 6m だと ×30/×60 の
+      // 早送りで通常の移動がテレポート扱いになり、毎フレーム状態がリセットされて歩容が止まる。
+      const teleport = Math.max(6, 11 * dt);
+      if (dist > teleport) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; f.pv = 0; f.acc = 0; }   // スクラブ・ジャンプ（#156: 加速度状態もリセット＝テレポート後のリーン揺れ回避）
+      else if (dt > 0 || dv > 0) {
+        const vInst = dt > 0 ? Math.min(dist / dt, 10) : f.v;
         f.v += (vInst - f.v) * Math.min(1, dt * 5);
         if (shield && f.v < 3) {
           // シールド: プレッサーへ背を向けボールと相手の間に体を入れる
           const target = Math.atan2(px - shield.x, pz - shield.z);
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 4.5));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * 4.5));
         } else if (f.v > 0.6 && dist > 0.002) {
           const dot = (dx * dbx + dz * dbz) / (dist * (dBall || 1));
           backpedal = dot < -0.35 && f.v < 4.5 && dBall < 45;
           const target = backpedal ? Math.atan2(dbx, dbz) : Math.atan2(dx, dz);
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * (backpedal ? 5 : 7)));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * (backpedal ? 5 : 7)));
         } else if (f.v <= 0.6) {
           const target = dBall < 30 ? Math.atan2(dbx, dbz) : defYaw;
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 2.2));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * 2.2));
         }
         // ケイデンス: 歩き~0.9Hz → スプリント~1.6Hz（ストライド）
         f.phase += dt * (4.2 + f.v * 0.85) * (f.v > 0.3 ? 1 : 0.25);
@@ -1141,8 +1146,8 @@
     const legMix = (tone, shorts) =>
       [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
     // 旧経路（カプセル寄せ集め）— #154 移行期の切り戻し用に温存（?fig=capsule）。VIS-02 完了後に撤去予定。
-    const drawFigureCapsule = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time) => {
-      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time);
+    const drawFigureCapsule = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time, dtView) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time, dtView);
       const op = { emiss: 0.04, alpha };
       const legC = legMix(tone, shorts);
       for (const s of [-1, 1]) {
@@ -1176,8 +1181,8 @@
     // #154 新経路: 単一スキンドメッシュ1回描画（関節球なし・膝/肘/股/脊椎で表面が連続）
     const skinPal = new Float32Array(18);       // 6色 × vec3
     const BOOT_COL = [0.09, 0.09, 0.105];
-    const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time) => {
-      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time);
+    const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time, dtView) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time, dtView);
       // cid4 は膝下のソックス（腿は素肌）。旧カプセル経路の脚色（肌×ショーツの混色）を
       // そのまま使うと素肌の腿まで濁って「肌の色が場所で違う」に見えるため、布の色にする。
       const sockC = [shorts[0] * 1.15 + 0.02, shorts[1] * 1.15 + 0.02, shorts[2] * 1.15 + 0.02];
@@ -1339,6 +1344,8 @@
     let lastHeat = -1;
     api.frame = (time, dt, scene) => {
       const { state, field, options, selected, hover } = scene;
+      // 人型の運動（速度推定・ケイデンス・向き）は試合時間で進める。カメラの慣性は壁時計のまま。
+      const dtFig = scene.dtMatch != null ? scene.dtMatch : dt;
       figCapsuleMode = !!(options && options.figCapsule);   // #154 切り戻しフラグ（?fig=capsule）
       // カメラ更新
       if (cam.anim) {
@@ -1694,10 +1701,10 @@
         }
         const numTx = (options.kitNumbers !== false) ? kitNumTex(p.team, p.no, isGK) : null;
         drawFigure(
-          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
+          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dtFig,
           shirt, shorts, toneOf(p.team, p.no),
           bodyAlpha * alpha, Math.atan2(dir, 0),
-          state.ball.x, -state.ball.y, ex, numTx, time
+          state.ball.x, -state.ball.y, ex, numTx, time, dt
         );
         gl.disable(gl.BLEND);
       }
@@ -1735,9 +1742,9 @@
         drawMesh(mQuad);
         gl.depthMask(true);
         gl.disable(gl.BLEND);
-        drawFigure("REF:" + ri, rf.x, rz, dt,
+        drawFigure("REF:" + ri, rf.x, rz, dtFig,
           [0.13, 0.13, 0.15], [0.10, 0.10, 0.12], REF_TONE, 1,
-          Math.atan2(b.x - rf.x, bz - rz), b.x, bz, null, null, time);
+          Math.atan2(b.x - rf.x, bz - rz), b.x, bz, null, null, time, dt);
       }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
