@@ -3965,6 +3965,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 
   // #174 速度上限を守るための取り分。基礎運動（帯域制限ノイズ）と合わせて 9.9m/s を超えないようにする。
   const GAUSS_SLOPE = 1 / Math.sqrt(Math.E);   // ガウス窓の最大傾き（×1/σ）
+  const PRESS_V = 3.5;                         // 寄せの立ち上がり/解放に割ける速度 [m/s]
   const ANCHOR_V = 6.0;                        // アンカーへの寄せに割ける速度 [m/s]
   //   小さくするほど上限は守られるが、記録のスプリント再現（佐野29'の独走 ≥20km/h）が壊れる。
   //   6.0 は「再現テストが全て通る中で最も小さい値」として実測で決めた。
@@ -3999,18 +4000,35 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (c && c.mode === "hold" && c.team !== team && slot.role !== "GK" && ctx.carrierPos) {
       const cp = ctx.carrierPos;
       const d = Math.hypot(cp.x - x, cp.y - y);
-      const rank = ctx.pressRank ? ctx.pressRank.ranks.get(no) : undefined;
+      // #178: 順位は連続量（0=最も近い / 1=2番手 / 2=3番手 / それ以降）。
+      // 整数の分岐だと入れ替わりで寄せ方が跳ぶ。段階値の間を線形に補間する
+      // （整数の位置では従来の較正値と一致する）。
+      const rc = ctx.pressRank && ctx.pressRank.soft ? ctx.pressRank.soft.get(no) : undefined;
       // トリガ（#29）: 相手のビルドアップで自チームのプレスが点灯（連続 level）
       const trig = ctx.trigger && ctx.trigger.team === team ? ctx.trigger.level : 0;
-      let wBase = 0.22, sig = 10;
-      if (rank === 0) { wBase = 0.52 + 0.14 * trig; sig = 7.5 + 3 * trig; }    // 1st: 密着（トリガで増圧）
-      else if (rank === 1) { wBase = 0.32 + 0.12 * trig; sig = 9 + 6 * trig; }  // 2nd: カバー（トリガで遠くから連動）
-      else if (rank === 2) { wBase = 0.22 + 0.16 * trig; sig = 10 + 5 * trig; } // 3rd: トリガで連動
+      const LV = [
+        { w: 0.52 + 0.14 * trig, sig: 7.5 + 3 * trig, near: 0.9 },   // 1st: 密着（トリガで増圧）
+        { w: 0.32 + 0.12 * trig, sig: 9 + 6 * trig, near: 1.6 },     // 2nd: カバー（トリガで遠くから連動）
+        { w: 0.22 + 0.16 * trig, sig: 10 + 5 * trig, near: 1.6 },    // 3rd: トリガで連動
+        { w: 0.22, sig: 10, near: 1.6 },                             // それ以降
+      ];
+      let wBase = LV[3].w, sig = LV[3].sig, nearD = LV[3].near;
+      if (rc != null) {
+        const i = Math.min(2, Math.floor(rc)), u = clamp(rc - i, 0, 1);
+        const a = LV[i], b = LV[Math.min(3, i + 1)];
+        wBase = lerp(a.w, b.w, u); sig = lerp(a.sig, b.sig, u); nearD = lerp(a.near, b.near, u);
+      }
       const gate = Math.exp(-(d * d) / (2 * sig * sig));
       // 疲労でプレス強度が落ちる（#44・終盤は寄せ切れない）
       const fatP = E.fatigueOf(match, scenario, team, no, ctx.t);
       wBase *= (1 - 0.35 * fatP);
-      let uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
+      // #178 解放の速度も距離で決める。保持が終わると寄せの重みが 0 へ落ちるが、
+      // 固定 0.6s で落とすと「寄せていた変位 ÷ 0.6s」の速度で戻ってしまう（実測 22m/s）。
+      // 変位が大きいほど長い時間をかけて解放し、戻り速度を PRESS_V 以内に収める。
+      const relDur = Math.max(0.6, (d * wBase) / PRESS_V);
+      const uOutL = N.smooth(clamp((c.seg.t1 - ctx.t) / relDur, 0, 1));
+      const uInL = N.smooth(clamp((ctx.t - c.seg.tf) / Math.max(1.4, relDur), 0, 1));
+      let uPress = Math.min(uInL, uOutL);
       // キックオフ（#51）: ピン中は相手に寄せない（競技規則: 相手はセンターサークル外）。
       // 蹴り出し後に通常ランプで再開 → 窓境界の目標ジャンプによる速度スパイクも消える
       if (c.seg && c.seg.restart === "kickoff") {
@@ -4018,17 +4036,20 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       }
       const w = wBase * gate * uPress;
       if (w > 0.003) {
-        // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m）
-        const near = rank === 0 ? 0.9 : 1.6;
+        // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m・順位の間は補間）
+        const near = nearD;
         const gx = -ctx.dir * HALF_W;
         const gl = Math.hypot(gx - cp.x, 0 - cp.y) || 1;
         let px = cp.x + ((gx - cp.x) / gl) * near;
         let py = cp.y + ((0 - cp.y) / gl) * near;
         // カバーシャドウ（#29）: トリガ中の2ndは保持者→支援重心のレーン上へ
         //（パスコースを消す）。trig 連続 → 目標も連続
-        if (rank === 1 && ctx.pressRank.shadow) {
+        // カバーシャドウは 2 番手の役目。順位の入れ替わりで効き方が跳ばないよう、
+        // rc=1 を頂点とする三角の重みで効かせる。
+        const u2nd = rc == null ? 0 : clamp(1 - Math.abs(rc - 1), 0, 1);
+        if (u2nd > 0 && ctx.pressRank.shadow) {
           const sh = ctx.pressRank.shadow;
-          const uSh = Math.min(1, trig * 1.5);
+          const uSh = Math.min(1, trig * 1.5) * u2nd;
           px = lerp(px, lerp(cp.x, sh.x, 0.4), uSh);
           py = lerp(py, lerp(cp.y, sh.y, 0.4), uSh);
         }
@@ -4074,6 +4095,17 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     ds.sort((a, b) => a.d - b.d || a.no - b.no);
     const m = new Map();
     ds.forEach((e, i) => m.set(e.no, i));
+    // #178 連続順位: 整数の順位は入れ替わりで寄せ方（距離 0.9/1.6m・重み 0.52/0.32/0.22）が
+    // 段階的に切り替わり、目標が跳んで 1 フレームで数メートル飛ぶ。
+    // 「自分より近い味方の人数」を滑らかに数えることで、入れ替わりの瞬間に両者の重みが
+    // 等しくなり、目標が連続に入れ替わる（シャドウの重心を連続化したのと同じ手口）。
+    const RANK_H = 1.2;   // 入れ替わりを滑らかにする距離スケール[m]
+    const soft = new Map();
+    for (const a of ds) {
+      let closer = 0;
+      for (const b of ds) if (b.no !== a.no) closer += N.smooth(clamp((a.d - b.d) / (2 * RANK_H) + 0.5, 0, 1));
+      soft.set(a.no, closer);
+    }
     // カバーシャドウの遮断対象（#29）: 保持者の支援味方の「連続な重心」
     // （最寄り1人だと支援者の入替で目標が跳ぶ → exp(-d/6) 重み付き重心で連続化）
     let shadow = null;
@@ -4091,7 +4123,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       }
       if (sw > 1e-9) shadow = { x: sx / sw, y: sy / sw };
     }
-    const out = { ranks: m, shadow };
+    const out = { ranks: m, soft, shadow };
     if (rankCache.size > 8000) rankCache.clear();
     rankCache.set(key, out);
     return out;

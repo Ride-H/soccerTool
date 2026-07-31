@@ -305,7 +305,7 @@ export const REQUIREMENTS = [
     text: "選手の速度上限 9.9m/s を、どの局面でも 1 フレームも超えない（0.25 秒刻みの全走査）",
     source: "リプレイ評価 KN-03",
     plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "#174 で GK（18.3→5.5m/s）とアンカー収束を解消。残るのはプレス順位の入れ替わり（#178・16 件・最大 13.4m/s）",
+    note: "#174 で GK（18.3→5.5m/s）とアンカー収束、#178 で順位の入れ替わりと寄せの解放を解消。残り 2 件・最大 11.0m/s",
   },
   {
     id: "OPS-06", area: "engine", status: "held",
