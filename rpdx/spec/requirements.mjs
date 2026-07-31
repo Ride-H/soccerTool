@@ -301,11 +301,11 @@ export const REQUIREMENTS = [
       + "決勝 102' の 36m/s → 5.2m/s、退場時 12.7m/s → 7.9m/s",
   },
   {
-    id: "OPS-05", area: "engine", status: "open", issue: 174,
-    text: "記録イベントのアンカー収束と GK の角度圧縮でも速度上限 9.9m/s を超えない",
-    source: "リプレイ評価 KN-02",
+    id: "OPS-05", area: "engine", status: "open", issue: 178,
+    text: "選手の速度上限 9.9m/s を、どの局面でも 1 フレームも超えない（0.25 秒刻みの全走査）",
+    source: "リプレイ評価 KN-03",
     plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "実測の最大は GK の角度圧縮で 15.7m/s（JPN#1）。#173 の修正後に残った唯一の型。台帳 KN-02",
+    note: "#174 で GK（18.3→5.5m/s）とアンカー収束を解消。残るのはプレス順位の入れ替わり（#178・16 件・最大 13.4m/s）",
   },
   {
     id: "OPS-06", area: "engine", status: "held",

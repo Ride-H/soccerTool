@@ -3816,7 +3816,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     // 対称ガウスだと「シュート後の受け」が時間を遡って走路を先食いしてしまう。
     for (const a of playerAnchorsOf(match, scenario)) {
       if (a.team !== team || a.no !== no) continue;
-      const sg = t < a.t ? (a.sigmaL ?? a.sigma ?? 6) : (a.sigmaR ?? a.sigma ?? 6);
+      const sgRaw = t < a.t ? (a.sigmaL ?? a.sigma ?? 6) : (a.sigmaR ?? a.sigma ?? 6);
+      // #174: 収束窓は「距離から決める」。ガウス窓の傾きは最大 1/(σ√e) なので、
+      // 遠いアンカーへ小さい σ で寄せると必要な速度が上限を超える（実測 10〜13m/s）。
+      // σ に下限を入れて、寄せに使う速度を ANCHOR_V 以内へ収める。窓の中心は動かさないので
+      // w(a.t)=1 のまま＝アンカー時刻の位置一致（記録イベントの再現）は保たれる。
+      const dA = Math.hypot(a.x - x, a.y - y);
+      const sg = Math.max(sgRaw, (dA * GAUSS_SLOPE) / ANCHOR_V);
       const w = N.gauss(t, a.t, sg);
       if (w > 0.004) { x = lerp(x, a.x, w); y = lerp(y, a.y, w); }
     }
@@ -3927,6 +3933,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     return best && best.w > 0.01 ? best : null;
   };
 
+  // #174 速度上限を守るための取り分。基礎運動（帯域制限ノイズ）と合わせて 9.9m/s を超えないようにする。
+  const GAUSS_SLOPE = 1 / Math.sqrt(Math.E);   // ガウス窓の最大傾き（×1/σ）
+  const ANCHOR_V = 6.0;                        // アンカーへの寄せに割ける速度 [m/s]
+  //   小さくするほど上限は守られるが、記録のスプリント再現（佐野29'の独走 ≥20km/h）が壊れる。
+  //   6.0 は「再現テストが全て通る中で最も小さい値」として実測で決めた。
+  const GK_SHARP = 0.35;                       // GK が実ボールへ研ぐ割合（残りは平滑ボール）
+
   const playerPos = (match, scenario, team, no, slot, t, ctx) => {
     const bctx = { half: ctx.half, dir: ctx.dir, P: ctx.P, ballS: ctx.ballS };
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
@@ -3938,9 +3951,15 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     //   実ボールへの深度クランプはしない（速度上限を破らないための設計）。
     if (slot.role === "GK" && ball) {
       const gx = -ctx.dir * HALF_W;
-      const dG = Math.hypot(gx - ball.x, ball.y) || 1;
       const depth = Math.hypot(gx - x, y);                  // 現在の飛び出し量
-      const ty = clamp((ball.y / dG) * depth, -8, 8);       // 実ボール二等分線の横位置
+      // #174: 二等分線の横位置は**平滑ボール**を主に取る。実ボールは 20m/s で横へ流れるので、
+      // それに 45% 追従させると GK 自身が上限を超えて滑った（実測 15.7m/s）。
+      // 実ボールへの「研ぎ」は GK_SHARP の割合だけ残す — 角度圧縮の意図（#31）は保ちつつ、
+      // 速い横移動には付いていかない。速さで重みを絞る案は、重みの変化自体が速くなって悪化した。
+      const bs = ctx.ballS;
+      const dGs = Math.hypot(gx - bs.x, bs.y) || 1;
+      const dGr = Math.hypot(gx - ball.x, ball.y) || 1;
+      const ty = clamp(lerp((bs.y / dGs) * depth, (ball.y / dGr) * depth, GK_SHARP), -8, 8);
       y = lerp(y, ty, 0.45);
     }
 
