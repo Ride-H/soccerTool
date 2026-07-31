@@ -254,8 +254,9 @@ export const REQUIREMENTS = [
     id: "VIS-05", area: "render", status: "held",
     text: "素肌は顔・腕・手・腿で同じ材質（膝下だけソックス）",
     source: "指摘 2026-07-28",
-    checks: [{ kind: "test", file: "charmesh.test.mjs", name: "" }, { kind: "tool", cmd: "character-lab/tools/audit.mjs" }],
-    note: "AO のばらつき上限は character-lab の造形監査 D13 で固定",
+    checks: [{ kind: "test", file: "charmesh.test.mjs", name: "" }, { kind: "test", file: "chargait.test.mjs", name: "肌: 顔/腕/手/腿が同じ素肌 ID・膝下だけソックス" }],
+    note: "AO のばらつき上限は共有コアの造形監査（character-lab 側 D13）でも見ているが、"
+      + "検証手段はこのリポジトリの中で完結させる（外部リポジトリへの参照は門が拒否する）",
   },
   {
     id: "VIS-06", area: "render", status: "held",
@@ -307,6 +308,31 @@ export const REQUIREMENTS = [
     source: "リプレイ評価",
     plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
     note: "決勝の ESP は守備局面の標本が無く NaN。NaN>45 は false なので帯の検査を静かに通過していた",
+  },
+
+  /* ---------------- ライブ実況（中継と並走） ---------------- */
+  {
+    id: "LIVE-01", area: "engine", status: "held",
+    text: "ライブの時計は壁時計の純関数（開始・中断・再開・中継への同期が決定論）",
+    source: "指摘 2026-07-31",
+    checks: [{ kind: "test", file: "live.test.mjs", name: "時計: 開始・一時停止・再開・中継への同期が壁時計の純関数" }],
+  },
+  {
+    id: "LIVE-02", area: "engine", status: "held",
+    text: "入力（得点・シュート・CK・交代）が世界と解釈レイヤーへ反映される・直前の入力を取り消せる",
+    source: "指摘 2026-07-31",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "反映: 入力した得点はスコア・イベント・危険度に効く" },
+      { kind: "test", file: "live.test.mjs", name: "交代: 入力した交代が名簿へ反映される" },
+      { kind: "test", file: "live.test.mjs", name: "入力: イベントと交代は時刻順に保たれ" },
+    ],
+  },
+  {
+    id: "LIVE-03", area: "engine", status: "open", issue: 177,
+    text: "ライブでイベントを入力しても、既に見た過去（入力時刻 − PRE_ROLL より前）の軌道が変わらない",
+    source: "指摘 2026-07-31",
+    plan: { kind: "test", file: "live.test.mjs", name: "因果（既知の制限 #177）" },
+    note: "50 分に得点を入れると 1 分時点の選手が 13.5m ずれる。保持チェーンが試合全体で引き直されるため",
   },
 
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */

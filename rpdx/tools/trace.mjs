@@ -37,8 +37,11 @@ const checkExists = (req, c) => {
   } else if (c.kind === "visual") {
     if (!smokeSrc.includes(c.scenario)) ng(req, `視覚シナリオが見つからない — ${c.scenario}`);
   } else if (c.kind === "tool") {
-    const p = join(root, c.cmd.startsWith("character-lab/") ? join("..", "..", "character-lab", c.cmd.slice("character-lab/".length)) : c.cmd);
-    if (!existsSync(p)) ng(req, `ツールが見つからない — ${c.cmd}`);
+    // 検証手段はこのリポジトリの中で完結していること。外部（内部リポジトリや個人環境）を
+    // 指すと、公開リポ単体の CI では必ず落ちる／黙って検証されなくなる。
+    if (c.cmd.startsWith("/") || c.cmd.startsWith("..") || c.cmd.includes("character-lab"))
+      return ng(req, `検証手段がリポジトリの外を指している — ${c.cmd}`);
+    if (!existsSync(join(root, c.cmd))) ng(req, `ツールが見つからない — ${c.cmd}`);
   } else if (c.kind === "manual") {
     if (!c.why) ng(req, "manual には why（なぜ自動化できないか）が必要");
   } else {

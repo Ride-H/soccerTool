@@ -11,7 +11,7 @@ const dataPacks = readdirSync(dir).filter((f) => /^data_match.*\.mjs$/.test(f)).
 export const SRC_ORDER = [
   "version.mjs", "noise.mjs", "formations.mjs", ...dataPacks,
   "engine.mjs", "danger.mjs", "subs.mjs", "sim.mjs", "psy.mjs",
-  "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "policy.mjs", "layers.mjs", "generic.mjs",
+  "duel.mjs", "physio.mjs", "filter.mjs", "uq.mjs", "tactics.mjs", "opponent.mjs", "scenlib.mjs", "policy.mjs", "layers.mjs", "generic.mjs", "live.mjs",
 ];
 export const evalFile = (path) => vm.runInThisContext(readFileSync(path, "utf8"), { filename: path });
 for (const f of SRC_ORDER) evalFile(join(dir, f));
