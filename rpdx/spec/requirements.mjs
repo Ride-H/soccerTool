@@ -336,11 +336,12 @@ export const REQUIREMENTS = [
     ],
   },
   {
-    id: "LIVE-03", area: "engine", status: "open", issue: 177,
-    text: "ライブでイベントを入力しても、既に見た過去（入力時刻 − PRE_ROLL より前）の軌道が変わらない",
-    source: "指摘 2026-07-31",
-    plan: { kind: "test", file: "live.test.mjs", name: "因果（既知の制限 #177）" },
-    note: "50 分に得点を入れると 1 分時点の選手が 13.5m ずれる。保持チェーンが試合全体で引き直されるため",
+    id: "LIVE-03", area: "engine", status: "held",
+    text: "ライブでイベントを入力しても、既に見た過去（入力時刻 − PRE_ROLL より前）の軌道が 1mm も変わらない",
+    source: "issue#177",
+    checks: [{ kind: "test", file: "live.test.mjs", name: "因果: 入力しても PRE_ROLL 秒より前の世界は 1mm も変わらない" }],
+    note: "チェーンの抽選シードを「その時刻までに起きたこと」だけから作る。収録パックは較正済みの成果物なので"
+      + "従来のシナリオ全体ハッシュのまま（世界は bit 不変・golden 安全）",
   },
 
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */

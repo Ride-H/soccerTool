@@ -157,7 +157,10 @@
     for (const sb of s.subs) h = N.seedOf(`${h}|s${sb.t}|${sb.team}|${sb.out}|${sb.in}`);
     return {
       ...base,
-      meta: { ...base.meta, id: `live-${s.cfg.seed || kA + kB}-${(h >>> 0).toString(36)}`, score, live: true, calibrated: false },
+      // id は入力内容で変える（各層のキャッシュが meta.id で引くため。同じ ID だと古い世界が返り続ける）。
+      // seedId は入力に依らず固定＝世界生成のシードは変わらない（過去が作り直されない・#177）。
+      meta: { ...base.meta, id: `live-${s.cfg.seed || kA + kB}-${(h >>> 0).toString(36)}`,
+        seedId: `live-${s.cfg.seed || kA + kB}`, score, live: true, calibrated: false },
       events, ballAnchors, possessionKP, subsActual,
     };
   };

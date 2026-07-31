@@ -68,39 +68,38 @@ test("不変: 操作は元のセッションを書き換えない", () => {
   assert.equal(JSON.stringify(s0), snapshot);
 });
 
-test("因果（既知の制限 #177）: 入力すると過去の軌道も作り直される — 記録は保たれる", () => {
+test("因果: 入力しても PRE_ROLL 秒より前の世界は 1mm も変わらない", () => {
   let s = L.withClock(L.create(cfg()), "start", T0);
   const before = L.matchOf(s);
   const scB = E.actualScenario(before);
   const T = 3000;
-  const probe = [60, 600, 1500, 2400];
-  const posOf = (m, sc, t) => E.stateAt(m, sc, t).players.map((p) => ({ k: p.team + p.no, x: p.x, y: p.y }));
-  const snap = probe.map((t) => posOf(before, scB, t));
+  const probe = [60, 600, 1500, 2400, T - L.PRE_ROLL - 10];
+  const posOf = (m, sc, t) => E.stateAt(m, sc, t).players.map((p) => `${p.team}${p.no}:${p.x},${p.y}`).join("|");
+  const ballOf = (m, sc, t) => JSON.stringify(E.stateAt(m, sc, t).ball);
+  const snapP = probe.map((t) => posOf(before, scB, t));
+  const snapB = probe.map((t) => ballOf(before, scB, t));
 
   s = L.withEvent(s, { t: T, type: "goal", team: "TMA", no: 9, label: "GOAL" });
   const after = L.matchOf(s);
   const scA = E.actualScenario(after);
-
-  // 保たれるもの: 試合の骨格・入力より前に記録した出来事・スコアの整合
-  assert.equal(after.time.h2.start, before.time.h2.start);
-  for (const type of ["kickoff", "halftime", "fulltime"])
-    assert.deepEqual(after.events.filter((e) => e.type === type).map((e) => e.t),
-      before.events.filter((e) => e.type === type).map((e) => e.t), `${type} の時刻`);
-  assert.deepEqual(after.meta.score, { TMA: 1, TMB: 0 });
-
-  // 保たれないもの: 入力より前の選手/ボールの軌道（保持チェーンが試合全体で作り直されるため）。
-  // ライブでは「さっき見た前半」と食い違うので #177 で追う。ここでは現状を明示的に固定する。
-  let maxDrift = 0;
   probe.forEach((t, i) => {
-    const now = posOf(after, scA, t), was = new Map(snap[i].map((p) => [p.k, p]));
-    for (const p of now) { const q = was.get(p.k); if (q) maxDrift = Math.max(maxDrift, Math.hypot(p.x - q.x, p.y - q.y)); }
+    assert.equal(posOf(after, scA, t), snapP[i], `t=${t} の選手配置が後から変わった`);
+    assert.equal(ballOf(after, scA, t), snapB[i], `t=${t} のボールが後から変わった`);
   });
-  assert.ok(maxDrift > 1, `過去が作り直される現状を固定（最大 ${maxDrift.toFixed(1)}m）— 直ったらこのテストを因果の保証へ書き換える`);
-  assert.ok(maxDrift < 40, `ピッチ幅を超える暴れ方はしていない（${maxDrift.toFixed(1)}m）`);
-
-  // 決定論は保たれる: 同じセッションなら何度取っても同じ
-  const again = L.matchOf(s);
-  assert.deepEqual(posOf(again, E.actualScenario(again), 600), posOf(after, scA, 600));
+  // 窓の中は変わってよい（変わらなければ入力が効いていない）
+  assert.notEqual(ballOf(after, scA, T - 5), ballOf(before, scB, T - 5), "得点直前は反応する");
+  // 種類を問わず因果が成り立つ（ファウルのように世界へ直接効かない型でも過去を触らない）
+  for (const type of ["foul", "corner", "shot"]) {
+    const s2 = L.withEvent(L.withClock(L.create(cfg()), "start", T0), { t: 5000, type, team: "TMA", no: 9 });
+    const m2 = L.matchOf(s2), sc2 = E.actualScenario(m2);
+    assert.equal(posOf(m2, sc2, 600), posOf(before, scB, 600), `${type} を足したら t=600 が変わった`);
+  }
+  // 交代も同じ（名簿は変わるが、それ以前の世界は不変）
+  const xi = Object.values(before.teams.TMA.phases[0].assign);
+  const bench = before.teams.TMA.squad.map((p) => p.no).find((n) => !xi.includes(n));
+  const s3 = L.withSub(L.withClock(L.create(cfg()), "start", T0), { t: 4000, team: "TMA", out: xi[5], in: bench });
+  const m3 = L.matchOf(s3), sc3 = E.actualScenario(m3);
+  assert.equal(posOf(m3, sc3, 600), posOf(before, scB, 600), "交代を足したら t=600 が変わった");
 });
 
 test("反映: 入力した得点はスコア・イベント・危険度に効く", () => {

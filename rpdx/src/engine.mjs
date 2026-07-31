@@ -321,9 +321,13 @@
 
   /* --------------------- ポゼッション波形 P(t) ∈ [-1,1] --------------------- */
   // P>0: possessionPlus チームの攻勢。KPスプライン + 小ノイズ（帯域制限）
+  // #177 世界生成のシードに使う試合 ID。ライブは入力のたびに meta.id を変える（キャッシュ無効化のため）
+  // ので、そのまま種にすると入力ごとに試合全体が別物になる。seedId があればそちらを使う。
+  const seedIdOf = (match) => match.meta.seedId || match.meta.id;
+
   E.possessionAt = (match, t, scenario) => {
     const base = N.spline(match.possessionKP, t)[0];
-    const n = 0.10 * N.vnoise1(N.seedOf(match.meta.id + "poss"), t, 37);
+    const n = 0.10 * N.vnoise1(N.seedOf(seedIdOf(match) + "poss"), t, 37);
     let p = base + n;
     // #81: 数的不利の保持シフト — 退場チームから相手側へ（2分ランプで浸透・決定論）。
     //   scenario 未指定/outages 無しは従来値と完全一致（golden安全）。
@@ -398,7 +402,7 @@
 
   // ブロック移動用の平滑ボール（帯域制限 — 速度寄与を抑える・シナリオ非依存）
   E.ballSlowAt = (match, t) => {
-    const seed = N.seedOf(match.meta.id + "ball");
+    const seed = N.seedOf(seedIdOf(match) + "ball");
     const P = E.possessionAt(match, t);
     const half = E.halfOf(match, t);
     const plus = match.possessionPlus || E.teamKeys(match)[0];
@@ -559,7 +563,32 @@
     chainBuilding = true;   // 生成中はチェーン由来アンカーを参照しない（循環回避・決定論）
     try {
     const range = E.playedRange(match);
-    const seed = N.seedOf(match.meta.id + "chain") ^ E.scenarioHash(scenario);
+    // #177 因果シード: 抽選のシードは「その時刻までに起きたこと」だけから作る。
+    // シナリオ全体のハッシュを使うと、後から足したイベント（ライブ入力の得点など）で
+    // 試合開始直後まで系列が引き直され、既に見た過去の軌道が変わってしまう。
+    // 収録パックは較正済みの成果物なので、従来どおりシナリオ全体のハッシュで種を作る
+    // （世界は bit 不変・golden 安全）。ライブ session だけ因果シードに切り替える。
+    const causal = !!match.meta.live;
+    const seed0 = causal ? N.seedOf(seedIdOf(match) + "chain")
+      : (N.seedOf(match.meta.id + "chain") ^ E.scenarioHash(scenario));
+    const causalEvents = [];
+    for (const ev of E.eventsOf(match, scenario))
+      causalEvents.push({ t: ev.t, k: `e${ev.type}${ev.team || ""}${ev.no ?? ""}` });
+    for (const k of E.teamKeys(match)) {
+      for (const sb of scenario.subs[k] || []) causalEvents.push({ t: sb.t, k: `s${k}${sb.out}${sb.in}` });
+      for (const o of E.outagesOf(match, scenario, k)) causalEvents.push({ t: o.t, k: `o${k}${o.no}` });
+      for (const ph of E.phasesOf(match, scenario, k)) if (ph.from > 0) causalEvents.push({ t: ph.from, k: `p${k}${ph.shape}` });
+    }
+    causalEvents.sort((a, b) => a.t - b.t || (a.k < b.k ? -1 : 1));
+    let causalIdx = 0, seed = seed0;
+    const seedUpTo = (tt) => {   // tt までに起きたことを畳み込む（過去は不変・単調）
+      if (!causal) return seed;
+      while (causalIdx < causalEvents.length && causalEvents[causalIdx].t <= tt) {
+        seed = N.seedOf(`${seed}|${causalEvents[causalIdx].k}`);
+        causalIdx++;
+      }
+      return seed;
+    };
     const keys = E.teamKeys(match);
     const plus = match.possessionPlus || keys[0];
     const minus = keys.find(k => k !== plus);
@@ -628,6 +657,7 @@
     let forceRef = null;    // コーナー後の受け手参照点（ゴール前 = クロスの落下点）
     const shareGain = match.possessionShareGain ?? 0.385;  // パック毎の較正ノブ
     while (t < range.t1 - 1) {
+      seedUpTo(t);   // #177: この時刻までのイベントだけがこれ以降の抽選に影響する
       const P = E.possessionAt(match, t, scenario);
       const share = clamp(0.5 + P * shareGain, 0.07, 0.93); // 実測支配率へ較正（定常分布）
       const u = N.hash2(seed, idx * 17 + 3);
@@ -966,7 +996,7 @@
       const bs = E.ballSlowAt(match, t);
       return { x: bs.x, y: bs.y, z: 0.11 };
     }
-    const seed = N.seedOf(match.meta.id + "dribble");
+    const seed = N.seedOf(seedIdOf(match) + "dribble");
     const holderPos = (seg, tt) => {
       const p = basePosOf(match, scenario, seg.team, seg.no, seg.slot, tt);
       return {
@@ -1095,7 +1125,7 @@
       z = bounceHeight(u, h, BALL_PHYS.REST, hops);
       // マグヌス: 飛行方向直交の弓なり（回転符号はセグメント決定・端点は不変）
       const dx = (b2.x - a2.x) / segLen, dy = (b2.y - a2.y) / segLen;
-      const spin = N.hash2(N.seedOf(match.meta.id + "spin"), lo) < 0.5 ? -1 : 1;
+      const spin = N.hash2(N.seedOf(seedIdOf(match) + "spin"), lo) < 0.5 ? -1 : 1;
       const bow = spin * Math.min(BALL_PHYS.MAX_BOW, segLen * BALL_PHYS.BOW_K) * Math.sin(Math.PI * u);
       ox = -dy * bow; oy = dx * bow;
     } else {
@@ -1255,7 +1285,7 @@
 
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
     const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * fat);
-    const ps = N.seedOf(match.meta.id + team + no);
+    const ps = N.seedOf(seedIdOf(match) + team + no);
     x += N.fbm1(ps, t, [
       { amp: amp * 0.5, period: 42 }, { amp: amp * 0.42, period: 14 },
       { amp: amp * 0.5, period: 5.6 }, { amp: amp * 0.28, period: 3.1 }]);
@@ -1771,7 +1801,7 @@
         const ehc = editHoldOf(scenario, carrier.team, carrier.no, t);
         if (ehc) w = Math.max(w, ehc.w * N.smooth(clamp(carrier.u * 1.6)));
         if (w > 0.02) {
-          const dseed = N.seedOf(match.meta.id + "dribble");
+          const dseed = N.seedOf(seedIdOf(match) + "dribble");
           const ax = cp.x + 0.7 * N.vnoise1(dseed + carrier.no * 7, t, 2.9);
           const ay = cp.y + 0.7 * N.vnoise1(dseed + 31 + carrier.no * 7, t, 3.1);
           ball.x = lerp(ball.x, ax, w);
