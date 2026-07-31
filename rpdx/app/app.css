@@ -513,3 +513,33 @@ input[type="text"], input[type="search"], textarea {
 }
 input[type="text"]::placeholder, textarea::placeholder { color: #8a96ad; }
 input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-color: #7fb2ff; outline: none; }
+
+/* ---- ライブ実況（#180）: 試合を見ながら片手で押すので、標的は 44px 以上 ---- */
+/* ライブ中は「見ながら押す」ので、画面下端に固定して親指の届く位置へ置く。
+   上部の HUD（時計・スコア）に重なると押せなくなるため、重なりは ui-probe で常時検査する。 */
+#liveBar {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+  border-color: var(--gold-line); background: rgba(11,15,22,.96);
+  position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 60;
+  max-height: 62vh; overflow-y: auto;
+  box-shadow: 0 -8px 28px rgba(0,0,0,.45);
+}
+@media (min-width: 900px) { #liveBar { left: auto; right: 12px; width: 420px; } }
+#liveHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#liveClock { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ink); }
+#liveDot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; flex: none; }
+#liveBar.running #liveDot { background: #e5533d; box-shadow: 0 0 0 4px rgba(229,83,61,.18); }
+#liveTeams, #liveEvents { display: flex; gap: 8px; flex-wrap: wrap; }
+.live-btn, #liveTeams .btn, #liveEvents .btn {
+  min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 13px; border-radius: 10px;
+}
+#liveEvents .btn { flex: 1 1 auto; justify-content: center; }
+#liveTeams .btn.on { border-width: 2px; }
+/* スタンドで読む前提なので、ライブバー内の補助文字は小さくしない（実測で 9〜10px だった） */
+#liveBar .eyebrow { font-size: 12px; letter-spacing: .04em; }
+#liveLog { min-height: 18px; font-size: 12px; line-height: 1.5; }
+#liveSubPick { display: flex; flex-direction: column; gap: 6px; }
+#liveSubPick .hint { font-size: 12px; }
+.live-nums { display: flex; gap: 6px; flex-wrap: wrap; }
+.live-nums .btn { min-width: 44px; min-height: 44px; justify-content: center; font-size: 14px; padding: 8px; }
+@media (max-width: 560px) { #liveEvents .btn { flex: 1 1 44%; } }

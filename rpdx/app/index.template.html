@@ -215,10 +215,28 @@
   <div id="inspEditForm" style="display:none;margin-top:6px"></div>
 </div>
 
+<!-- ライブ実況（中継を見ながら数タップ・#180） -->
+<div id="liveBar" class="panel" style="display:none" role="region" aria-label="ライブ実況（live commentary）">
+  <div id="liveHead">
+    <span id="liveDot" aria-hidden="true"></span>
+    <b id="liveClock" class="num">0:00</b>
+    <span class="eyebrow" id="liveState">停止中</span>
+    <button class="btn live-btn" id="liveStart" aria-label="試合開始 / 一時停止（start or pause）">▶ 開始</button>
+    <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
+    <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
+    <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
+  </div>
+  <div id="liveTeams" role="group" aria-label="入力するチーム（team to record）"></div>
+  <div id="liveEvents" role="group" aria-label="いま起きたこと（what just happened）"></div>
+  <div id="liveSubPick" style="display:none"></div>
+  <div id="liveLog" class="hint"></div>
+</div>
+
 <!-- タイムライン -->
 <div id="timelineWrap" class="panel">
   <div id="tlHead">
     <button class="btn" id="btnPlay" aria-label="再生 / 停止（play or pause）">▶ 再生</button>
+    <button class="btn" id="btnLive" aria-label="ライブ実況をはじめる（start live commentary）">🔴 <span data-i18n="ライブ">ライブ</span></button>
     <div class="speedgrp" id="speedGrp" role="group" aria-label="再生速度（playback speed）"></div>
     <button class="btn" id="btnPrevEv" aria-label="前のイベントへ（previous event）">|◀ <span data-i18n="前">前</span></button>
     <button class="btn" id="btnNextEv" aria-label="次のイベントへ（next event）">▶| <span data-i18n="次">次</span></button>

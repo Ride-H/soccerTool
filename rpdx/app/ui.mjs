@@ -227,7 +227,7 @@ self.onmessage = (e) => {
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
       "背番号": "Kit №", "リプレイ": "Replay", "品質": "Quality",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
-      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next", "ライブ": "Live",
       "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
       "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
       "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
@@ -1916,6 +1916,167 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     applyBundle(text, "端末");
   });
 
+  /* --------------------------- ライブ実況（#180） ---------------------------
+     中継や自チームの試合を見ながら、数タップで危険度と戦術助言を出すモード。
+     世界の生成は RPDX.live（純関数のセッション）に任せ、ここは画面と入力だけを持つ。
+     再構築は「入力があったとき」だけ（毎フレーム作り直すと重いうえ、キャッシュも効かない）。 */
+  const LIVE_EVENTS = [
+    { k: "goal", label: "⚽ 得点", type: "goal" },
+    { k: "shot", label: "🎯 シュート", type: "shot" },
+    { k: "corner", label: "🚩 CK", type: "corner" },
+    { k: "yellow", label: "🟨 警告", type: "yellow" },
+    { k: "red", label: "🟥 退場", type: "red" },
+    { k: "sub", label: "🔁 交代", type: "sub" },
+  ];
+  const liveState = { session: null, team: null, lastBuilt: null };
+
+  const liveTimeNow = () => (liveState.session ? R.live.tAt(liveState.session, Date.now()) : 0);
+
+  const liveRebuild = () => {
+    const m = R.live.matchOf(liveState.session);
+    liveState.lastBuilt = m;
+    setMatch(m);
+    App.playing = false;              // 時刻は壁時計が決めるので、通常の再生は使わない
+  };
+
+  const liveLog = (msg) => { const el = $("#liveLog"); if (el) el.textContent = msg; };
+
+  const liveRenderBar = () => {
+    const bar = $("#liveBar");
+    if (!bar) return;
+    bar.style.display = liveState.session ? "" : "none";
+    if (!liveState.session) return;
+    const running = R.live.isRunning(liveState.session);
+    bar.classList.toggle("running", running);
+    $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
+    $("#liveState").textContent = running ? "進行中" : "停止中";
+    // チーム選択（どちらの出来事かを先に選ぶ＝入力は 2 タップで完了）
+    const tg = $("#liveTeams");
+    if (tg.dataset.built !== App.match.meta.id) {
+      tg.innerHTML = "";
+      for (const k of teamOrder()) {
+        const b = document.createElement("button");
+        b.className = "btn" + (liveState.team === k ? " on" : "");
+        b.textContent = App.match.teams[k].name || k;
+        b.onclick = () => { liveState.team = k; liveRenderBar(); };
+        tg.appendChild(b);
+      }
+      tg.dataset.built = App.match.meta.id;
+    } else {
+      [...tg.children].forEach((b, i) => b.classList.toggle("on", teamOrder()[i] === liveState.team));
+    }
+    const eg = $("#liveEvents");
+    if (!eg.dataset.built) {
+      for (const ev of LIVE_EVENTS) {
+        const b = document.createElement("button");
+        b.className = "btn"; b.textContent = ev.label;
+        b.onclick = () => liveAdd(ev);
+        eg.appendChild(b);
+      }
+      eg.dataset.built = "1";
+    }
+  };
+
+  // 交代は「誰と誰か」が要るので、番号を押して選ぶ 2 段の入力にする。
+  // 数字入力（prompt）はスタンドで使えないので、押せる大きさのボタンで並べる。
+  const livePickSub = () => {
+    const wrap = $("#liveSubPick");
+    const t = liveTimeNow();
+    const team = liveState.team;
+    const on = E.stateAt(App.match, E.actualScenario(App.match), t).players
+      .filter((p) => p.team === team && p.onPitch).map((p) => p.no).sort((a, b) => a - b);
+    const bench = App.match.teams[team].squad.map((p) => p.no).filter((n) => !on.includes(n)).sort((a, b) => a - b);
+    let out = null;
+    const draw = () => {
+      wrap.innerHTML = "";
+      const row = (title, nums, fn, sel) => {
+        const h = document.createElement("div"); h.className = "hint"; h.textContent = title; wrap.appendChild(h);
+        const g = document.createElement("div"); g.className = "live-nums";
+        for (const n of nums) {
+          const b = document.createElement("button");
+          b.className = "btn" + (sel === n ? " on" : ""); b.textContent = n;
+          b.onclick = () => fn(n);
+          g.appendChild(b);
+        }
+        wrap.appendChild(g);
+      };
+      row("退く選手（out）", on, (n) => { out = n; draw(); }, out);
+      if (out != null) row("入る選手（in）", bench, (n) => {
+        liveState.session = R.live.withSub(liveState.session, { t, team, out, in: n });
+        wrap.style.display = "none"; wrap.innerHTML = "";
+        liveRebuild(); liveRenderBar();
+        liveLog(`${App.match.teams[team].name} #${out} → #${n} の交代（${E.clockAt(App.match, t).disp}）を記録`);
+      }, null);
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "やめる";
+      cancel.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+      wrap.appendChild(cancel);
+    };
+    wrap.style.display = "";
+    draw();
+  };
+
+  const liveAdd = (ev) => {
+    if (!liveState.session) return;
+    if (!liveState.team) { liveLog("どちらのチームの出来事か、先に選んでください"); return; }
+    if (ev.type === "sub") { livePickSub(); return; }
+    const t = liveTimeNow();
+    liveState.session = R.live.withEvent(liveState.session, { t, type: ev.type, team: liveState.team, label: ev.label });
+    liveRebuild();
+    liveLog(`${App.match.teams[liveState.team].name} の ${ev.label}（${E.clockAt(App.match, t).disp}）を記録`);
+    liveRenderBar();
+  };
+
+  const liveEnter = () => {
+    const cfg = G.template();
+    liveState.session = R.live.create(cfg);
+    liveState.team = null;
+    liveRebuild();
+    liveRenderBar();
+    liveLog("チームを選び、開始を押してから、起きたことをタップしてください");
+  };
+
+  const liveExit = () => {
+    liveState.session = null;
+    $("#liveBar").style.display = "none";
+    $("#liveTeams").dataset.built = "";
+    setMatch(getTemplateMatch());
+  };
+
+  const bindLive = () => {
+    const btn = $("#btnLive");
+    if (btn) btn.onclick = () => (liveState.session ? liveExit() : liveEnter());
+    $("#liveStart").onclick = () => {
+      const running = R.live.isRunning(liveState.session);
+      liveState.session = R.live.withClock(liveState.session, running ? "pause" : (liveState.session.clock.length ? "resume" : "start"), Date.now());
+      liveRenderBar();
+    };
+    $("#liveSync").onclick = () => {
+      const cur = Math.round(liveTimeNow() / 60);
+      const min = prompt("中継の経過時間（分）を入れてください", String(cur));
+      if (min == null) return;
+      const v = Number(min);
+      if (!Number.isFinite(v) || v < 0 || v > 130) { liveLog("0〜130 の数字で入れてください"); return; }
+      liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
+      liveLog(`時計を ${v} 分に合わせました`);
+      liveRenderBar();
+    };
+    $("#liveUndo").onclick = () => {
+      liveState.session = R.live.undo(liveState.session);
+      liveRebuild(); liveRenderBar(); liveLog("直前の入力を取り消しました");
+    };
+    $("#liveExit").onclick = liveExit;
+  };
+
+  // 毎フレーム: 壁時計から試合時刻を進める（世界の作り直しはしない）
+  const liveTick = () => {
+    if (!liveState.session) return;
+    const range = E.playedRange(App.match);
+    App.t = clamp(liveTimeNow(), 0, range.t1);
+    const el = $("#liveClock");
+    if (el) el.textContent = E.clockAt(App.match, App.t).disp;
+  };
+
   const setMatch = (m) => {
     App.match = m;
     App.scenario = null; App.scenarios = [];
@@ -2284,6 +2445,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       curveReadyAt = frameCount;
       lastHUD = 0;
     }
+    liveTick();                                        // #180 ライブ中は壁時計が時刻を決める
     const range = E.playedRange(App.match);
     const t0 = App.t;
     if (App.playing) {
@@ -2542,6 +2704,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   // 破棄し、以後の仮想時間フレーム列を決定論化する）
   const startLoop = () => {
     if (maxFrames !== Infinity && renderer) renderer.setPreset(App.camPreset || "broadcast", true);
+    bindLive();                                        // #180 ライブ実況の操作を繋ぐ
+    if (urlq.get("live") === "1") liveEnter();         // ?live=1 で直接ライブへ（検証・ブックマーク用）
     requestAnimationFrame(loop);
   };
   const startWhenReady = () => {

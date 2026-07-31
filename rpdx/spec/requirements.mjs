@@ -344,6 +344,32 @@ export const REQUIREMENTS = [
       + "従来のシナリオ全体ハッシュのまま（世界は bit 不変・golden 安全）",
   },
 
+  {
+    id: "LIVE-04", area: "ux", status: "held",
+    text: "ライブ実況モードに入る/出る手段があり、ライブ中であることが画面から一目で分かる",
+    source: "issue#180",
+    checks: [{ kind: "test", file: "liveui.test.mjs", name: "ライブモードの開始と終了" }],
+  },
+  {
+    id: "LIVE-05", area: "ux", status: "held",
+    text: "中継に合わせて時計を操作できる（開始・一時停止・再開・時刻合わせ）",
+    source: "issue#180",
+    checks: [{ kind: "test", file: "liveui.test.mjs", name: "時計の操作が session へ反映される" }],
+  },
+  {
+    id: "LIVE-06", area: "ux", status: "held",
+    text: "得点・シュート・CK・交代・カードをその場で入力でき、直前の入力を取り消せる",
+    source: "issue#180",
+    checks: [{ kind: "test", file: "liveui.test.mjs", name: "イベント入力と取り消し" }],
+  },
+  {
+    id: "LIVE-07", area: "ux", status: "held",
+    text: "ライブ操作の標的は 44px 以上・他の要素に覆われない・文字は 11px 以上・コントラスト AA",
+    source: "issue#180",
+    checks: [{ kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" }],
+    note: "目視だけに頼らず実測する。標的の重なりは elementFromPoint で検査（大きさだけ見ても覆われていたら押せない）",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "open", issue: 105,
