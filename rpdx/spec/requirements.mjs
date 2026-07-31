@@ -289,18 +289,23 @@ export const REQUIREMENTS = [
   },
 
   {
-    id: "OPS-04", area: "engine", status: "open", issue: 173,
-    text: "交代・退場の瞬間にスロットの割り当て直しで選手が瞬間移動しない（速度上限を 1 フレームも破らない）",
-    source: "リプレイ評価 KN-01",
-    plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "決勝 102' の交代で残っていた選手が 1 秒に 36m 移動（0.25 秒刻みでは 52m/s 相当）。台帳 rpdx/spec/replay-known.mjs KN-01",
+    id: "OPS-04", area: "engine", status: "held",
+    text: "交代・退場でスロットが割り当て直されても、ピッチに残る選手が瞬間移動しない",
+    source: "issue#173",
+    checks: [
+      { kind: "test", file: "outage.test.mjs", name: "退場後の交代はスロットのスワップだけ" },
+      { kind: "test", file: "outage.test.mjs", name: "退場の瞬間もシェイプ切替のブレンドが効く" },
+      { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
+    ],
+    note: "交代と退場を時刻順に畳むよう変更（以前は全交代→退場リシェイプの順で、後の交代が再割当を引き直していた）。"
+      + "決勝 102' の 36m/s → 5.2m/s、退場時 12.7m/s → 7.9m/s",
   },
   {
     id: "OPS-05", area: "engine", status: "open", issue: 174,
-    text: "記録イベントのアンカーへ収束する区間でも速度上限 9.9m/s を超えない",
+    text: "記録イベントのアンカー収束と GK の角度圧縮でも速度上限 9.9m/s を超えない",
     source: "リプレイ評価 KN-02",
     plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "決勝 131' のシュート前で 10.24m/s（上限比 +3%）。台帳 KN-02",
+    note: "実測の最大は GK の角度圧縮で 15.7m/s（JPN#1）。#173 の修正後に残った唯一の型。台帳 KN-02",
   },
   {
     id: "OPS-06", area: "engine", status: "held",

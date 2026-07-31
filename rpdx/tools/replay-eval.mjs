@@ -39,7 +39,7 @@ for (const [id, match] of Object.entries(MATCHES)) {
   const add = (list, msg) => { if (list.length < 8) list.push(msg); };   // 同種の洪水を防ぐ
 
   /* ---- 1) 運動学の走査（毎 DT 秒）---- */
-  let prev = null, prevBall = null, samples = 0;
+  let prev = null, prevBall = null, prevPeriod = null, samples = 0;
   let vMaxSeen = 0, ballMaxStep = 0, minPair = 1e9, minPairAt = "";
   const wall0 = process.hrtime.bigint();
   for (let t = range.t0; t <= range.t1; t += DT) {
@@ -62,8 +62,11 @@ for (const [id, match] of Object.entries(MATCHES)) {
     }
     if (!Number.isFinite(st.ball.x) || !Number.isFinite(st.ball.y) || !Number.isFinite(st.ball.z))
       add(ng, `t=${t.toFixed(0)} ボール座標が NaN`);
-    // 速度上限（ハーフ境界と入退場をまたぐ組は除外）
-    if (prev && Math.abs(t - prev.t - DT) < 1e-9 && st.half === prev.half) {
+    // 速度上限（ピリオド境界と入退場をまたぐ組は除外）。前後半・延長の切替では
+    // 両チームが自陣へ整列し直すので、そこを速度で測っても意味がない。
+    const period = E.periodOf ? E.periodOf(match, t) : st.half;
+    const samePeriod = prev && period === prevPeriod;
+    if (prev && Math.abs(t - prev.t - DT) < 1e-9 && st.half === prev.half && samePeriod) {
       const byNo = new Map(prev.players.filter((p) => p.onPitch && !p.entering).map((p) => [p.team + p.no, p]));
       for (const p of on) {
         if (p.entering > 0) continue;
@@ -83,7 +86,7 @@ for (const [id, match] of Object.entries(MATCHES)) {
         if (d < minPair) { minPair = d; minPairAt = `t=${t.toFixed(0)} ${live[i].team}#${live[i].no}/${live[j].team}#${live[j].no}`; }
       }
     }
-    prev = st; prevBall = st.ball;
+    prev = st; prevBall = st.ball; prevPeriod = period;
   }
   const wallMs = Number(process.hrtime.bigint() - wall0) / 1e6;
   const simSec = range.t1 - range.t0;
