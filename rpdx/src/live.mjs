@@ -152,7 +152,9 @@
 
     // 試合 ID は入力内容で変える。各層のキャッシュは meta.id で引くので、
     // 内容が変わったのに ID が同じだと**古い世界が返り続ける**（入力しても何も起きない）。
-    let h = N.seedOf(s.cfg.seed || kA + kB);
+    // 名簿（cfg）も ID に含める。含めないと、チーム名や選手を変えても ID が同じままで
+    // 各層のキャッシュが古い世界を返し続ける（UI 側も「変わっていない」と判断して描き直さない）。
+    let h = N.seedOf(JSON.stringify(s.cfg));
     for (const ev of s.events) h = N.seedOf(`${h}|${ev.t}|${ev.type}|${ev.team}|${ev.no ?? ""}`);
     for (const sb of s.subs) h = N.seedOf(`${h}|s${sb.t}|${sb.team}|${sb.out}|${sb.in}`);
     return {
@@ -164,6 +166,10 @@
       events, ballAnchors, possessionKP, subsActual,
     };
   };
+
+  // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
+  // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。
+  L.withCfg = (s, cfg) => ({ ...s, cfg });
 
   /* ---------------- 保存・復帰（#181）----------------
      保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための

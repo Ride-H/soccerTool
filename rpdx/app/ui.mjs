@@ -1836,7 +1836,12 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     try {
       const cfg = JSON.parse($("#customJson").value);
       const m = G.createMatch(cfg);
-      setMatch(m);
+      // ライブ中なら、入力済みの記録を保ったまま名簿だけ差し替える（#182）
+      if (liveState.session) {
+        liveState.session = R.live.withCfg(liveState.session, cfg);
+        liveState.team = null;
+        liveRebuild(); liveSave(); liveRenderBar();
+      } else setMatch(m);
       $("#customErr").textContent = "";
       $("#modalCustom").classList.remove("open");
       toast("カスタム試合を読み込みました（モデル生成）", "#7FA6FF");
@@ -1967,6 +1972,30 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   const liveLog = (msg) => { const el = $("#liveLog"); if (el) el.textContent = msg; };
 
+  // 現在の試合から cfg を復元する（カスタム試合はバンドルと同じ形で書き出せる）。
+  // 収録試合（較正済み）はライブの土台にしない — 公式記録を上書きしたように見えるため。
+  const liveCfgFromMatch = (m) => {
+    if (!m || m.meta.calibrated !== false) return null;
+    try {
+      const b = JSON.parse(R.scenlib.serializeBundle(m, E.actualScenario(m), null));
+      return b.customMatch || null;
+    } catch { return null; }
+  };
+
+  // チーム名だけを差し替えた cfg を作る（既存の createMatch 経路をそのまま通す）
+  const liveRenameCfg = (cfg, home, away) => {
+    const out = JSON.parse(JSON.stringify(cfg));
+    const put = (side, name) => {
+      if (!name) return;
+      out[side].name = name;
+      out[side].nameEn = name;
+      out[side].code = (name.replace(/[^A-Za-z0-9ぁ-んァ-ヶ一-龠]/g, "").slice(0, 3) || out[side].code).toUpperCase();
+    };
+    put("home", home); put("away", away);
+    if (out.home.code === out.away.code) out.away.code = out.away.code + "2";
+    return out;
+  };
+
   const liveRenderBar = () => {
     const bar = $("#liveBar");
     if (!bar) return;
@@ -1977,9 +2006,13 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
+    // 名簿の設定は試合開始前だけ出す（始まったら入力に集中させる）
+    const started = liveState.session.clock.length > 0;
+    $("#liveSetup").style.display = started ? "none" : "";
     // チーム選択（どちらの出来事かを先に選ぶ＝入力は 2 タップで完了）
     const tg = $("#liveTeams");
-    if (tg.dataset.built !== App.match.meta.id) {
+    const teamsKey = teamOrder().join("|") + "|" + App.match.meta.id;
+    if (tg.dataset.built !== teamsKey) {
       tg.innerHTML = "";
       for (const k of teamOrder()) {
         const b = document.createElement("button");
@@ -1988,7 +2021,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
         b.onclick = () => { liveState.team = k; liveRenderBar(); };
         tg.appendChild(b);
       }
-      tg.dataset.built = App.match.meta.id;
+      tg.dataset.built = teamsKey;
     } else {
       [...tg.children].forEach((b, i) => b.classList.toggle("on", teamOrder()[i] === liveState.team));
     }
@@ -2045,6 +2078,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
 
   const liveAdd = (ev) => {
     if (!liveState.session) return;
+    if (liveState.team && !App.match.teams[liveState.team]) liveState.team = null;   // 名簿差し替えで消えた
     if (!liveState.team) { liveLog("どちらのチームの出来事か、先に選んでください"); return; }
     if (ev.type === "sub") { livePickSub(); return; }
     const t = liveTimeNow();
@@ -2056,7 +2090,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   };
 
   const liveEnter = () => {
-    const cfg = G.template();
+    // 既にカスタム試合（未較正）を開いているなら、その名簿をそのまま土台にする。
+    // ライブ用に別の名簿を作らせない（#182: 既存のカスタム試合の経路を使う）。
+    const cfg = liveCfgFromMatch(App.match) || G.template();
     liveState.session = R.live.create(cfg);
     liveState.team = null;
     liveRebuild();
@@ -2121,6 +2157,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       wrap.style.display = ""; draw();
     };
     $("#liveResume").onclick = () => liveRestore();
+    $("#liveNameApply").onclick = () => {
+      if (!liveState.session) return;
+      const home = $("#liveHomeName").value.trim(), away = $("#liveAwayName").value.trim();
+      if (!home && !away) { liveLog("チーム名を入れてください（片方だけでも大丈夫です）"); return; }
+      liveState.session = R.live.withCfg(liveState.session, liveRenameCfg(liveState.session.cfg, home, away));
+      liveState.team = null;
+      liveRebuild(); liveSave(); liveRenderBar();
+      liveLog(`${teamOrder().map((k) => App.match.teams[k].name).join(" × ")} で記録します`);
+    };
+    // 選手名・背番号・ポジションは既存のロスター編集（✎）とカスタム試合の経路を使う
+    $("#liveEditRoster").onclick = () => {
+      $("#customJson").value = JSON.stringify(liveState.session ? liveState.session.cfg : G.template(), null, 2);
+      $("#modalCustom").classList.add("open");
+      liveLog("編集して「この試合を読み込む」を押すと、その名簿でライブを続けます");
+    };
     $("#liveUndo").onclick = () => {
       liveState.session = R.live.undo(liveState.session);
       liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");

@@ -394,6 +394,18 @@ export const REQUIREMENTS = [
     note: "prompt 等はスマホで使えずヘッドレス検証も止まる。保存キーの登録制は「既存の仕組みで足りないか」を一度考えさせるため",
   },
 
+  {
+    id: "LIVE-09", area: "ux", status: "held",
+    text: "ライブは自チームの名簿で記録できる（名簿の作成・編集は既存のカスタム試合の経路を使う）",
+    source: "issue#182",
+    checks: [
+      { kind: "test", file: "liveui.test.mjs", name: "名簿: cfg を差し替えても入力した記録は残る" },
+      { kind: "test", file: "liveui.test.mjs", name: "名簿: 収録試合はライブの土台にしない" },
+      { kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" },
+    ],
+    note: "ライブ専用の名簿エディタは作らない。チーム名だけ画面から入れ、詳細は既存のカスタム試合とロスターの ✎ を使う",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "open", issue: 105,

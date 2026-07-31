@@ -227,6 +227,17 @@
     <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
     <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
   </div>
+  <div id="liveSetup">
+    <div class="hint">チーム名を入れてください（選手名は後からロスターの ✎ で直せます）</div>
+    <div class="live-names">
+      <input id="liveHomeName" class="live-in" type="text" maxlength="20" aria-label="自チームの名前（home team name）" placeholder="自チーム">
+      <input id="liveAwayName" class="live-in" type="text" maxlength="20" aria-label="相手チームの名前（away team name）" placeholder="相手チーム">
+    </div>
+    <div class="live-names">
+      <button class="btn" id="liveNameApply">この名簿ではじめる</button>
+      <button class="btn" id="liveEditRoster">名簿をくわしく編集</button>
+    </div>
+  </div>
   <div id="liveTeams" role="group" aria-label="入力するチーム（team to record）"></div>
   <div id="liveEvents" role="group" aria-label="いま起きたこと（what just happened）"></div>
   <div id="liveSubPick" style="display:none"></div>

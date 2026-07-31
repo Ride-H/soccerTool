@@ -27,7 +27,8 @@ const probe = `(() => {
   // position:fixed だと offsetParent が null になるので、実寸と display で見る
   out.liveVisible = !!(live && getComputedStyle(live).display !== "none" && live.getBoundingClientRect().height > 1);
   const scope = out.liveVisible ? live : document.body;
-  for (const b of scope.querySelectorAll("button")) {
+  // 入力欄も「押す/触る」標的。ボタンだけ見ていると、小さすぎる入力欄を見逃す。
+  for (const b of scope.querySelectorAll("button, input:not([type=hidden]), select, textarea")) {
     const r = b.getBoundingClientRect();
     if (r.width < 1) continue;
     const st = getComputedStyle(b);
@@ -37,7 +38,7 @@ const probe = `(() => {
     const hit = document.elementFromPoint(cx, cy);
     const covered = !(hit && (hit === b || b.contains(hit)));
     const offscreen = r.left < 0 || r.top < 0 || r.right > window.innerWidth + 0.5 || r.bottom > window.innerHeight + 0.5;
-    out.targets.push({ label: (b.textContent || "").trim().slice(0, 12), w: Math.round(r.width), h: Math.round(r.height),
+    out.targets.push({ label: ((b.textContent || b.getAttribute("aria-label") || b.placeholder || b.tagName) + "").trim().slice(0, 12), w: Math.round(r.width), h: Math.round(r.height),
       font: parseFloat(st.fontSize), fg: st.color, bg: bgOf(b), covered, offscreen,
       by: covered && hit ? (hit.id || hit.className || hit.tagName).toString().slice(0, 24) : "" });
   }

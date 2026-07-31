@@ -133,3 +133,39 @@ test("保存・復帰: 時計の続きから再開できる（保存時点の試
   assert.ok(L.isRunning(resumed));
   assert.ok(Math.abs(L.tAt(resumed, T0 + 1_009_999) - 2410) < 1, "再開後は進む");
 });
+
+// #182 名簿はライブ専用に作らず、既存の cfg → createMatch の経路を通す。
+// 記録済みの入力を保ったまま名簿だけ差し替えられること、ID がちゃんと変わることを固定する。
+test("名簿: cfg を差し替えても入力した記録は残る（既存の createMatch 経路）", () => {
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  const KS0 = E.teamKeys(L.matchOf(s));
+  s = L.withEvent(s, { t: 600, type: "goal", team: KS0[0], no: 9 });
+  const before = L.matchOf(s);
+
+  // チーム名だけ差し替えた cfg（UI の「この名簿ではじめる」と同じ操作）
+  const cfg2 = JSON.parse(JSON.stringify(s.cfg));
+  cfg2.home.name = "県立南高校"; cfg2.home.code = "MNM";
+  cfg2.away.name = "北高校"; cfg2.away.code = "KTA";
+  const s2 = L.withCfg(s, cfg2);
+  const after = L.matchOf(s2);
+
+  assert.deepEqual(E.teamKeys(after), ["MNM", "KTA"], "チームが差し替わる");
+  assert.equal(after.teams.MNM.name, "県立南高校");
+  assert.equal(after.events.filter((e) => e.type === "goal").length, 1, "入力した得点は残る");
+  assert.notEqual(after.meta.id, before.meta.id,
+    "名簿が変われば試合 ID も変わる（同じだと各層のキャッシュが古い世界を返す）");
+  assert.equal(after.meta.seedId, before.meta.seedId, "世界生成の種は変えない（過去が作り直されない）");
+  // 記録は残るが、チームキーが変わるので古いキーの得点は数えない（UI 側で選び直す前提）
+  assert.equal(Object.keys(after.meta.score).length, 2);
+});
+
+test("名簿: 収録試合はライブの土台にしない（公式記録を上書きしたように見せない）", () => {
+  const rec = RPDX.data.MATCH;
+  assert.notEqual(rec.meta.calibrated, false, "収録試合は較正済み");
+  const tpl = G.templateMatch();
+  assert.equal(tpl.meta.calibrated, false, "テンプレ/カスタムは未較正");
+  // ライブが作る試合は必ず未較正（＝画面で「未較正」と明示される）
+  const m = L.matchOf(L.create(G.template()));
+  assert.equal(m.meta.calibrated, false);
+  assert.equal(m.meta.live, true);
+});
