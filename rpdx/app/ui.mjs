@@ -2006,6 +2006,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
+    const atBreak = R.live.isAtHalfBreak(liveState.session, App.match, Date.now());
+    $("#liveHalf").style.display = atBreak ? "" : "none";
+    bar.classList.toggle("half", atBreak);
     // 名簿の設定は試合開始前だけ出す（始まったら入力に集中させる）
     const started = liveState.session.clock.length > 0;
     $("#liveSetup").style.display = started ? "none" : "";
@@ -2176,12 +2179,24 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveState.session = R.live.undo(liveState.session);
       liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
     };
+    $("#liveHalf").onclick = () => {
+      liveState.session = R.live.startSecondHalf(liveState.session, App.match, Date.now());
+      liveSave(); liveRenderBar();
+      liveLog("後半開始です");
+    };
     $("#liveExit").onclick = liveExit;
   };
 
   // 毎フレーム: 壁時計から試合時刻を進める（世界の作り直しはしない）
   const liveTick = () => {
     if (!liveState.session) return;
+    // #183 前半終了に達したら自動で止める（人が時計合わせで入れ直さなくてよい）
+    const brk = R.live.atHalfBreak(liveState.session, App.match, Date.now());
+    if (brk) {
+      liveState.session = brk;
+      liveSave(); liveRenderBar();
+      liveLog("前半終了です。ハーフタイムの入力もできます。「後半開始」で再開してください");
+    }
     const range = E.playedRange(App.match);
     App.t = clamp(liveTimeNow(), 0, range.t1);
     const el = $("#liveClock");

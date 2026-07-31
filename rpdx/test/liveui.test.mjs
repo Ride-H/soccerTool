@@ -169,3 +169,73 @@ test("名簿: 収録試合はライブの土台にしない（公式記録を上
   assert.equal(m.meta.calibrated, false);
   assert.equal(m.meta.live, true);
 });
+
+// #183 ハーフタイムは必ず起きるので、人が時計合わせで入れ直さなくてよい。
+test("ハーフタイム: 前半終了で自動的に止まり、後半開始で先頭から進む", () => {
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  const m = L.matchOf(s);
+  const h1end = m.time.h1.end, h2start = m.time.h2.start;
+  assert.ok(h1end > 0 && h2start >= h1end);
+
+  // 前半の途中では何も起きない
+  assert.equal(L.atHalfBreak(s, m, T0 + (h1end - 60) * 1000), null, "前半の途中では止めない");
+  assert.equal(L.isAtHalfBreak(s, m, T0 + (h1end - 60) * 1000), false);
+
+  // 前半終了を越えたら、越えた瞬間ちょうどで止まる（行き過ぎた分は進まない）
+  const past = T0 + (h1end + 37) * 1000;
+  const paused = L.atHalfBreak(s, m, past);
+  assert.ok(paused, "前半終了を越えたら止める");
+  assert.equal(L.isRunning(paused), false);
+  assert.ok(Math.abs(L.tAt(paused, past) - h1end) < 1e-6, `止まる位置は前半終了ちょうど（${L.tAt(paused, past)}）`);
+  assert.ok(Math.abs(L.tAt(paused, past + 600_000) - h1end) < 1e-6, "そのまま置いても進まない");
+  assert.equal(L.isAtHalfBreak(paused, m, past), true, "画面が「後半開始」を出せる状態");
+  assert.equal(L.atHalfBreak(paused, m, past), null, "止まっている間は何度呼んでも何もしない（純関数）");
+
+  // 後半開始で後半の先頭から進む
+  const h2 = L.startSecondHalf(paused, m, past + 300_000);
+  assert.ok(L.isRunning(h2));
+  assert.ok(Math.abs(L.tAt(h2, past + 300_000) - h2start) < 1e-6, "後半の先頭から");
+  assert.ok(Math.abs(L.tAt(h2, past + 310_000) - (h2start + 10)) < 1e-6, "その後は進む");
+  assert.equal(L.isAtHalfBreak(h2, m, past + 310_000), false);
+
+  // 手動の時計合わせは従来どおり効く（ロスタイムの微調整）
+  const synced = L.withClock(h2, "sync", past + 320_000, h2start + 120);
+  assert.ok(Math.abs(L.tAt(synced, past + 320_000) - (h2start + 120)) < 1e-6);
+});
+
+test("ハーフタイム: 止まっている間に入力しても記録は前半終了の時刻に入る", () => {
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  const m = L.matchOf(s);
+  const h1end = m.time.h1.end;
+  const past = T0 + (h1end + 5) * 1000;
+  s = L.atHalfBreak(s, m, past) || s;
+  const t = L.tAt(s, past + 60_000);
+  s = L.withEvent(s, { t, type: "yellow", team: E.teamKeys(m)[0], no: 5 });
+  const m2 = L.matchOf(s);
+  const ev = m2.events.find((e) => e.type === "yellow");
+  assert.ok(ev && Math.abs(ev.t - h1end) < 1e-6, "止まっている間の入力は前半終了の時刻");
+});
+
+// 実機で見つけた不具合の回帰: h1.end と h2.start は同じ時刻なので、時刻の比較だけで
+// 自動停止を判断すると、後半開始の直後にまた止まってしまう（「後半開始」を押しても動かない）。
+test("ハーフタイム: 後半開始のあとは二度と自動停止しない（保存・復帰をまたいでも）", () => {
+  const SCN = RPDX.scenlib;
+  let s = L.withClock(L.create(G.template()), "start", T0);
+  const m = L.matchOf(s);
+  assert.equal(m.time.h1.end, m.time.h2.start, "前半終了と後半開始は同じ時刻（この前提が罠だった）");
+  const past = T0 + (m.time.h1.end + 5) * 1000;
+  s = L.atHalfBreak(s, m, past);
+  s = L.startSecondHalf(s, m, past + 60_000);
+  assert.ok(L.isRunning(s), "後半は動いている");
+  assert.equal(L.atHalfBreak(s, m, past + 61_000), null, "後半開始の直後に止め直さない");
+  assert.equal(L.isAtHalfBreak(s, m, past + 61_000), false, "「後半開始」ボタンも出ない");
+  assert.ok(L.tAt(s, past + 120_000) > m.time.h2.start + 30, "後半は進み続ける");
+
+  // 保存・復帰をまたいでも前半終了へ戻らない
+  const m2 = L.matchOf(s);
+  const saved = JSON.parse(SCN.serializeBundle(m2, E.actualScenario(m2), null, { live: s }));
+  const back = L.fromObj(saved.live, past + 200_000);
+  assert.equal(L.isAtHalfBreak(back, m2, past + 200_000), false, "復帰後も後半のまま");
+  const resumed = L.withClock(back, "resume", past + 200_000);
+  assert.equal(L.atHalfBreak(resumed, m2, past + 260_000), null, "復帰して再開しても止め直さない");
+});

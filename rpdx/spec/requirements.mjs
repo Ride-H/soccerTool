@@ -406,6 +406,17 @@ export const REQUIREMENTS = [
     note: "ライブ専用の名簿エディタは作らない。チーム名だけ画面から入れ、詳細は既存のカスタム試合とロスターの ✎ を使う",
   },
 
+  {
+    id: "LIVE-10", area: "ux", status: "held",
+    text: "ライブは前半終了で自動的に止まり、「後半開始」で後半の先頭から進む（手動の時計合わせは従来どおり）",
+    source: "issue#183",
+    checks: [
+      { kind: "test", file: "liveui.test.mjs", name: "ハーフタイム: 前半終了で自動的に止まり、後半開始で先頭から進む" },
+      { kind: "test", file: "liveui.test.mjs", name: "ハーフタイム: 後半開始のあとは二度と自動停止しない" },
+    ],
+    note: "h1.end と h2.start は同じ時刻なので、時刻の比較だけで判断すると後半開始の直後にまた止まる（実機で発覚）",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "open", issue: 105,

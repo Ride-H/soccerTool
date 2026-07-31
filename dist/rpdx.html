@@ -536,6 +536,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 #liveClock { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ink); }
 #liveDot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; flex: none; }
 #liveBar.running #liveDot { background: #e5533d; box-shadow: 0 0 0 4px rgba(229,83,61,.18); }
+#liveBar.half #liveDot { background: var(--gold-bright); box-shadow: 0 0 0 4px rgba(212,175,55,.18); }
 #liveTeams, #liveEvents { display: flex; gap: 8px; flex-wrap: wrap; }
 .live-btn, #liveTeams .btn, #liveEvents .btn {
   min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 13px; border-radius: 10px;
@@ -778,6 +779,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     <span class="eyebrow" id="liveState">停止中</span>
     <button class="btn live-btn" id="liveStart" aria-label="試合開始 / 一時停止（start or pause）">▶ 開始</button>
     <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
+    <button class="btn live-btn primary" id="liveHalf" style="display:none" aria-label="後半を開始する（start second half）">▶ 後半開始</button>
     <button class="btn live-btn" id="liveResume" style="display:none" aria-label="前回の続きから復帰（resume saved live）">⏱ 続きから</button>
     <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
     <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
@@ -8278,6 +8280,34 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     };
   };
 
+  /* ---------------- ハーフタイム（#183）----------------
+     前半終了は必ず起きるので、人が時計合わせで入れ直す必要は無い。
+     壁時計が前半終了を越えていたら、**その瞬間の時刻ちょうど**で止めた session を返す。
+     純関数（同じ入力なら同じ結果）にしてあるので、毎フレーム呼んでよい。 */
+  L.atHalfBreak = (s, match, wallMs) => {
+    if (!L.isRunning(s) || !match || !match.time || !match.time.h1) return null;
+    // 後半を始めたら二度と止めない。h1.end と h2.start は同じ時刻なので、
+    // 時刻の比較だけだと後半開始の直後にまた止まってしまう（実機で発覚）。
+    if (s.clock.some((c) => c.h2)) return null;
+    const end = match.time.h1.end;
+    if (L.tAt(s, wallMs) < end) return null;
+    const seg = s.clock[s.clock.length - 1];
+    // 前半終了に達した瞬間の壁時計（その時刻で止めれば、止めた位置は常に end ちょうど）
+    const wallAtEnd = seg.wall + (end - seg.t) * 1000;
+    return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
+  };
+
+  // 後半へ進む（前半終了で止まっている状態から、後半の先頭で再開する）
+  L.startSecondHalf = (s, match, wallMs) => {
+    const t0 = match && match.time && match.time.h2 ? match.time.h2.start : L.tAt(s, wallMs);
+    return { ...s, clock: [...s.clock, { wall: wallMs, t: t0, rate: 1, h2: true }] };
+  };
+
+  // 前半終了で止まっているか（UI が「後半開始」を出す判断に使う）
+  L.isAtHalfBreak = (s, match, wallMs) =>
+    !!(match && match.time && match.time.h1 && !L.isRunning(s) && !s.clock.some((c) => c.h2)
+      && Math.abs(L.tAt(s, wallMs) - match.time.h1.end) < 0.5);
+
   // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
   // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。
   L.withCfg = (s, cfg) => ({ ...s, cfg });
@@ -8286,7 +8316,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
      保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための
      「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
-  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate })),
+  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
     events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
 
   L.fromObj = (o, wallMs) => {
@@ -8296,7 +8326,9 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
-    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0 }];
+    // 後半に入っていたかどうかは引き継ぐ（復帰後にまた前半終了で止まらないように）
+    const wasH2 = (o.clock || []).some((c) => c.h2);
+    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0, ...(wasH2 ? { h2: true } : {}) }];
     return s;
   };
 
@@ -13409,6 +13441,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
+    const atBreak = R.live.isAtHalfBreak(liveState.session, App.match, Date.now());
+    $("#liveHalf").style.display = atBreak ? "" : "none";
+    bar.classList.toggle("half", atBreak);
     // 名簿の設定は試合開始前だけ出す（始まったら入力に集中させる）
     const started = liveState.session.clock.length > 0;
     $("#liveSetup").style.display = started ? "none" : "";
@@ -13579,12 +13614,24 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveState.session = R.live.undo(liveState.session);
       liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
     };
+    $("#liveHalf").onclick = () => {
+      liveState.session = R.live.startSecondHalf(liveState.session, App.match, Date.now());
+      liveSave(); liveRenderBar();
+      liveLog("後半開始です");
+    };
     $("#liveExit").onclick = liveExit;
   };
 
   // 毎フレーム: 壁時計から試合時刻を進める（世界の作り直しはしない）
   const liveTick = () => {
     if (!liveState.session) return;
+    // #183 前半終了に達したら自動で止める（人が時計合わせで入れ直さなくてよい）
+    const brk = R.live.atHalfBreak(liveState.session, App.match, Date.now());
+    if (brk) {
+      liveState.session = brk;
+      liveSave(); liveRenderBar();
+      liveLog("前半終了です。ハーフタイムの入力もできます。「後半開始」で再開してください");
+    }
     const range = E.playedRange(App.match);
     App.t = clamp(liveTimeNow(), 0, range.t1);
     const el = $("#liveClock");

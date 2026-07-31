@@ -529,6 +529,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 #liveClock { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ink); }
 #liveDot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; flex: none; }
 #liveBar.running #liveDot { background: #e5533d; box-shadow: 0 0 0 4px rgba(229,83,61,.18); }
+#liveBar.half #liveDot { background: var(--gold-bright); box-shadow: 0 0 0 4px rgba(212,175,55,.18); }
 #liveTeams, #liveEvents { display: flex; gap: 8px; flex-wrap: wrap; }
 .live-btn, #liveTeams .btn, #liveEvents .btn {
   min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 13px; border-radius: 10px;

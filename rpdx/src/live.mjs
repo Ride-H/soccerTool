@@ -167,6 +167,34 @@
     };
   };
 
+  /* ---------------- ハーフタイム（#183）----------------
+     前半終了は必ず起きるので、人が時計合わせで入れ直す必要は無い。
+     壁時計が前半終了を越えていたら、**その瞬間の時刻ちょうど**で止めた session を返す。
+     純関数（同じ入力なら同じ結果）にしてあるので、毎フレーム呼んでよい。 */
+  L.atHalfBreak = (s, match, wallMs) => {
+    if (!L.isRunning(s) || !match || !match.time || !match.time.h1) return null;
+    // 後半を始めたら二度と止めない。h1.end と h2.start は同じ時刻なので、
+    // 時刻の比較だけだと後半開始の直後にまた止まってしまう（実機で発覚）。
+    if (s.clock.some((c) => c.h2)) return null;
+    const end = match.time.h1.end;
+    if (L.tAt(s, wallMs) < end) return null;
+    const seg = s.clock[s.clock.length - 1];
+    // 前半終了に達した瞬間の壁時計（その時刻で止めれば、止めた位置は常に end ちょうど）
+    const wallAtEnd = seg.wall + (end - seg.t) * 1000;
+    return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
+  };
+
+  // 後半へ進む（前半終了で止まっている状態から、後半の先頭で再開する）
+  L.startSecondHalf = (s, match, wallMs) => {
+    const t0 = match && match.time && match.time.h2 ? match.time.h2.start : L.tAt(s, wallMs);
+    return { ...s, clock: [...s.clock, { wall: wallMs, t: t0, rate: 1, h2: true }] };
+  };
+
+  // 前半終了で止まっているか（UI が「後半開始」を出す判断に使う）
+  L.isAtHalfBreak = (s, match, wallMs) =>
+    !!(match && match.time && match.time.h1 && !L.isRunning(s) && !s.clock.some((c) => c.h2)
+      && Math.abs(L.tAt(s, wallMs) - match.time.h1.end) < 0.5);
+
   // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
   // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。
   L.withCfg = (s, cfg) => ({ ...s, cfg });
@@ -175,7 +203,7 @@
      保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための
      「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
-  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate })),
+  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
     events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
 
   L.fromObj = (o, wallMs) => {
@@ -185,7 +213,9 @@
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
-    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0 }];
+    // 後半に入っていたかどうかは引き継ぐ（復帰後にまた前半終了で止まらないように）
+    const wasH2 = (o.clock || []).some((c) => c.h2);
+    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0, ...(wasH2 ? { h2: true } : {}) }];
     return s;
   };
 
