@@ -40,6 +40,8 @@ open dist/rpdx.html        # ブラウザで開くだけ（オフライン動作
 node rpdx/build.mjs                 # → dist/rpdx.html（配布用単一ファイル）
 node --test rpdx/test/*.test.mjs    # 552テスト（…品質ティア/滑らかさ守衛・視覚回帰契約・スキンドメッシュ骨格/ポーズ/造形・フットIK/スケーティング解消/注視・頂点AO・材質差別化・ポストプロセス・共有コアの部品/行列/歩容・UI 側 API・シナリオ編集の取り消し）
 bash rpdx/tools/coverage.sh         # カバレッジ門（ロジック層 行99%/分岐90%/関数98% 未満で失敗）
+node rpdx/tools/trace.mjs           # 要件↔検証手段の対応（docs/REQUIREMENTS.md・漏れと腐りを検出）
+node rpdx/tools/replay-eval.mjs     # リプレイ評価（全試合を時間軸で走査・新規の破綻で失敗）
 node rpdx/test/visual/smoke.mjs     # 視覚回帰スモーク（#153・要Chrome — CIでも実行）
 ```
 
