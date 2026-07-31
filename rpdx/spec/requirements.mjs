@@ -303,11 +303,14 @@ export const REQUIREMENTS = [
     note: "決勝 131' のシュート前で 10.24m/s（上限比 +3%）。台帳 KN-02",
   },
   {
-    id: "OPS-06", area: "engine", status: "open", issue: 175,
-    text: "形状の判定は標本不足のとき「測れていない」と分かる（NaN が帯の判定を素通りしない）",
-    source: "リプレイ評価",
-    plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "決勝の ESP は守備局面の標本が無く NaN。NaN>45 は false なので帯の検査を静かに通過していた",
+    id: "OPS-06", area: "engine", status: "held",
+    text: "形状の判定は 3 値（帯の中／帯の外／測れていない）で、標本不足が「基準内」に化けない",
+    source: "issue#175",
+    checks: [
+      { kind: "test", file: "shape.test.mjs", name: "標本不足で判定できない組み合わせが増えていない" },
+      { kind: "tool", cmd: "rpdx/tools/shape-probe.mjs" },
+    ],
+    note: "判定できない組み合わせは許可リストと完全一致を要求する。増えたら（＝検査が静かに消えたら）落ちる",
   },
 
   /* ---------------- ライブ実況（中継と並走） ---------------- */

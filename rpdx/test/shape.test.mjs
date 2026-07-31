@@ -9,16 +9,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RPDX, MATCHES } from "./load.mjs";
-import { shapeProbe, frameLines } from "../tools/shape-probe.mjs";
+import { shapeProbe, frameLines, shapeVerdicts, MIN_N, fmt } from "../tools/shape-probe.mjs";
 
 const E = RPDX.engine;
 
 // 改修（#136-138）完了時に true へ。切替は golden 再ベースラインとセット（エピック手順）。
 export const SHAPE_V1_ACTIVE = false;
 
-// サンプル不足（片側試合で一方の局面がほとんど発生しない＝決勝の ESP 守備/ARG 攻撃など）は
-// 統計的に無意味なので帯判定から除外する閾値。
-const MIN_N = 8;
+// 標本不足（片側試合で一方の局面がほとんど発生しない＝決勝の ESP 守備/ARG 攻撃など）で
+// 帯判定ができない組み合わせの一覧。#175: これを黙って読み飛ばすと「検査が消えたのに緑」になるため、
+// **ここに書いたものだけ**を許し、増えたらテストが落ちるようにする。
+// 減らすには局面の定義を見直すか、その試合を対象から外す判断を明示的にする。
+const UNMEASURED_ALLOW = new Set([
+  "wc2026-r32-bra-jpn|JPN|atkLine",      // 日本は敵陣深部までボールを運ぶ局面が少ない
+  "wc2026-r32-bra-jpn|BRA|defFront",     // ブラジルが自陣30m以内に押し込まれる局面が少ない
+  "wc2026-r32-bra-jpn|BRA|defCompact",
+  "wc2026-final-esp-arg|ESP|defFront",   // 決勝はスペインが支配し、守備局面の標本が 0
+  "wc2026-final-esp-arg|ESP|defCompact",
+  "wc2026-final-esp-arg|ARG|atkLine",    // 同じ理由でアルゼンチンの攻撃局面の標本が 0
+]);
 
 test("#140 shape-probe: 決定論・構造妥当（プローブが tools に整備されている）", () => {
   for (const m of Object.values(MATCHES)) {
@@ -62,26 +71,28 @@ test("#140 shape-gate: JPN 守備形状は基準内（回帰ベンチ・改修�
   assert.ok(jpn.defCompact.p90 <= 40, `JPN 守備時コンパクトネス p90 ${jpn.defCompact.p90.toFixed(1)} ≤40`);
 });
 
+// #175: 「測れていない」を「基準内」と混ぜない。標本不足で判定できない組み合わせは
+// 許可リストと完全一致すること。局面の定義を変えたり試合を足したときに、
+// **検査が静かに消えた**ことへ気づけるようにする（帯そのものの合否とは独立に常時有効）。
+test("#140 shape-gate: 標本不足で判定できない組み合わせが増えていない", () => {
+  const now = [];
+  for (const m of Object.values(MATCHES))
+    for (const r of shapeVerdicts(m)) if (r.verdict === "unmeasured") now.push(`${m.meta.id}|${r.team}|${r.key}`);
+  const added = now.filter((k) => !UNMEASURED_ALLOW.has(k));
+  const gone = [...UNMEASURED_ALLOW].filter((k) => !now.includes(k));
+  assert.deepEqual(added, [], `判定できない組み合わせが増えた（検査が静かに消えている）:\n  ${added.join("\n  ")}`);
+  assert.deepEqual(gone, [], `測れるようになった組み合わせは許可リストから外すこと:\n  ${gone.join("\n  ")}`);
+  // 判定できているものが十分にある（全部が「測れていない」で緑、を防ぐ）
+  const judged = Object.values(MATCHES).flatMap((m) => shapeVerdicts(m)).filter((r) => r.verdict !== "unmeasured");
+  assert.ok(judged.length >= 24, `判定できた組み合わせ ${judged.length} 件（少なすぎる）`);
+});
+
 // 形状帯アサート（#136-138 完了で有効化）: 全収録試合・両チームで妥当性帯に収める。
-// - 守備時の前線 p50 ≤ 45m（#136）
-// - 守備時コンパクトネス p10–p90 ⊂ 25–40m（#137）
-// - 攻撃時の最終ライン p50 ∈ 35–50m（#138）
-// - 全局面コンパクトネス平均 ≤ 45m
+// 帯の定義は shape-probe.mjs の BANDS が唯一の出所（表示と判定で二重管理しない）。
 test("#140 shape-gate v1: 全試合の形状帯（#136-138 完了で有効化）", { skip: !SHAPE_V1_ACTIVE }, () => {
   const bad = [];
-  for (const m of Object.values(MATCHES)) {
-    const agg = shapeProbe(m);
-    for (const team of E.teamKeys(m)) {
-      const a = agg[team];
-      if (a.defFront.n >= MIN_N && a.defFront.p50 > 45)
-        bad.push(`${m.meta.id} ${team} 守備時前線 p50=${a.defFront.p50.toFixed(1)} (>45)`);
-      if (a.defCompact.n >= MIN_N && (a.defCompact.p10 < 25 || a.defCompact.p90 > 40))
-        bad.push(`${m.meta.id} ${team} 守備compact p10–p90=${a.defCompact.p10.toFixed(1)}–${a.defCompact.p90.toFixed(1)} (⊄25–40)`);
-      if (a.atkLine.n >= MIN_N && (a.atkLine.p50 < 35 || a.atkLine.p50 > 50))
-        bad.push(`${m.meta.id} ${team} 攻撃時最終ライン p50=${a.atkLine.p50.toFixed(1)} (∉35–50)`);
-      if (a.allCompact.n >= MIN_N && a.allCompact.mean > 45)
-        bad.push(`${m.meta.id} ${team} 全局面compact 平均=${a.allCompact.mean.toFixed(1)} (>45)`);
-    }
-  }
+  for (const m of Object.values(MATCHES))
+    for (const r of shapeVerdicts(m))
+      if (r.verdict === "out") bad.push(`${m.meta.id} ${r.team} ${r.label} ${fmt(r)} — ${r.detail}`);
   assert.deepEqual(bad, [], `形状帯違反 ${bad.length}件:\n  ${bad.join("\n  ")}`);
 });

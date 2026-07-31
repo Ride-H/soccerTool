@@ -85,37 +85,68 @@ export const shapeProbe = (match, opts = {}) => {
   return agg;
 };
 
+/* ---------------------------------------------------------------------------
+   帯の定義と判定（#175）
+   基準値をここ 1 か所に置き、CLI もプロパティゲートも同じ定義を使う。
+   判定は 3 値にする: ok（帯の中）/ out（帯の外）/ unmeasured（標本不足で測れていない）。
+   「測れていない」を「基準内」と一緒にすると、局面が発生しない試合で検査が静かに
+   消えるのに緑になる（決勝の ESP 守備・ARG 攻撃がまさにそれだった）。
+   --------------------------------------------------------------------------- */
+export const MIN_N = 8;   // これ未満の標本数では統計的に判定しない
+
+export const BANDS = [
+  { key: "atkLine",    stat: "p50",          lo: 35, hi: 50, label: "攻撃時の最終ライン",     issue: 138 },
+  { key: "defFront",   stat: "p50",                  hi: 45, label: "守備時の前線",           issue: 136 },
+  { key: "defCompact", stat: ["p10", "p90"], lo: 25, hi: 40, label: "守備時コンパクトネス",   issue: 137 },
+  { key: "allCompact", stat: "mean",                 hi: 45, label: "全局面コンパクトネス",   issue: 137 },
+];
+
+// 1 試合ぶんの判定。返値: [{ team, key, label, issue, n, values, verdict, detail }]
+export const shapeVerdicts = (match, opts = {}) => {
+  const agg = opts.agg || shapeProbe(match, opts);
+  const rows = [];
+  for (const team of E.teamKeys(match)) {
+    for (const b of BANDS) {
+      const a = agg[team][b.key];
+      const stats = Array.isArray(b.stat) ? b.stat : [b.stat];
+      const values = stats.map((k) => a[k]);
+      let verdict = "ok", detail = "";
+      if (a.n < MIN_N || values.some((v) => !Number.isFinite(v))) {
+        verdict = "unmeasured";
+        detail = `標本 ${a.n} 件（必要 ${MIN_N}）— この試合ではこの局面がほとんど発生しない`;
+      } else {
+        const bad = [];
+        if (b.lo != null && Math.min(...values) < b.lo) bad.push(`下限 ${b.lo} を割る`);
+        if (b.hi != null && Math.max(...values) > b.hi) bad.push(`上限 ${b.hi} を超える`);
+        if (bad.length) { verdict = "out"; detail = bad.join(" / "); }
+      }
+      rows.push({ team, key: b.key, label: b.label, issue: b.issue, n: a.n,
+        values: values.map((v) => (Number.isFinite(v) ? +v.toFixed(1) : null)), verdict, detail });
+    }
+  }
+  return rows;
+};
+
+// 表示用: 値か「測定不能」か
+export const fmt = (row) => (row.verdict === "unmeasured" ? `測定不能(n=${row.n})` : row.values.join("–"));
+
 // ---- CLI ----
 if (import.meta.url === `file://${process.argv[1]}`) {
   const json = process.argv.includes("--json");
-  const rows = [];
-  for (const m of Object.values(MATCHES)) {
-    const agg = shapeProbe(m);
-    for (const team of E.teamKeys(m)) {
-      const a = agg[team];
-      rows.push({
-        match: m.meta.id, team,
-        atkLine_p50: +a.atkLine.p50.toFixed(1),
-        defFront_p50: +a.defFront.p50.toFixed(1),
-        defCompact_p10: +a.defCompact.p10.toFixed(1),
-        defCompact_p50: +a.defCompact.p50.toFixed(1),
-        defCompact_p90: +a.defCompact.p90.toFixed(1),
-        allCompact_mean: +a.allCompact.mean.toFixed(1),
-      });
-    }
-  }
-  if (json) { console.log(JSON.stringify(rows, null, 1)); }
+  const all = [];
+  for (const m of Object.values(MATCHES)) for (const r of shapeVerdicts(m)) all.push({ match: m.meta.id, ...r });
+  if (json) { console.log(JSON.stringify(all, null, 1)); }
   else {
-    console.log("# 形状プローブ（基準: 攻撃時最終ライン 35–50m / 守備時前線 ≤45m / 守備時コンパクトネス 25–38m）");
-    console.log("match".padEnd(22), "team", "攻撃時LINE", "守備時FRONT", "守備compact(p10/p50/p90)", "全局面compact");
-    for (const r of rows) {
-      console.log(
-        r.match.padEnd(22), r.team.padEnd(4),
-        String(r.atkLine_p50).padStart(7),
-        String(r.defFront_p50).padStart(9),
-        `${r.defCompact_p10}/${r.defCompact_p50}/${r.defCompact_p90}`.padStart(18),
-        String(r.allCompact_mean).padStart(10),
-      );
+    console.log("# 形状プローブ（判定: ✓帯の中 / ✖帯の外 / ?標本不足で測れていない）");
+    for (const b of BANDS) {
+      const lim = `${b.lo != null ? `${b.lo}–` : "≤"}${b.hi}m`;
+      console.log(`\n## ${b.label}（基準 ${lim}・#${b.issue}）`);
+      for (const r of all.filter((r) => r.key === b.key)) {
+        const mark = r.verdict === "ok" ? "✓" : r.verdict === "out" ? "✖" : "?";
+        console.log(`  ${mark} ${r.match.padEnd(22)} ${r.team.padEnd(4)} ${fmt(r).padStart(14)}  ${r.detail}`);
+      }
     }
+    const n = (v) => all.filter((r) => r.verdict === v).length;
+    console.log(`\n判定: 帯の中 ${n("ok")} / 帯の外 ${n("out")} / 測れていない ${n("unmeasured")}`);
   }
 }

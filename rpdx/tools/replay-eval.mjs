@@ -129,16 +129,15 @@ for (const [id, match] of Object.entries(MATCHES)) {
   }
 
   /* ---- 4) 形状帯（#135 エピック・未充足なので WARN）---- */
+  // 帯の定義と判定は shape-probe.mjs の BANDS / shapeVerdicts が唯一の出所。
+  // ここで閾値を書き直すと、ゲートと表示で基準がずれる。
   const shape = {};
   try {
-    const probe = (await import("./shape-probe.mjs")).shapeProbe;
-    const agg = probe(match);
-    for (const k of keys) {
-      const a = agg[k]; if (!a) continue;
-      shape[k] = { attLine: a.attLine?.p50, defFront: a.defFront?.p50, defCompact: a.defCompact?.p50 };
-      if (a.defFront?.p50 > 45) add(warn, `${k} 守備時の前線 ${a.defFront.p50.toFixed(1)}m（基準 ≤45・#136）`);
-      if (a.defCompact?.p50 > 40) add(warn, `${k} 守備時コンパクトネス ${a.defCompact.p50.toFixed(1)}m（基準 25–40・#137）`);
-      if (a.attLine?.p50 < 35) add(warn, `${k} 攻撃時の最終ライン ${a.attLine.p50.toFixed(1)}m（基準 35–50・#138）`);
+    const { shapeVerdicts, fmt } = await import("./shape-probe.mjs");
+    for (const r of shapeVerdicts(match)) {
+      (shape[r.team] ||= {})[r.key] = { v: r.values, n: r.n, verdict: r.verdict };
+      if (r.verdict === "out") add(warn, `${r.team} ${r.label} ${fmt(r)}（#${r.issue}）`);
+      if (r.verdict === "unmeasured") add(warn, `${r.team} の${r.label}が測れていない（${r.detail}）`);
     }
   } catch (e) { add(warn, `形状プローブを実行できない: ${e.message}`); }
 
@@ -161,8 +160,9 @@ for (const m of report.matches) {
   console.log(`  最大選手速度 ${m.vMaxSeen}m/s（上限 ${V_MAX}） / ボール最大 ${m.ballMaxStep}m/s / 最小ペア距離 ${m.minPair}m（${m.minPairAt}）`);
   console.log(`  危険度の最大跳び ${m.maxIdxJump}（${DT_SLOW}s あたり） / 保持者の交代 ${m.holderFlips} 回 / 助言の種類 ${m.adviceKinds.length}`);
   for (const k of Object.keys(m.shape)) {
-    const s = m.shape[k];
-    console.log(`  形状 ${k}: 攻撃時ライン ${s.attLine?.toFixed?.(1) ?? "—"} / 守備時前線 ${s.defFront?.toFixed?.(1) ?? "—"} / 守備compact ${s.defCompact?.toFixed?.(1) ?? "—"}`);
+    const cells = Object.entries(m.shape[k]).map(([key, v]) =>
+      `${key}=${v.verdict === "unmeasured" ? `測定不能(n=${v.n})` : v.v.join("–")}`);
+    console.log(`  形状 ${k}: ${cells.join(" / ")}`);
   }
   for (const w of m.warn) console.log(`  △ ${w}`);
   for (const k of m.known) console.log(`  ・既知 ${isKnown(k).id}: ${k}`);
