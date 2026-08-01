@@ -89,3 +89,26 @@ for (const m of Object.values(MATCHES)) {
     }
   });
 }
+
+// #184 GK は二等分線に貼り付くと 838m しか歩かない（実サッカーは 4,000〜5,500m）。
+// ボールが自陣に無いときだけ左右へ歩き回る。角度圧縮の性質（上の 4 本）は壊さない。
+test("#184 GK: 歩き回りで走行距離が増える（ただし角度圧縮を壊さない範囲）", () => {
+  const seen = [];
+  for (const m of Object.values(MATCHES)) {
+    const sc = E.actualScenario(m), end = E.playedRange(m).t1;
+    for (const k of E.teamKeys(m)) {
+      const gk = m.teams[k].squad.find((p) => p.pos === "GK" && E.presenceOf(m, sc, k, p.no));
+      if (!gk) continue;
+      const pr = E.presenceOf(m, sc, k, gk.no);
+      const d = E.distanceCovered(m, sc, k, gk.no, end) / ((pr.to - pr.from) / 60) * 90;
+      seen.push({ id: m.meta.id, k, d });
+      // 対策前は 563〜838m だった。下限を 900m に置き、上限は実サッカーの範囲を超えないこと。
+      assert.ok(d > 900, `${m.meta.id} ${k} GK 走行 ${Math.round(d)}m（対策前 563〜838m から増えていない）`);
+      assert.ok(d < 6000, `${m.meta.id} ${k} GK 走行 ${Math.round(d)}m（実サッカーの上限を超えている）`);
+    }
+  }
+  assert.ok(seen.length >= 8, `GK の標本 ${seen.length}`);
+  // 支配しているチームの GK ほど歩く（相手陣にボールがある時間が長い＝歩ける）
+  const top = Math.max(...seen.map((s) => s.d));
+  assert.ok(top > 2500, `最も歩く GK が ${Math.round(top)}m（歩き回りが効いていない）`);
+});

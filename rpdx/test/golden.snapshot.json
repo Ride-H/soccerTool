@@ -2,49 +2,49 @@
  "version": 1,
  "entries": {
   "wc2026-r32-bra-jpn|actual": {
-   "pos": "802166d1",
+   "pos": "2a42439d",
    "ball": "3ef921a5",
    "carrier": "cb2d4f2b",
    "score": "JPN:1,BRA:2"
   },
   "wc2026-r32-bra-jpn|whatif-cancel-last-sub": {
-   "pos": "fb01b663",
-   "ball": "2eae5870",
+   "pos": "5e928124",
+   "ball": "839b61a5",
    "carrier": "8c096380",
    "score": "JPN:1,BRA:2"
   },
   "wc2026-r16-arg-egy|actual": {
-   "pos": "80d964ba",
+   "pos": "c1a48add",
    "ball": "47d242da",
    "carrier": "ceca6e5a",
    "score": "ARG:3,EGY:2"
   },
   "wc2026-r16-arg-egy|whatif-cancel-last-sub": {
-   "pos": "e0d8acf4",
+   "pos": "d9817d34",
    "ball": "da200c1c",
    "carrier": "6ea305e8",
    "score": "ARG:4,EGY:2"
   },
   "wc2026-final-esp-arg|actual": {
-   "pos": "d99b380a",
+   "pos": "d42479c1",
    "ball": "8388f53b",
    "carrier": "f97a0777",
    "score": "ESP:1,ARG:0"
   },
   "wc2026-final-esp-arg|whatif-cancel-last-sub": {
-   "pos": "de6b8238",
+   "pos": "2d910f3a",
    "ball": "543e7e02",
    "carrier": "fb7017b5",
    "score": "ESP:1,ARG:1"
   },
   "wc2026-sf-fra-esp|actual": {
-   "pos": "01a57d02",
+   "pos": "47b045df",
    "ball": "d0a2c3a5",
    "carrier": "939052d8",
    "score": "FRA:0,ESP:2"
   },
   "wc2026-sf-fra-esp|whatif-cancel-last-sub": {
-   "pos": "92dfc771",
+   "pos": "e02a44f8",
    "ball": "5624917b",
    "carrier": "07bd57c1",
    "score": "FRA:0,ESP:2"
