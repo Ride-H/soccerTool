@@ -30,9 +30,11 @@
 | TAC-03 | engine | 協調プレスが点灯し、最近接守備者が寄せる・2 番手がパスレーンを消す | 担保 | pressing.test.mjs 「trigger: 決定論・点灯率2〜20%」<br>pressing.test.mjs 「トリガ点灯中は最近接守備者が平均≤5.5mまで寄せる」<br>pressing.test.mjs 「cover shadow」 |
 | TAC-04 | engine | GK が角度を圧縮し、至近の脅威ほど前へ出る（自ゴール半径内・ボールを追い越さない） | 担保 | gk.test.mjs 「GKは常に自ゴール半径内・ボールを追い越さない」<br>gk.test.mjs 「角度圧縮」<br>gk.test.mjs 「至近ほど飛び出す」 |
 | TAC-05 | engine | 疲労が終盤の平均速度を落とし、交代した選手との差が出る | 担保 | engine.test.mjs 「疲労モデル: 出場時間とともに増加・交代INはフレッシュ」 |
-| TAC-06 | engine | 守備時（自陣被侵入時）の前線が ≤45m まで下がる（ブロックに参加する） | 未充足（#136） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
-| TAC-07 | engine | 守備時の縦コンパクトネスが 25–40m 帯に収まる（全局面平均 ≤45m） | 未充足（#137） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
-| TAC-08 | engine | 攻撃時の最終ラインが 35–50m 帯まで押し上がる | 未充足（#138） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
+| TAC-06 | engine | 自陣 30m 以内を相手が持つとき、非GK 7 人以上がボールより後方にいる | 未充足（#136） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
+| TAC-07 | engine | 守備時のブロック厚み（最深DF→最前MF）が 15–35m、ライン間距離が 6–16m に収まる | 未充足（#137） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
+| TAC-08 | engine | 最終ライン高さが試合平均 22–55m、攻撃時 35–55m に入る | 未充足（#138） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
+| TAC-10 | engine | 形状の基準値はすべて出典を持ち、局面の窓と出典の窓が一致している | 担保 | shape.test.mjs 「帯の定義: すべての基準値に出典」<br>ツール rpdx/tools/shape-probe.mjs |
+| TAC-11 | engine | 「守備時に何人がボールより後方へ戻るか」をボール深さ別に測れている（全員は戻らない） | 担保 | shape.test.mjs 「後方人数: ボール深さ別に測れていて」 |
 | RO-01 | layers | 解釈レイヤー（危険度/PSY/戦術/守備）は世界状態を書き換えない | 担保 | layers.test.mjs<br>defense.test.mjs 「読み取り専用・決定論: 呼び出し前後で世界不変」 |
 | RO-02 | danger | 危険度 6 モジュールが [0,100] に収まり、単調性（距離・ゴール距離）を持つ | 担保 | danger.test.mjs 「v2モジュール: 6モジュール」<br>danger.test.mjs 「距離-危険度: 守備者が近づくほど危険度が下がる」<br>danger.test.mjs 「脅威面 T(x,y): ゴール距離に単調」 |
 | RO-03 | ux | 編集（シナリオ what-if）は元の記録を書き換えない・保存/再読込で復元できる | 担保 | editframe.test.mjs<br>bundle.test.mjs<br>subsedit.test.mjs 「ショック得点: 追加してから取り消すと元のシナリオへ戻る」 |

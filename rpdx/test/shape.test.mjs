@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RPDX, MATCHES } from "./load.mjs";
-import { shapeProbe, frameLines, shapeVerdicts, MIN_N, fmt } from "../tools/shape-probe.mjs";
+import { shapeProbe, frameLines, shapeVerdicts, BANDS, MIN_N, fmt } from "../tools/shape-probe.mjs";
 
 const E = RPDX.engine;
 
@@ -21,11 +21,11 @@ export const SHAPE_V1_ACTIVE = false;
 // **ここに書いたものだけ**を許し、増えたらテストが落ちるようにする。
 // 減らすには局面の定義を見直すか、その試合を対象から外す判断を明示的にする。
 const UNMEASURED_ALLOW = new Set([
-  "wc2026-r32-bra-jpn|JPN|atkLine",      // 日本は敵陣深部までボールを運ぶ局面が少ない
-  "wc2026-r32-bra-jpn|BRA|defFront",     // ブラジルが自陣30m以内に押し込まれる局面が少ない
-  "wc2026-r32-bra-jpn|BRA|defCompact",
-  "wc2026-final-esp-arg|ESP|defFront",   // 決勝はスペインが支配し、守備局面の標本が 0
-  "wc2026-final-esp-arg|ESP|defCompact",
+  // 決勝はスペインが支配し、スペインが自陣30m以内で守る局面の標本が 0
+  "wc2026-final-esp-arg|ESP|defBlock",
+  "wc2026-final-esp-arg|ESP|defFront",
+  "wc2026-final-esp-arg|ESP|defBehind",
+  "wc2026-final-esp-arg|ESP|interLine",
   "wc2026-final-esp-arg|ARG|atkLine",    // 同じ理由でアルゼンチンの攻撃局面の標本が 0
 ]);
 
@@ -39,6 +39,41 @@ test("#140 shape-probe: 決定論・構造妥当（プローブが tools に整�
       assert.deepEqual(a[team], b[team], `${m.meta.id} ${team} 決定論`);
     }
   }
+});
+
+// #135: 帯の数字には必ず出典を持たせる。旧「守備時の前線 ≤45m」は、文献上
+// **最終ライン高さ**の数字（ミドルブロック 35–45m）を前線に当てていた誤りで、
+// 実サッカーでは起きない形（ローブロックで FW も 45m 以内へ）を正解にしていた。
+// 出典なしの数字が混ざると実装がその数字に合わせて歪むので、構造として禁止する。
+test("#135 帯の定義: すべての基準値に出典（src）と対応 Issue がある", () => {
+  for (const b of BANDS) {
+    assert.ok(b.src && b.src.length > 20, `${b.key}: 出典（src）が無い/短すぎる`);
+    assert.ok(Number.isInteger(b.issue), `${b.key}: 対応 Issue 番号が無い`);
+    assert.ok(b.lo != null || b.hi != null, `${b.key}: 上限も下限も無い（判定できない）`);
+    if (b.lo != null && b.hi != null) assert.ok(b.lo < b.hi, `${b.key}: 下限 ${b.lo} ≥ 上限 ${b.hi}`);
+  }
+  assert.ok(BANDS.length >= 6, `帯 ${BANDS.length} 件（一次量化として少なすぎる）`);
+});
+
+// #135: 「何人戻るか」は 1 つの数字ではなくボール深さの関数として持つ。
+// 実サッカーでも全員は戻らない（1〜2 人は前線に残る）ので、深さによらず
+// 「10 人全員を自陣へ」を目標にすると誤った形を正解にしてしまう。
+test("#135 後方人数: ボール深さ別に測れていて、押し込まれるほど増える", () => {
+  let checked = 0;
+  for (const m of Object.values(MATCHES)) {
+    const agg = shapeProbe(m);
+    for (const team of E.teamKeys(m)) {
+      const bins = agg[team].behindByDepth;
+      assert.ok(Array.isArray(bins) && bins.length >= 4, `${m.meta.id} ${team} 深さビンが無い`);
+      const usable = bins.filter((b) => b.n >= MIN_N && Number.isFinite(b.behind));
+      for (const b of usable) {
+        assert.ok(b.behind >= 0 && b.behind <= 10, `${m.meta.id} ${team} ${b.lo}-${b.hi}m 後方 ${b.behind} 人`);
+        assert.ok(Math.abs(b.behind + b.ahead - 10) <= 1, `${m.meta.id} ${team} 後方+前方が 10 人にならない`);
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked >= 12, `深さ別に測れたビン ${checked} 個（少なすぎる）`);
 });
 
 test("#140 shape-probe: frameLines は最終ライン≤前線・自ゴール縦深域内", () => {
@@ -64,11 +99,13 @@ test("#140 shape-probe: frameLines は最終ライン≤前線・自ゴール縦
 test("#140 shape-gate: JPN 守備形状は基準内（回帰ベンチ・改修で壊さない）", () => {
   const m = MATCHES["wc2026-r32-bra-jpn"];
   const jpn = shapeProbe(m).JPN;
-  // 現行: 守備時前線 p50≈38.2m（≤45）・守備時コンパクトネス p50≈27.1m（25–38帯内）
+  // 現行: 守備時前線 p50≈38.3m・コンパクトネス p50≈27.3m・後方人数 p50=7（唯一 #136 の帯に入るチーム）
   assert.ok(jpn.defFront.n >= MIN_N, `JPN 守備サンプル ${jpn.defFront.n}`);
   assert.ok(jpn.defFront.p50 <= 45, `JPN 守備時前線 p50 ${jpn.defFront.p50.toFixed(1)} ≤45`);
   assert.ok(jpn.defCompact.p50 <= 38, `JPN 守備時コンパクトネス p50 ${jpn.defCompact.p50.toFixed(1)} ≤38`);
   assert.ok(jpn.defCompact.p90 <= 40, `JPN 守備時コンパクトネス p90 ${jpn.defCompact.p90.toFixed(1)} ≤40`);
+  // 後方人数は #136 で他チームを引き上げる対象。JPN は既に帯の中なので、下げないことを固定する。
+  assert.ok(jpn.defBehind.p50 >= 7, `JPN 守備時の後方人数 p50 ${jpn.defBehind.p50} ≥7`);
 });
 
 // #175: 「測れていない」を「基準内」と混ぜない。標本不足で判定できない組み合わせは
@@ -84,7 +121,7 @@ test("#140 shape-gate: 標本不足で判定できない組み合わせが増え
   assert.deepEqual(gone, [], `測れるようになった組み合わせは許可リストから外すこと:\n  ${gone.join("\n  ")}`);
   // 判定できているものが十分にある（全部が「測れていない」で緑、を防ぐ）
   const judged = Object.values(MATCHES).flatMap((m) => shapeVerdicts(m)).filter((r) => r.verdict !== "unmeasured");
-  assert.ok(judged.length >= 24, `判定できた組み合わせ ${judged.length} 件（少なすぎる）`);
+  assert.ok(judged.length >= 40, `判定できた組み合わせ ${judged.length} 件（少なすぎる）`);
 });
 
 // 形状帯アサート（#136-138 完了で有効化）: 全収録試合・両チームで妥当性帯に収める。

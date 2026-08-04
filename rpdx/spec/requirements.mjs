@@ -163,24 +163,47 @@ export const REQUIREMENTS = [
   },
   {
     id: "TAC-06", area: "engine", status: "open", issue: 136,
-    text: "守備時（自陣被侵入時）の前線が ≤45m まで下がる（ブロックに参加する）",
+    text: "自陣 30m 以内を相手が持つとき、非GK 7 人以上がボールより後方にいる",
     source: "issue#136",
     plan: { kind: "test", file: "shape.test.mjs", name: "shape-gate v1: 全試合の形状帯" },
-    note: "現状 38.2〜52.7m（rpdx/tools/shape-probe.mjs で実測）。ゲートは skip 状態で登録済み",
+    note: "現状 5〜7 人（帯に入るのは JPN のみ）。**旧文言「前線が ≤45m まで下がる」は誤り**で、"
+      + "45m は文献上の最終ライン高さの数字を前線に当てていた。前線は ≤55m（実測 38〜53m）で既に妥当。"
+      + "実サッカーでも 1〜2 人は前線に残るため、10 人全員を戻す目標にはしない",
   },
   {
     id: "TAC-07", area: "engine", status: "open", issue: 137,
-    text: "守備時の縦コンパクトネスが 25–40m 帯に収まる（全局面平均 ≤45m）",
+    text: "守備時のブロック厚み（最深DF→最前MF）が 15–35m、ライン間距離が 6–16m に収まる",
     source: "issue#137",
     plan: { kind: "test", file: "shape.test.mjs", name: "shape-gate v1: 全試合の形状帯" },
-    note: "現状 p50 27.1〜40.6m。全局面平均は 31〜54m でまだ帯外のチームがある",
+    note: "現状 厚み 9.2〜40.7m（4/7 が帯外）・ライン間 11.2〜19.3m（5/7 が上限超え）。"
+      + "帯の出典は縦コンパクトネス 30–35m 以内・ユニット間 8–12m",
   },
   {
     id: "TAC-08", area: "engine", status: "open", issue: 138,
-    text: "攻撃時の最終ラインが 35–50m 帯まで押し上がる",
+    text: "最終ライン高さが試合平均 22–55m、攻撃時 35–55m に入る",
     source: "issue#138",
     plan: { kind: "test", file: "shape.test.mjs", name: "shape-gate v1: 全試合の形状帯" },
-    note: "現状 34.7〜41.6m（帯の下限付近）。ESP/ARG は決勝で標本不足（NaN）",
+    note: "攻撃時 35.3〜41.8m は全チーム合格。試合平均は 14.2〜34.9m で 3/8 が下限割れ（JPN/EGY/ARG）。"
+      + "帯の出典はローブロック 22–28m・ミドル 35–45m・ハイプレス 52–55m",
+  },
+
+  {
+    id: "TAC-10", area: "engine", status: "held", issue: 135,
+    text: "形状の基準値はすべて出典を持ち、局面の窓と出典の窓が一致している",
+    source: "issue#135",
+    checks: [
+      { kind: "test", file: "shape.test.mjs", name: "帯の定義: すべての基準値に出典" },
+      { kind: "tool", cmd: "rpdx/tools/shape-probe.mjs" },
+    ],
+    note: "出典なしの数字を基準にすると実装がその数字へ歪む。旧「守備時の前線 ≤45m」は"
+      + "最終ライン高さの数字の誤用で、実サッカーに無い形を正解にしていた",
+  },
+  {
+    id: "TAC-11", area: "engine", status: "held", issue: 135,
+    text: "「守備時に何人がボールより後方へ戻るか」をボール深さ別に測れている（全員は戻らない）",
+    source: "issue#135",
+    checks: [{ kind: "test", file: "shape.test.mjs", name: "後方人数: ボール深さ別に測れていて" }],
+    note: "1 つの数字に潰すと「全員戻る／誰も戻らない」の二択しか設計できない。#136 の設計材料",
   },
 
   /* ---------------- 読み取り専用レイヤー ---------------- */
