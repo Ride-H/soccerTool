@@ -68,3 +68,60 @@ test("画面層: 操作要素には説明（aria-label か文字）がある", (
   }
   assert.deepEqual(bad, [], `説明の無いボタン: ${bad.join(" / ")}`);
 });
+
+/* ---------------------------------------------------------------------------
+   #187 責任ある解析の規律を、文書と画面文言の両方で機械的に固定する。
+
+   PK コース記録（#189/#190）は「これまでに記録された本数」であって、次に起きることの
+   確率ではない。この区別は人の注意力ではなく検査で守る — 予測に踏み込む文言は、
+   足した本人には自然に見えるため、レビューで見落とされる。
+   --------------------------------------------------------------------------- */
+const docsDir = join(root, "..", "docs");
+const policySrc = readFileSync(join(docsDir, "RESPONSIBLE_ANALYSIS.md"), "utf8");
+const readmeSrc = readFileSync(join(root, "..", "README.md"), "utf8");
+
+test("#187 規律: 統治文書に PK コース記録の特則がある（黙って消えない）", () => {
+  assert.ok(/##\s*\d+\.\s*PK コース記録の特則/.test(policySrc), "RESPONSIBLE_ANALYSIS に PK の節が無い");
+  for (const clause of [
+    "確率を表示しない",
+    "次の 1 本に言及しない",
+    "順位付けをしない",
+    "他チームの練習の偵察",
+    "データ取得の適法性",
+  ]) assert.ok(policySrc.includes(clause), `RESPONSIBLE_ANALYSIS §PK に「${clause}」が無い`);
+  for (const clause of [
+    "起きたことを見て理解するための道具",
+    "他チームの練習の偵察",
+    "一切の責任を負いません",
+  ]) assert.ok(readmeSrc.includes(clause), `README の位置づけに「${clause}」が無い`);
+});
+
+// 画面文言で「予測」「確率」を使うときは、必ず否定・断りとセットであること。
+// 現状のコードはすべて否定形（「非予測」「予測ではありません」「予測値ではありません」）で、
+// その状態を固定する。PK の集計文言が「確率」を素で使ったらここで落ちる。
+test("#187 規律: 画面文言の「予測」「確率」は必ず否定とセット", () => {
+  const NEG = ["非予測", "ではなく", "ではありません", "ではあり", "ません"];
+  const bad = [];
+  for (const f of [...appFiles, "index.template.html"]) {
+    const src = readFileSync(join(appDir, f), "utf8");
+    src.split("\n").forEach((line, i) => {
+      if (!/予測|確率/.test(line)) return;
+      if (NEG.some((n) => line.includes(n))) return;
+      bad.push(`${f}:${i + 1} ${line.trim().slice(0, 70)}`);
+    });
+  }
+  assert.deepEqual(bad, [], `予測を断定する文言が入った ${bad.length} 件:\n  ${bad.join("\n  ")}`);
+});
+
+// PK の集計は実数と母数で示す（§6）。百分率だけを単独で出す文言を禁止する。
+test("#187 規律: 「傾向がある」「次は」の断定を画面文言に入れない", () => {
+  const bad = [];
+  for (const f of [...appFiles, "index.template.html"]) {
+    const src = readFileSync(join(appDir, f), "utf8");
+    src.split("\n").forEach((line, i) => {
+      if (!/傾向があ|次はここ|次に来る|来る可能性/.test(line)) return;
+      bad.push(`${f}:${i + 1} ${line.trim().slice(0, 70)}`);
+    });
+  }
+  assert.deepEqual(bad, [], `断定的な予測表現が入った ${bad.length} 件:\n  ${bad.join("\n  ")}`);
+});

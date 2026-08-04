@@ -453,6 +453,27 @@ export const REQUIREMENTS = [
       + "全チームを帯に入れるには GK の位置の作り方（二等分線への貼り付け）自体の見直しが要る",
   },
 
+  {
+    id: "POL-01", area: "docs", status: "held", issue: 187,
+    text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
+    source: "issue#187",
+    checks: [
+      { kind: "test", file: "uicontract.test.mjs", name: "統治文書に PK コース記録の特則がある" },
+      { kind: "test", file: "uicontract.test.mjs", name: "画面文言の「予測」「確率」は必ず否定とセット" },
+      { kind: "test", file: "uicontract.test.mjs", name: "「傾向がある」「次は」の断定を画面文言に入れない" },
+    ],
+    note: "確率を出さない設計にすることで、少ない標本から確率を作る問題が構造的に発生しない"
+      + "（1 試合で PK は 5 本、同じ選手なら 1 本）",
+  },
+  {
+    id: "POL-02", area: "docs", status: "held", issue: 187,
+    text: "記録してよい場と、データ取得の適法性の責任範囲を README と統治文書に明示する",
+    source: "issue#187",
+    checks: [{ kind: "test", file: "uicontract.test.mjs", name: "統治文書に PK コース記録の特則がある" }],
+    note: "公式戦・練習試合など観戦が認められている場のみ。他チームの練習の偵察は対象外。"
+      + "取得の適法性は利用者の責任で、本ツールは責任を負わない",
+  },
+
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
     id: "UX-01", area: "ux", status: "held", issue: 105,
