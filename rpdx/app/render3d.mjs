@@ -782,13 +782,17 @@
       mode: "orbit", theta: Math.PI / 2, phi: 0.62, dist: 78,
       target: [0, 0, 6], fov: 46,
       fly: { pos: [0, 22, 55], yaw: -Math.PI / 2, pitch: -0.32 },
-      anim: null, followBall: false,
+      anim: null, followBall: false, pkAim: false,
     };
+    const PK_HALF_W = 5.0;   // ゴール半幅 3.66m + ネット/ポストの余白（#188 の画角計算）
     const PRESETS = {
       broadcast: { theta: Math.PI / 2, phi: 0.62, dist: 78, target: [0, 0, 6], fov: 46, followBall: false },
       tactical: { theta: Math.PI / 2, phi: 1.42, dist: 136, target: [0, 0, 0], fov: 40, followBall: false },
       goal: { theta: Math.PI + 0.0001, phi: 0.32, dist: 46, target: [-32, 0, 0], fov: 52, followBall: false },
       pitch: { theta: Math.PI / 2, phi: 0.16, dist: 26, target: [0, 0, 0], fov: 58, followBall: true },
+      // #188 PK: キッカーの背後からゴールを見る。キッカー(スポット11m)・GK・ゴールマウス
+      // (7.32×2.44m)・ボールが 1 画面に入る近接画角。ゴールは pkAim がボール側で選ぶ。
+      pk: { theta: 0, phi: 0.13, dist: 23, target: [-52.5, 1.1, 0], fov: 33, followBall: false, pkAim: true },
     };
     const setPreset = (name, immediate) => {
       if (name === "fly") {
@@ -811,6 +815,7 @@
         cam.anim = { from: { theta: cam.theta, phi: cam.phi, dist: cam.dist, target: [...cam.target], fov: cam.fov }, to: p, u: 0 };
       }
       cam.followBall = p.followBall;
+      cam.pkAim = !!p.pkAim;
     };
     const eyePos = () => {
       if (cam.mode === "fly") return cam.fly.pos;
@@ -859,7 +864,7 @@
           const cx = Math.cos(cam.theta), sx = Math.sin(cam.theta);
           cam.target[0] = clamp(cam.target[0] + (-dx * sx + dy * cx) * s, -60, 60);
           cam.target[2] = clamp(cam.target[2] + (dx * cx + dy * sx) * s, -45, 45);
-          cam.followBall = false;
+          cam.followBall = false; cam.pkAim = false;
           pinchDist = d; pinchMx = mx; pinchMy = my;
         }
         return;
@@ -882,7 +887,7 @@
         cam.target[2] += (dx * cx + dy * sx) * s;
         cam.target[0] = clamp(cam.target[0], -60, 60);
         cam.target[2] = clamp(cam.target[2], -45, 45);
-        cam.followBall = false;
+        cam.followBall = false; cam.pkAim = false;
       } else {
         cam.theta += dx * 0.005;
         cam.phi = clamp(cam.phi + dy * 0.004, 0.06, 1.52);
@@ -1325,7 +1330,7 @@
         theta: side >= 0 ? 0.0001 : Math.PI + 0.0001,
         phi: 0.30, dist: 44, target: [side >= 0 ? 33 : -33, 0, 0], fov: 52, followBall: false,
       };
-      cam.mode = "orbit"; cam.followBall = false;
+      cam.mode = "orbit"; cam.followBall = false; cam.pkAim = false;
       if (immediate) {
         cam.anim = null;
         cam.theta = to.theta; cam.phi = to.phi; cam.dist = to.dist; cam.fov = to.fov; cam.target = [...to.target];
@@ -1363,6 +1368,25 @@
         const k = Math.min(1, dt * 2.2);
         cam.target[0] += (state.ball.x - cam.target[0]) * k;
         cam.target[2] += (-state.ball.y - cam.target[2]) * k;   // 幅軸は worldZ=-fieldY
+      }
+      // #188: PK はボールに近い側のゴールを見る。ボールを追わずゴールへ吸い付く
+      //（PK は固定カメラのほうが見やすい）。θ は最短回りで寄せる。
+      if (cam.pkAim && cam.mode === "orbit" && !cam.anim) {
+        const k = Math.min(1, dt * 2.2);
+        const gx = state.ball.x < 0 ? -52.5 : 52.5;
+        cam.target[0] += (gx - cam.target[0]) * k;
+        cam.target[2] += (0 - cam.target[2]) * k;
+        let d = (gx < 0 ? 0 : Math.PI) - cam.theta;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        cam.theta += d * k;
+        // 縦画角は固定なので、縦長の画面では横が切れる（実測: 390×844 でゴールポストが
+        // 画面外 x=±1.15）。ゴール幅 7.32m + 余白が横に収まる距離まで引く。
+        // 横に余裕がある画面ではプリセットの距離のままにする。
+        const asp = canvas.width / Math.max(1, canvas.height);
+        const hHalf = Math.atan(Math.tan((cam.fov * Math.PI) / 360) * asp);
+        const need = PK_HALF_W / Math.max(0.02, Math.tan(hHalf));
+        cam.dist += (Math.max(PRESETS.pk.dist, need) - cam.dist) * k;
       }
       if (cam.mode === "fly") {
         const sp = api.flySpeed * (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2.6 : 1) * dt;
@@ -1835,6 +1859,16 @@
     };
 
     // ピッキング（クリック → 選手）
+    // ワールド座標 → 正規化デバイス座標（-1..1）。画面内に入っているかを画素ではなく
+    // 座標で確かめるための計測フック（#188 の受け入れ条件）。z<=0 は背後。
+    api.project = (wx, wy, wz) => {
+      const mv = M4.mul(proj, view);
+      const cx = mv[0] * wx + mv[4] * wy + mv[8] * wz + mv[12];
+      const cy = mv[1] * wx + mv[5] * wy + mv[9] * wz + mv[13];
+      const cw = mv[3] * wx + mv[7] * wy + mv[11] * wz + mv[15];
+      return { x: cx / cw, y: cy / cw, w: cw };
+    };
+
     api.pick = (mx, my, state) => {
       const rect = canvas.getBoundingClientRect();
       const x = ((mx - rect.left) / rect.width) * 2 - 1;

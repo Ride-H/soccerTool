@@ -179,6 +179,42 @@ const main = async () => {
     compareGolden("cinematic_shadow_t1732", s4, readFileSync(join(outDir, "cinematic_shadow_t1732.png")));
   }
 
+  /* ---- S5 (#188): PK カメラの画角 ----
+     キッカー・GK・ゴールマウス左右端・クロスバー・ボールが 1 画面に入ること。
+     画素ではなく正規化デバイス座標で見る（api.project）。画素だと GPU 差で揺れるうえ、
+     「入っているか」を直接は測れない。
+     縦長の画面は縦画角が同じでも横が狭いので、両方の端末幅で確かめる。 */
+  for (const [W, H] of [[1280, 800], [390, 844]]) {
+    const page = await browser.newPage({ width: W, height: H });
+    await page.navigate(`file://${distHtml}?play=0&cam=pk`);
+    let ready = false, t0 = Date.now();
+    while (!ready && Date.now() - t0 < 40000) { await sleep(300); ready = await page.evaluate("!!(globalThis.RPDX && RPDX.app && RPDX.app.match)"); }
+    await sleep(2500);
+    const res = await page.evaluate(`(() => {
+      const A = RPDX.app, R = A.renderer;
+      if (!R || !R.project) return JSON.stringify({ err: "project フックが無い" });
+      const E = RPDX.engine;
+      const st = E.stateAt(A.match, A.scenario || E.actualScenario(A.match), A.t);
+      const gx = st.ball.x < 0 ? -52.5 : 52.5;
+      const spot = gx < 0 ? -41.5 : 41.5;   // PK スポットはゴールラインから 11m
+      const pts = {
+        goalL: [gx, 1.2, -3.66], goalR: [gx, 1.2, 3.66], bar: [gx, 2.44, 0],
+        kicker: [spot, 1.0, 0], gk: [gx + (gx < 0 ? 0.4 : -0.4), 1.0, 0], ball: [spot, 0.11, 0],
+      };
+      const out = {};
+      for (const [k, v] of Object.entries(pts)) {
+        const q = R.project(v[0], v[1], v[2]);
+        out[k] = q.w > 0 && Math.abs(q.x) <= 1 && Math.abs(q.y) <= 1;
+      }
+      return JSON.stringify(out);
+    })()`);
+    await page.dispose();
+    const r = JSON.parse(res);
+    const missing = Object.entries(r).filter(([, v]) => !v).map(([k]) => k);
+    check(`S5: PK カメラに要素が収まる（${W}×${H}）`, !r.err && missing.length === 0,
+      r.err || (missing.length ? `枠外: ${missing.join(",")}` : "全要素が枠内"));
+  }
+
   await browser.close();
   console.log(failures === 0 ? "\n視覚スモーク: 全チェック合格" : `\n視覚スモーク: ${failures} 件失敗（out/ に実画像あり）`);
   process.exit(failures === 0 ? 0 : 1);

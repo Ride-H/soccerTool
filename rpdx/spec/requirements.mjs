@@ -454,6 +454,16 @@ export const REQUIREMENTS = [
   },
 
   {
+    id: "UX-03", area: "ux", status: "held", issue: 188,
+    text: "PK カメラで、キッカー・GK・ゴールマウス左右端・クロスバー・ボールが 1 画面に入る",
+    source: "issue#188",
+    checks: [{ kind: "visual", scenario: "S5: PK カメラに要素が収まる" }],
+    note: "縦画角は固定なので縦長の画面では横が切れる（実測 390×844 でポストが x=±1.15）。"
+      + "ゴール幅 + 余白が横に収まる距離まで引くよう、アスペクトに応じて距離を決める。"
+      + "判定は画素ではなく正規化デバイス座標（api.project）— 画素は GPU 差で揺れるうえ"
+      + "「入っているか」を直接は測れない",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

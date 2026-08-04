@@ -223,7 +223,7 @@ self.onmessage = (e) => {
      動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
   const I18N = {
     en: {
-      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "PK": "Penalty", "追従": "Follow", "自由飛行": "Free-fly",
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
       "背番号": "Kit №", "リプレイ": "Replay", "品質": "Quality",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
@@ -264,6 +264,7 @@ self.onmessage = (e) => {
     }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
+      App.renderer = renderer;   // #188: 画角の受け入れ確認（api.project）から触れるようにする
     } catch (err) {
       // WebGL2 未対応環境（iOS の Files/Quick Look プレビュー等）: 固まらせず原因と導線を表示
       const l = $("#loading");
