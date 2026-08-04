@@ -48,7 +48,7 @@
 | OPS-02 | build | ロジック層のカバレッジが行 99% / 分岐 90% / 関数 98% を下回らない | 担保 | ツール rpdx/tools/coverage.sh |
 | OPS-03 | build | 収録試合のリプレイが実時間で破綻しない（危険度・保持・助言が連続で NaN を出さない） | 担保 | ツール rpdx/tools/replay-eval.mjs |
 | OPS-04 | engine | 交代・退場でスロットが割り当て直されても、ピッチに残る選手が瞬間移動しない | 担保 | outage.test.mjs 「退場後の交代はスロットのスワップだけ」<br>outage.test.mjs 「退場の瞬間もシェイプ切替のブレンドが効く」<br>ツール rpdx/tools/replay-eval.mjs |
-| OPS-05 | engine | 選手の速度上限 9.9m/s を、どの局面でも 1 フレームも超えない（0.25 秒刻みの全走査） | 未充足（#178） | ツール rpdx/tools/replay-eval.mjs |
+| OPS-05 | engine | 選手の速度上限 9.9m/s を、どの局面でも 1 フレームも超えない（0.25 秒刻みの全走査） | 未充足（#178） | property.test.mjs 「名簿変更の前後で位置が飛ばない」 |
 | OPS-06 | engine | 形状の判定は 3 値（帯の中／帯の外／測れていない）で、標本不足が「基準内」に化けない | 担保 | shape.test.mjs 「標本不足で判定できない組み合わせが増えていない」<br>ツール rpdx/tools/shape-probe.mjs |
 | LIVE-01 | engine | ライブの時計は壁時計の純関数（開始・中断・再開・中継への同期が決定論） | 担保 | live.test.mjs 「時計: 開始・一時停止・再開・中継への同期が壁時計の純関数」 |
 | LIVE-02 | engine | 入力（得点・シュート・CK・交代）が世界と解釈レイヤーへ反映される・直前の入力を取り消せる | 担保 | live.test.mjs 「反映: 入力した得点はスコア・イベント・危険度に効く」<br>live.test.mjs 「交代: 入力した交代が名簿へ反映される」<br>live.test.mjs 「入力: イベントと交代は時刻順に保たれ」 |

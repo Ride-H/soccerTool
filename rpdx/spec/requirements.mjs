@@ -326,9 +326,13 @@ export const REQUIREMENTS = [
   {
     id: "OPS-05", area: "engine", status: "open", issue: 178,
     text: "選手の速度上限 9.9m/s を、どの局面でも 1 フレームも超えない（0.25 秒刻みの全走査）",
-    source: "リプレイ評価 KN-03",
-    plan: { kind: "tool", cmd: "rpdx/tools/replay-eval.mjs" },
-    note: "#174 で GK（18.3→5.5m/s）とアンカー収束、#178 で順位の入れ替わりと寄せの解放を解消。残り 2 件・最大 11.0m/s",
+    source: "issue#178",
+    plan: { kind: "test", file: "property.test.mjs", name: "名簿変更の前後で位置が飛ばない" },
+    note: "位置を返す経路が 2 つあり、フェーズ切替のブレンドが描画側にしか入っていなかったのを是正"
+      + "（退場時 161m/s → 上限内）。0.25 秒刻みの全走査で 11 件 → 2 件。"
+      + "0.05 秒刻みで名簿変更の近傍を見ると 16 件が残り、台帳（KNOWN_JUMPS）で固定している。"
+      + "残りは交代で入った選手が相互分離の場に瞬間出現する系統と、斥力の変化率が接近速度に"
+      + "比例する構造的な上乗せ（分離を弱めると最小距離 0.25m を割る — 現在 0.295m）",
   },
   {
     id: "OPS-06", area: "engine", status: "held",

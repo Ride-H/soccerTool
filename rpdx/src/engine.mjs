@@ -1737,6 +1737,31 @@
   };
 
   /* ------------------------------ 状態合成 ------------------------------ */
+  // フェーズ切替（宣言フェーズ・退場リシェイプ）の平滑化。旧スロット→新スロットを補間する。
+  // #178: 位置を返す経路が 2 つ（stateAt の描画ループと stateFrozenPos）あり、この補間が
+  // 描画側にしか入っていなかった。速度・走行距離は stateFrozenPos を使うため、
+  // 「画面の選手は滑らかに動いているのに、報告される速度が 161m/s」という食い違いが出ていた。
+  // 位置の一意性（速度・軌跡・走行距離の整合）を保つため、両方からこの 1 か所を呼ぶ。
+  const phaseBlendedPos = (match, scenario, team, no, slot, t, ctx, roster) => {
+    const pos = playerPos(match, scenario, team, no, slot, t, ctx);
+    const dtPhase = t - roster.phaseFrom;
+    const htMod = E.htCorrectionOf(match, scenario, team);
+    const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
+    const phDelay = htNear ? htMod.delaySec : 0;
+    const phDur = htNear ? htMod.blendSec : 45;
+    if (!(roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur)) return pos;
+    const rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
+    const prevSlotId = Object.keys(rosterPrev.assign).find((k) => rosterPrev.assign[k] === no);
+    // #173: スロット ID が同じでも、シェイプが変われば座標は別物（4132 の RCM と 10_441 の
+    // RCM は別の位置）。ID の一致だけで判定するとシェイプ切替で 1 フレームだけ瞬間移動する。
+    if (!prevSlotId || (prevSlotId === slot.id && rosterPrev.shape === roster.shape)) return pos;
+    const prevSlot = F.SHAPES[rosterPrev.shape].find((s) => s.id === prevSlotId);
+    if (!prevSlot) return pos;
+    const posPrev = playerPos(match, scenario, team, no, prevSlot, t, ctx);
+    const u = N.smooth(clamp((dtPhase - phDelay) / phDur));
+    return { x: lerp(posPrev.x, pos.x, u), y: lerp(posPrev.y, pos.y, u) };
+  };
+
   // 単一スロットmemo: 同一フレーム内の重複呼び出し（描画・PSY・ピック等）を1回に
   let stateMemo = null;
   E.stateAt = (match, scenario, t) => {
@@ -1765,38 +1790,13 @@
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
-      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド。
-      // #61: opponentHt 指定チームのHT近傍切替は delay 秒ホールド後、blendSec かけて浸透
-      let rosterPrev = null, prevShape = null, blendU = 1;
-      const dtPhase = t - roster.phaseFrom;
-      const htMod = E.htCorrectionOf(match, scenario, team);
-      const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
-      const phDelay = htNear ? htMod.delaySec : 0;
-      const phDur = htNear ? htMod.blendSec : 45;
-      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur) {
-        rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
-        prevShape = F.SHAPES[rosterPrev.shape];
-        blendU = N.smooth(clamp((dtPhase - phDelay) / phDur));
-      }
       // 現在ピッチ上の11人
       for (const slot of shape) {
         const no = roster.assign[slot.id];
         if (no == null) continue;
         const p = match.teams[team].squad.find(q => q.no === no);
         if (!p) continue;
-        let pos = playerPos(match, scenario, team, no, slot, t, ctx);
-        if (rosterPrev) {
-          const prevSlotId = Object.keys(rosterPrev.assign).find(k => rosterPrev.assign[k] === no);
-          // #173: スロット ID が同じでも、シェイプが変われば座標は別物（4132 の RCM と 10_441 の RCM は
-          // 別の位置）。ID の一致だけで判定するとシェイプ切替で 1 フレームだけ瞬間移動する。
-          if (prevSlotId && (prevSlotId !== slot.id || rosterPrev.shape !== roster.shape)) {
-            const prevSlot = prevShape.find(s => s.id === prevSlotId);
-            if (prevSlot) {
-              const posPrev = playerPos(match, scenario, team, no, prevSlot, t, ctx);
-              pos = { x: lerp(posPrev.x, pos.x, blendU), y: lerp(posPrev.y, pos.y, blendU) };
-            }
-          }
-        }
+        let pos = phaseBlendedPos(match, scenario, team, no, slot, t, ctx, roster);
         // 入場アニメ: 交代直後はタッチラインから走り込む
         let entering = 0;
         const entT = roster.entered[no];
@@ -1951,7 +1951,7 @@
       sep: separationAt(match, scenario, tt),
       trigger: E.pressTriggerAt(match, scenario, tt), t: tt,
     };
-    return playerPos(match, scenario, team, no, slot, tt, ctx);
+    return phaseBlendedPos(match, scenario, team, no, slot, tt, ctx, roster);
   };
 
   /* --------------------------- 走行距離・速度 --------------------------- */
