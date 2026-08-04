@@ -1196,10 +1196,10 @@ self.onmessage = (e) => {
       const T = App.match.teams[c.team];
       const p = T.squad.find(q => q.no === c.no);
       return `<div class="contrib-row">
-        <span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:22px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:800">${c.no}</span>
+        <span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:22px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800">${c.no}</span>
         <span style="width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p?.ja ?? c.no}</span>
         <div class="track"><div style="height:100%;width:${clamp(c.val, 0, 1) * 100}%;background:${seriesColor(c.team)}"></div></div>
-        <span class="num" style="font-family:var(--mono);font-size:10px;color:var(--muted);width:26px;text-align:right">${(c.val * 100).toFixed(0)}</span>
+        <span class="num" style="font-family:var(--mono);color:var(--muted);width:26px;text-align:right">${(c.val * 100).toFixed(0)}</span>
       </div>`;
     }).join("");
   };
@@ -2000,6 +2000,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const bar = $("#liveBar");
     if (!bar) return;
     bar.style.display = liveState.session ? "" : "none";
+    // #105: 下部シートが出ている間は ⚙📈 トグルを上へ逃がす（CSS 側が body.live-on を見る）
+    document.body.classList.toggle("live-on", !!liveState.session);
     if (!liveState.session) return;
     const running = R.live.isRunning(liveState.session);
     bar.classList.toggle("running", running);

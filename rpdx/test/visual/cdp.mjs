@@ -97,14 +97,22 @@ export const launch = async ({ width = 1280, height = 800 } = {}) => {
   // ページ（タブ）単位のセッションを作る。シナリオごとに新規タブ＝新規レンダラで、
   // 仮想時間・localStorage 注入・描画状態をタブ内に隔離する（プロセス連続起動は
   // 2回目以降にコンポジタがフレームを発行しない事象があるため、タブ方式が安定）。
-  const newPage = async ({ width = 1280, height = 800 } = {}) => {
+  //   touch: true でタッチ端末として扱う（pointer:coarse / hover:none のCSSが効く状態にする）。
+  //   これを再現しないと、実機だけに当たる指定（タップ標的の拡大など）を測れない。
+  const newPage = async ({ width = 1280, height = 800, touch = false } = {}) => {
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
     await send("Page.enable", {}, sessionId);
     await send("Runtime.enable", {}, sessionId);
     // ビューポートを明示固定（プラットフォームのウィンドウ装飾差で 1280x713 等になるのを防ぐ）
     await send("Emulation.setDeviceMetricsOverride",
-      { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
+      { width, height, deviceScaleFactor: 1, mobile: touch }, sessionId);
+    if (touch) {
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 }, sessionId);
+      await send("Emulation.setEmulatedMedia", { features: [
+        { name: "pointer", value: "coarse" }, { name: "any-pointer", value: "coarse" },
+        { name: "hover", value: "none" }, { name: "any-hover", value: "none" }] }, sessionId);
+    }
     return {
       // ページスクリプト実行前に評価されるスクリプトを登録（navigate 前に呼ぶ・localStorage 事前注入等）
       async injectOnNewDocument(source) {

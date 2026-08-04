@@ -451,10 +451,12 @@ export const REQUIREMENTS = [
 
   /* ---------------- まだ検証手段が無いもの（意図的に可視化） ---------------- */
   {
-    id: "UX-01", area: "ux", status: "open", issue: 105,
-    text: "スマホ実機（〜360px 幅）でピンチズーム/2 本指パンができ、主要パネルがタッチで開閉できる",
+    id: "UX-01", area: "ux", status: "held", issue: 105,
+    text: "スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす",
     source: "issue#105",
-    plan: { kind: "manual", why: "実機のタッチ操作は自動化していない。CDP のタッチエミュレーションで一部は自動化可能（未着手）" },
+    checks: [{ kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" }],
+    note: "7 画面（分析初期・左右の引き出し・表示切替・タイムライン・インスペクタ・ライブバー）を"
+      + "pointer:coarse / hover:none を再現して実測。147 件 → 0 件。ピンチズーム/2本指パンは実装済み",
   },
   {
     id: "UX-02", area: "ux", status: "waived",
