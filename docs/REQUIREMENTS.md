@@ -30,7 +30,7 @@
 | TAC-03 | engine | 協調プレスが点灯し、最近接守備者が寄せる・2 番手がパスレーンを消す | 担保 | pressing.test.mjs 「trigger: 決定論・点灯率2〜20%」<br>pressing.test.mjs 「トリガ点灯中は最近接守備者が平均≤5.5mまで寄せる」<br>pressing.test.mjs 「cover shadow」 |
 | TAC-04 | engine | GK が角度を圧縮し、至近の脅威ほど前へ出る（自ゴール半径内・ボールを追い越さない） | 担保 | gk.test.mjs 「GKは常に自ゴール半径内・ボールを追い越さない」<br>gk.test.mjs 「角度圧縮」<br>gk.test.mjs 「至近ほど飛び出す」 |
 | TAC-05 | engine | 疲労が終盤の平均速度を落とし、交代した選手との差が出る | 担保 | engine.test.mjs 「疲労モデル: 出場時間とともに増加・交代INはフレッシュ」 |
-| TAC-06 | engine | 自陣 30m 以内を相手が持つとき、非GK 7 人以上がボールより後方にいる | 未充足（#136） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
+| TAC-06 | engine | 自陣 30m 以内を相手が持つとき、非GK 7 人以上がボールより後方にいる | 担保 | shape.test.mjs 「ブロック復帰: 押し込まれた時」 |
 | TAC-07 | engine | 守備時のブロック厚み（最深DF→最前MF）が 15–35m、ライン間距離が 6–16m に収まる | 未充足（#137） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
 | TAC-08 | engine | 最終ライン高さが試合平均 22–55m、攻撃時 35–55m に入る | 未充足（#138） | shape.test.mjs 「shape-gate v1: 全試合の形状帯」 |
 | TAC-10 | engine | 形状の基準値はすべて出典を持ち、局面の窓と出典の窓が一致している | 担保 | shape.test.mjs 「帯の定義: すべての基準値に出典」<br>ツール rpdx/tools/shape-probe.mjs |

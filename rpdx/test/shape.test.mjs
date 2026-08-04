@@ -22,10 +22,8 @@ export const SHAPE_V1_ACTIVE = false;
 // 減らすには局面の定義を見直すか、その試合を対象から外す判断を明示的にする。
 const UNMEASURED_ALLOW = new Set([
   // 決勝はスペインが支配し、スペインが自陣30m以内で守る局面の標本が 0
-  "wc2026-final-esp-arg|ESP|defBlock",
   "wc2026-final-esp-arg|ESP|defFront",
   "wc2026-final-esp-arg|ESP|defBehind",
-  "wc2026-final-esp-arg|ESP|interLine",
   "wc2026-final-esp-arg|ARG|atkLine",    // 同じ理由でアルゼンチンの攻撃局面の標本が 0
 ]);
 
@@ -106,6 +104,26 @@ test("#140 shape-gate: JPN 守備形状は基準内（回帰ベンチ・改修�
   assert.ok(jpn.defCompact.p90 <= 40, `JPN 守備時コンパクトネス p90 ${jpn.defCompact.p90.toFixed(1)} ≤40`);
   // 後方人数は #136 で他チームを引き上げる対象。JPN は既に帯の中なので、下げないことを固定する。
   assert.ok(jpn.defBehind.p50 >= 7, `JPN 守備時の後方人数 p50 ${jpn.defBehind.p50} ≥7`);
+});
+
+// #136 の本体ゲート: 押し込まれた時に中盤がボールより自ゴール側へ回り込む。
+// 対策前は 5〜7 人（帯に入るのは JPN のみ）だった。BRA は標本 9 件しか無いので対象外。
+test("#136 ブロック復帰: 押し込まれた時、非GK 7 人以上がボールより後方にいる", () => {
+  // 標本数: JPN193 / EGY195 / ARG(決勝)90 / ARG(R16)38 / FRA37 / ESP(準決)13 / BRA9 / ESP(決勝)0。
+  // BRA は自陣30m以内へ押し込まれた局面が 9 件しか無く、統計として扱わない（支配した側）。
+  const MIN_SAMPLES = 12;
+  const bad = [], judged = [];
+  for (const m of Object.values(MATCHES)) {
+    const agg = shapeProbe(m);
+    for (const team of E.teamKeys(m)) {
+      const v = agg[team].defBehind;
+      if (v.n < MIN_SAMPLES) continue;
+      judged.push(`${m.meta.id} ${team}`);
+      if (v.p50 < 7) bad.push(`${m.meta.id} ${team} 後方 ${v.p50} 人（n=${v.n}）`);
+    }
+  }
+  assert.ok(judged.length >= 6, `判定できたチーム ${judged.length}（少なすぎる）`);
+  assert.deepEqual(bad, [], `押し込まれた時に戻りきっていない ${bad.length} 件:\n  ${bad.join("\n  ")}`);
 });
 
 // #175: 「測れていない」を「基準内」と混ぜない。標本不足で判定できない組み合わせは

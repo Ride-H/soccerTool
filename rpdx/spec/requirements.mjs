@@ -162,17 +162,17 @@ export const REQUIREMENTS = [
     checks: [{ kind: "test", file: "engine.test.mjs", name: "疲労モデル: 出場時間とともに増加・交代INはフレッシュ" }],
   },
   {
-    id: "TAC-06", area: "engine", status: "open", issue: 136,
+    id: "TAC-06", area: "engine", status: "held", issue: 136,
     text: "自陣 30m 以内を相手が持つとき、非GK 7 人以上がボールより後方にいる",
     source: "issue#136",
-    plan: { kind: "test", file: "shape.test.mjs", name: "shape-gate v1: 全試合の形状帯" },
-    note: "現状 5〜7 人（帯に入るのは JPN のみ）。**旧文言「前線が ≤45m まで下がる」は誤り**で、"
-      + "45m は文献上の最終ライン高さの数字を前線に当てていた。前線は ≤55m（実測 38〜53m）で既に妥当。"
-      + "実サッカーでも 1〜2 人は前線に残るため、10 人全員を戻す目標にはしない",
+    checks: [{ kind: "test", file: "shape.test.mjs", name: "ブロック復帰: 押し込まれた時" }],
+    note: "5〜7 人 → 7〜8 人（判定した 6 チーム全て合格）。ブロックの高さをボールの深さから決める"
+      + "（中盤のみ・前線は出口として残す）。BRA は押し込まれた局面が 9 件しか無く判定対象外。"
+      + "**旧文言「前線が ≤45m まで下がる」は誤り**で、45m は最終ライン高さの数字だった",
   },
   {
     id: "TAC-07", area: "engine", status: "open", issue: 137,
-    text: "守備時のブロック厚み（最深DF→最前MF）が 15–35m、ライン間距離が 6–16m に収まる",
+    text: "ミドルブロックの厚みが 18–35m、ライン間距離が 6–16m に収まる",
     source: "issue#137",
     plan: { kind: "test", file: "shape.test.mjs", name: "shape-gate v1: 全試合の形状帯" },
     note: "現状 厚み 9.2〜40.7m（4/7 が帯外）・ライン間 11.2〜19.3m（5/7 が上限超え）。"

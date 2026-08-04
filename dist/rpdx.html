@@ -3077,6 +3077,13 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   const LINE_ROLES = { CB: 1, FB: 1, WB: 1 };
   const LINE_SYNC = 0.34;                  // 最終ラインを合意 x へ引き寄せる重み（同期昇降）
 
+  // #136 守備ブロックへの復帰: 中盤のみ（前線は出口として残す・最終ラインは 2.6 と二重になる）
+  const BLOCK_RECOVER = { DM: 1, CM: 1, AM: 0.85 };
+  const RECOVER_D0 = 48;      // 自ゴールから何 m 以内にボールが入ったら点灯しはじめるか
+  const RECOVER_SPAN = 22;    // 点灯の立ち上がり幅（連続ゲート＝速度上限を破らない）
+  const RECOVER_GOALSIDE = 3; // ボールより何 m 自ゴール側を目標にするか
+  const RECOVER_K = 0.9;      // 目標までの差をどれだけ詰めるか
+
   // 自チーム最終ラインの合意 x（同期前の生 base x の平均）
   E.defensiveLineAt = (match, scenario, team, t) => {
     scenario = scenario || E.actualScenario(match);
@@ -3821,6 +3828,30 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     // 「ブロック追従・集団サージ・プレス・ラン」の強度を落とす（終盤の質的変化）。
     // 交代のフレッシュな脚は fatigueOf が presence 起点なので自然に回復する。
     const fat = E.fatigueOf(match, scenario, team, no, t);
+
+    // 1.5) 守備ブロックへの復帰（#136）
+    // 攻守モーフ g は保持基調（遅い信号）で決まるため、支配しているチームの中盤は
+    // 相手に一時的に押し込まれている間も攻撃時の高さに留まる。実測では守備局面の
+    // MF の 51% がボールより平均 9.1m 前に居た（実サッカーは非GK 8〜9 人が後方）。
+    // ボールが自陣深くにある間だけ、中盤を守備側モーフへ寄せる。
+    // ・ゲートは平滑ボールの深さのみ＝連続。保持の切り替わりのような不連続を持たない
+    //   ので、速度上限（9.9m/s）に新しい違反を作らない。
+    // ・前線（ST/W）は触らない。実サッカーでも 1〜2 人は出口として前線に残る（#135）。
+    // ・最終ライン（CB/FB/WB）も触らない。2.6 の協調ライン制御と二重に効いてしまう。
+    // chainBuilding 中は無効（#30 のランと同じ扱い）。ここを効かせると守備ブロックの
+    // 位置が保持列の選定に混ざり、公式記録どおりに較正した再現（キックオフの保持・
+    // 得点の検知）が変わってしまう。較正済みの世界は動かさない。
+    if (!chainBuilding && BLOCK_RECOVER[role]) {
+      const bd = dir * ballS.x + HALF_W;                        // 自ゴールからのボール深さ
+      const wRec = N.smooth(clamp((RECOVER_D0 - bd) / RECOVER_SPAN)) * BLOCK_RECOVER[role];
+      if (wRec > 0.02) {
+        // 守備スロット自体がボールより前にある（実測: スロット 32.2m / ボール 26.8m）。
+        // モーフを深くしても届かないので、ブロックの高さをボールの深さから決める。
+        const myD = dir * x + HALF_W;
+        const target = bd - RECOVER_GOALSIDE;                   // ボールより自ゴール側へ
+        if (myD > target) x -= dir * (myD - target) * RECOVER_K * wRec;
+      }
+    }
 
     // 2) ブロック連動（平滑ボールへスライド — 守備ブロックの本質・疲労で緩む=ライン間延び）
     const cw = (F.chaseWeight[role] ?? 0.3) * (1 - 0.22 * fat);

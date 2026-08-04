@@ -117,11 +117,16 @@ export const shapeProbe = (match, opts = {}) => {
         if (ballDepth <= 30) { d.defBehind.push(lines.behind); d.defAhead.push(lines.ahead); }
       }
       if (ballDepth >= 75 && mine) d.atkLast.push(lines.last);          // 攻撃局面
-      else if (ballDepth <= 30 && car && !mine) {                       // 守備局面（相手保持）
+      else if (ballDepth <= 30 && car && !mine) {                       // 深い守備局面（相手保持）
         d.defFront.push(lines.front);
         d.defCompact.push(lines.compact);
-        if (Number.isFinite(lines.interLine)) d.interLine.push(lines.interLine);
         if (Number.isFinite(lines.line)) d.defLine.push(lines.line);
+      } else if (ballDepth > 30 && ballDepth <= 50 && car && !mine) {   // ミドルブロック局面
+        // 厚み・ライン間の出典（縦コンパクトネス 30–35m / ユニット間 8–12m）は
+        // **ミドルブロックの数字**。自陣ボックス際まで押し込まれた状態では、
+        // ブロックは物理的にそれより薄くなる（ゴールまで 26m しか無い所に 30m は入らない）。
+        // 帯ごとに、出典が語っている局面と同じ窓で測る。
+        if (Number.isFinite(lines.interLine)) d.interLine.push(lines.interLine);
         if (Number.isFinite(lines.block)) d.defBlock.push(lines.block);
       }
     }
@@ -171,8 +176,9 @@ export const BANDS = [
     src: "文献の平均ライン高さ: ローブロック 22–28m / ミドル 35–45m / ハイプレス 52–55m。"
       + "どの戦い方でもこの 22–55m に入る。**局面で条件付けた値にこの帯は当てられない**"
       + "（出典が試合平均の数字のため。ボール ≤30m 窓の値は帯なしで報告する）" },
-  { key: "defBlock", stat: ["p10", "p90"], lo: 15, hi: 35, label: "守備時のブロック厚み（最深DF→最前MF）", issue: 137,
-    src: "縦コンパクトネス = 最深守備者と最前中盤の距離 30–35m 以内。アトレティコの4バック↔2トップは 25m" },
+  { key: "defBlock", stat: ["p10", "p90"], lo: 18, hi: 35, label: "ミドルブロックの厚み（最深DF→最前MF）", issue: 137,
+    src: "縦コンパクトネス = 最深守備者と最前中盤の距離 30–35m 以内。アトレティコの4バック↔2トップは 25m。"
+      + "**ミドルブロックの数字**なので、窓もミドルブロック（ボール 30–50m・相手保持）に合わせる" },
   { key: "defFront", stat: "p50", hi: 55, label: "守備時の前線高さ（前残り込み）", issue: 136,
     src: "ローブロックでも FW はハーフウェー（52.5m）付近かそれ以下まで下がる。**≤45m は最終ラインの数字の誤用だった**" },
   { key: "defBehind", stat: "p50", lo: 7, hi: 10, label: "自ゴール30m以内を相手が持つ時のボール後方人数", issue: 136,
@@ -182,7 +188,7 @@ export const BANDS = [
       + "20m 以内はこのエンジンでは標本が 0 件（＝そこまで深く運ばれない）ため、測れる最深の窓を採った" },
   { key: "atkLine", stat: "p50", lo: 35, hi: 55, label: "攻撃時の最終ライン高さ", issue: 138,
     src: "ミドルブロック 35–45m・ハイプレス時 52–55m。敵陣深部に運んでいる間はこの範囲まで押し上がる" },
-  { key: "interLine", stat: "p50", lo: 6, hi: 16, label: "ライン間距離（ユニット重心間）", issue: 137,
+  { key: "interLine", stat: "p50", lo: 6, hi: 16, label: "ミドルブロックのライン間距離", issue: 137,
     src: "ユニット間の適正距離 8–12m。ライン間で自由に受けられる距離を作らないための基準" },
 ];
 
