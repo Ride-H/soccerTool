@@ -80,15 +80,25 @@ export const regionStats = (img, x0, y0, x1, y1) => {
 };
 
 // 2画像の差分（許容差 tol 超の画素数と比率）— サイズ不一致は全画素差扱い
-export const diffCount = (a, b, tol) => {
+// mask: 比較から外す矩形の配列 [{x, y, w, h}]（#193: UI パネルの帯を外す）。
+// ratio は「比較した画素」に対する割合。マスクで母数が減ることを隠さない。
+export const diffCount = (a, b, tol, mask) => {
   if (a.width !== b.width || a.height !== b.height)
     return { pixels: a.width * a.height, ratio: 1, sizeMismatch: true };
-  let d = 0;
-  const n = a.width * a.height;
-  for (let i = 0; i < n * 4; i += 4) {
+  const rects = (mask || []).filter((r) => r && r.w > 0 && r.h > 0);
+  const skip = (x, y) => {
+    for (const r of rects)
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
+    return false;
+  };
+  let d = 0, n = 0;
+  for (let y = 0; y < a.height; y++) for (let x = 0; x < a.width; x++) {
+    if (rects.length && skip(x, y)) continue;
+    n++;
+    const i = (y * a.width + x) * 4;
     if (Math.abs(a.rgba[i] - b.rgba[i]) > tol ||
         Math.abs(a.rgba[i + 1] - b.rgba[i + 1]) > tol ||
         Math.abs(a.rgba[i + 2] - b.rgba[i + 2]) > tol) d++;
   }
-  return { pixels: d, ratio: d / n, sizeMismatch: false };
+  return { pixels: d, ratio: n ? d / n : 0, compared: n, sizeMismatch: false };
 };

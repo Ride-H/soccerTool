@@ -503,6 +503,15 @@ export const REQUIREMENTS = [
       + "成否の予測はしない — 記録から数えた結果だけを持つ",
   },
   {
+    id: "OPS-08", area: "ops", status: "held", issue: 193,
+    text: "視覚回帰の golden は 3D レンダリングだけを比較し、UI の変更で再ベースラインを要求しない",
+    source: "issue#193",
+    checks: [{ kind: "visual", scenario: "golden 差分（許容内）" }],
+    note: "画面に出ているパネル類の矩形を実測して比較から外す。実測: マスク前 8〜10% → 後 0.90〜1.43%"
+      + "（環境差の大半は UI の文字描画だった）。基準線が下がったぶん許容を 20% → 5% に締めた。"
+      + "UI の変更（ボタンの余白）では落ちず、3D の退行（芝の色）では 78% で落ちることを注入で確認",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

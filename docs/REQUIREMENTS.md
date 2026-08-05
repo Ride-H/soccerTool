@@ -66,6 +66,7 @@
 | UX-04 | ux | PK を 1 本ずつ記録できる（蹴る前の観測・コース・○×）。保存はライブセッションに載せる | 担保 | live.test.mjs 「PK: 1 本ずつ記録され、入力順に並び」<br>live.test.mjs 「PK: 保存と復元で記録が往復する」<br>live.test.mjs 「PK: 取り消しは PK の列だけを戻す」<br>ツール rpdx/tools/ui-probe.mjs |
 | UX-05 | ux | PK コースの記録本数をゴールマウス上に表示し、凡例と配色を危険度と分ける | 担保 | live.test.mjs 「PK: セルごとの本数が 0 と 1 で区別でき」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>ツール rpdx/tools/ui-probe.mjs |
 | UX-06 | ux | PK 戦の進行（5 本ずつ・打ち切り・サドンデス）と蹴る順番を、位置エンジンに載せずに扱う | 担保 | live.test.mjs 「PK戦: 残り本数で追いつけなくなったら」<br>live.test.mjs 「PK戦: 5 本ずつで同点ならサドンデスへ入り」<br>live.test.mjs 「PK戦: 順番を変えても記録済みの本は」 |
+| OPS-08 | ops | 視覚回帰の golden は 3D レンダリングだけを比較し、UI の変更で再ベースラインを要求しない | 担保 | 視覚 golden 差分（許容内） |
 | POL-01 | docs | PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>uicontract.test.mjs 「「傾向がある」「次は」の断定を画面文言に入れない」 |
 | POL-02 | docs | 記録してよい場と、データ取得の適法性の責任範囲を README と統治文書に明示する | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」 |
 | UX-01 | ux | スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす | 担保 | ツール rpdx/tools/ui-probe.mjs |

@@ -31,7 +31,13 @@ const FRAMES = 45;
 // 他OSはフォントラスタライズが根本的に異なり同一版でも 9〜11% ずれる（実測）ため、
 // 広い閾値で「大破綻のみ」検知する（存在チェックが主・golden はローカルでは参考）。
 const GOLDEN_TOL = 20;
-const GOLDEN_RATIO = process.platform === "linux" ? 0.025 : 0.20;
+// #193: UI パネルを比較から外したので、環境差の大半（文字描画）が消えた。
+// 実測: マスク前 8〜10% → マスク後 0.90〜1.43%（linux 以外の環境で・golden は linux 生成）。
+// 基準線が下がったぶん許容を締める（linux 以外 20% → 5%・実測に対して 3.5 倍の余裕）。
+// linux は golden の生成環境なので元から差が小さく、2.5% のまま。
+// 注: GOLDEN_TOL=20 は 1 画素あたりの許容。1 チャンネル 20/255 以下の色ずれは
+//     どれだけ広くても数えない（アンチエイリアスと GPU 差を無視するための設計）。
+const GOLDEN_RATIO = process.platform === "linux" ? 0.025 : 0.05;
 // ROI（1280x800・サイドパネル/HUD/タイムラインを避けたピッチ領域）
 const ROI_TAC = { x0: 430, y0: 240, x1: 850, y1: 620 };   // 俯瞰
 const ROI_BRD = { x0: 380, y0: 300, x1: 900, y1: 600 };   // 既定（放送）カメラ
@@ -45,6 +51,25 @@ const check = (name, ok, detail) => {
 // 1シナリオ = 新規タブ → （注入）→ 読込 → 実時間ポーリングで45フレーム完了待ち → 検証・撮影
 // （フレーム列自体はアプリの合成クロックで決定論 — ポーリング間隔は結果に影響しない）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// #193: 視覚回帰ゲートが守りたいのは **3D レンダリング**の退行。UI クロームまで比較すると、
+// ボタンを 1 個足すたびに golden の再ベースラインが要り、再ベースラインが日常作業になると
+// 本当のレンダリング退行が混ざっても気づかない（実際 #188 でボタン 1 個が 3.86% を出した）。
+// 画面に出ているパネル類の矩形を**実測して**比較から外す。UI の退行は ui-probe が担当する。
+const UI_SELECTOR = ".panel, .dock-toggle, #toggleL, #toggleR, #viewToggle, #tlToggle";
+const uiMaskScript = `(() => {
+  const out = [];
+  for (const el of document.querySelectorAll(${JSON.stringify(UI_SELECTOR)})) {
+    const s = getComputedStyle(el);
+    if (s.display === "none" || s.visibility === "hidden") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    // 影・ぼかしの縁が golden 比較に残らないよう少し広げる
+    out.push({ x: Math.floor(r.left) - 3, y: Math.floor(r.top) - 3,
+      w: Math.ceil(r.width) + 6, h: Math.ceil(r.height) + 6 });
+  }
+  return JSON.stringify(out);
+})()`;
+
 const runScenario = async (browser, { name, query, inject }) => {
   const page = await browser.newPage({ width: 1280, height: 800 });
   try {
@@ -63,10 +88,12 @@ const runScenario = async (browser, { name, query, inject }) => {
     check(`${name}: 描画完了（${FRAMES}フレーム）`, done === FRAMES, `__RPDX_SHOT_DONE=${done} rAF=${raf}`);
     check(`${name}: 実行時エラーなし`, (await page.evaluate("document.getElementById('fatal') ? 1 : 0")) === 0);
     check(`${name}: タイトル正常`, (await page.evaluate("document.title")).startsWith("RPD-X"));
+    const uiMask = JSON.parse(await page.evaluate(uiMaskScript));
     const buf = await page.screenshot();
     writeFileSync(join(outDir, `${name}.png`), buf);
     const img = decodePNG(buf);
     check(`${name}: 寸法`, img.width === 1280 && img.height === 800, `${img.width}x${img.height}`);
+    img.uiMask = uiMask;
     return img;
   } finally {
     await page.dispose();
@@ -86,9 +113,10 @@ const compareGolden = (name, img, buf) => {
     return;
   }
   const g = decodePNG(readFileSync(goldenPath));
-  const d = diffCount(img, g, GOLDEN_TOL);
+  const d = diffCount(img, g, GOLDEN_TOL, img.uiMask);
+  const pct = img.uiMask ? ((d.compared / (img.width * img.height)) * 100).toFixed(0) : 100;
   check(`${name}: golden 差分（許容内）`, !d.sizeMismatch && d.ratio <= GOLDEN_RATIO,
-    `diff=${(d.ratio * 100).toFixed(2)}%（許容 ${(GOLDEN_RATIO * 100).toFixed(1)}%・tol=${GOLDEN_TOL}）`);
+    `diff=${(d.ratio * 100).toFixed(2)}%（許容 ${(GOLDEN_RATIO * 100).toFixed(1)}%・tol=${GOLDEN_TOL}・比較 ${pct}%）`);
 };
 
 const main = async () => {
