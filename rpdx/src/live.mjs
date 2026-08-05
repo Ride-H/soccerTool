@@ -57,7 +57,9 @@
 
   /* ---------------- イベント入力 ---------------- */
   // ev: { t, type, team, no?, assist?, label?, detail? }
-  //   type: goal / shot / corner / yellow / red / foul（エンジンが解釈する型）
+  //   type: goal / shot / corner / yellow / red / foul / penalty（エンジンが解釈する型）
+  //   penalty は**試合中の PK**。試合時間 t を持ち、得点・シュートと同列に試合の記録へ入る。
+  //   PK 戦（withPk）とは別物 — あちらは試合時間を持たず、順番 n だけを持つ。
   L.withEvent = (s, ev) => {
     if (!ev || typeof ev.t !== "number" || !Number.isFinite(ev.t)) throw new Error("live.withEvent: t が必要");
     if (!ev.type) throw new Error("live.withEvent: type が必要");
@@ -76,7 +78,21 @@
     return s;
   };
 
-  /* ---------------- PK コース記録（#189） ----------------
+  /* ---------------- 試合中の PK（#196） ----------------
+     PK 戦（下の withPk）と混ぜない。違いは:
+       試合中の PK … 試合時間 t を持つ／同じチームに連続で与えられ得る／危険度に効く
+       PK 戦       … 試合時間を持たない／順番 n で交互／危険度に関係しない
+     コースと結果は PK 戦と同じ格子・同じ意味で持つ（記録の読み方を揃えるため）。 */
+  L.withPenalty = (s, ev) => {
+    if (!ev || ev.t == null) throw new Error("試合中の PK には t が必要");
+    if (!ev.team) throw new Error("試合中の PK には team が必要");
+    if (typeof ev.scored !== "boolean") throw new Error("試合中の PK には scored（○×）が必要");
+    if (ev.cell != null && (!Number.isInteger(ev.cell) || ev.cell < 0 || ev.cell >= L.PK_COLS * L.PK_ROWS))
+      throw new Error("試合中の PK の cell が範囲外");
+    return L.withEvent(s, { ...ev, type: "penalty" });
+  };
+
+  /* ---------------- PK 戦のコース記録（#189） ----------------
      規律は docs/RESPONSIBLE_ANALYSIS.md §6。ここに入るのは**観測して記帳した事実**だけで、
      確率も次の 1 本の予想も持たない。集計は本数と母数で返す（pkTally）。 */
 
@@ -115,8 +131,14 @@
   L.undoPk = (s) => ((s.pk && s.pk.length) ? { ...s, pk: s.pk.slice(0, -1) } : s);
 
   // 集計は**本数と母数**で返す。割合は返さない（§6: 確率を表示しない）。
+  // source: "shootout"（既定・PK 戦）/ "match"（試合中の PK）/ "both"
+  // 数える関数を分けると、片方だけ直る不具合を生む。対象の指定で 1 本にする。
   L.pkTally = (s, filter = {}) => {
-    const rows = (s.pk || []).filter((r) =>
+    const src = filter.source || "shootout";
+    const shootout = src === "match" ? [] : (s.pk || []);
+    const inMatch = src === "shootout" ? []
+      : (s.events || []).filter((e) => e.type === "penalty" && e.cell != null);
+    const rows = [...shootout, ...inMatch].filter((r) =>
       (!filter.team || r.team === filter.team) && (filter.kicker == null || r.kicker === filter.kicker));
     const cells = new Array(L.PK_COLS * L.PK_ROWS).fill(0);
     let scored = 0;
@@ -124,7 +146,8 @@
     return { cells, total: rows.length, scored };
   };
 
-  // 5 本ずつ → 同点ならサドンデス。返値は { n, team, decided, score }（#191 が使う土台）
+  // 5 本ずつ → 同点ならサドンデス。**PK 戦（s.pk）だけ**を見る。
+  // 試合中の PK（events の penalty）は順番を持たないので、ここには入れない。
   L.pkStanding = (s, teams) => {
     const [a, b] = teams;
     const score = { [a]: 0, [b]: 0 }, taken = { [a]: 0, [b]: 0 };
@@ -238,6 +261,20 @@
         pin(t - L.PRE_ROLL);
         possessionKP.push([Math.max(0, t - 30), (ev.team === kA ? +1 : -1) * 0.5]);
         possessionKP.push([Math.min(t + 30, END), 0]);
+      } else if (ev.type === "penalty") {
+        // ボールは PK スポット（ゴールラインから 11m）に据えられ、そこから蹴られる。
+        // 決まればゴールへ、外れ/セーブなら枠付近で止まる。
+        ballAnchors.push({ t: Math.max(0, t - 10), x: d * 41.5, y: 0, hold: 7 });
+        if (ev.scored) {
+          ballAnchors.push({ t, x: d * 52.2, y, hold: 4 });
+          ballAnchors.push({ t: Math.min(t + RESTART, END - 5), x: 0, y: 0, hold: 6 });
+        } else {
+          ballAnchors.push({ t, x: d * 52.0, y: y * 2.5, hold: 2 });
+        }
+        pin(t - L.PRE_ROLL);
+        possessionKP.push([Math.max(0, t - 40), (ev.team === kA ? +1 : -1) * 0.7]);
+        possessionKP.push([t, (ev.team === kA ? +1 : -1) * (ev.scored ? 0.95 : 0.6)]);
+        possessionKP.push([Math.min(t + 60, END), 0]);
       } else if (ev.type === "corner") {
         ballAnchors.push({ t, x: d * 52.4, y: (y > 0 ? 1 : -1) * 33.8, hold: 3 });
         pin(t - L.PRE_ROLL);
@@ -252,7 +289,9 @@
     possessionKP.sort((a, b) => a[0] - b[0]);
 
     const score = { [kA]: 0, [kB]: 0 };
-    for (const ev of events) if (ev.type === "goal" && score[ev.team] != null) score[ev.team]++;
+    // 決まった PK は得点。PK 戦の成否はここに入れない（試合のスコアではない）。
+    for (const ev of events)
+      if (score[ev.team] != null && (ev.type === "goal" || (ev.type === "penalty" && ev.scored))) score[ev.team]++;
 
     const subsActual = { [kA]: [], [kB]: [] };
     for (const sb of s.subs) if (subsActual[sb.team]) subsActual[sb.team].push({ t: sb.t, min: minLabel(s, sb.t), out: sb.out, in: sb.in });
@@ -261,9 +300,13 @@
     // 内容が変わったのに ID が同じだと**古い世界が返り続ける**（入力しても何も起きない）。
     // 名簿（cfg）も ID に含める。含めないと、チーム名や選手を変えても ID が同じままで
     // 各層のキャッシュが古い世界を返し続ける（UI 側も「変わっていない」と判断して描き直さない）。
+    // #196: 入力を**まるごと**ハッシュに入れる。項目を手で並べていたため、あとから足した
+    // フィールド（PK の scored / cell）がハッシュに入らず、成功と失敗で同じ ID になり
+    // 古い世界が返っていた（#182 と同じ型の不具合を、同じ場所で再発させた）。
+    // 手で並べる限りフィールドを足すたびに同じ穴が空くので、全体を入れる。
     let h = N.seedOf(JSON.stringify(s.cfg));
-    for (const ev of s.events) h = N.seedOf(`${h}|${ev.t}|${ev.type}|${ev.team}|${ev.no ?? ""}`);
-    for (const sb of s.subs) h = N.seedOf(`${h}|s${sb.t}|${sb.team}|${sb.out}|${sb.in}`);
+    for (const ev of s.events) h = N.seedOf(`${h}|${JSON.stringify(ev)}`);
+    for (const sb of s.subs) h = N.seedOf(`${h}|s${JSON.stringify(sb)}`);
     return {
       ...base,
       // id は入力内容で変える（各層のキャッシュが meta.id で引くため。同じ ID だと古い世界が返り続ける）。

@@ -247,6 +247,11 @@
 
   <!-- PK コース記録（#189）。表示は「これまでに記録された本数」— 確率は出さない（#187 §6） -->
   <div id="pkPanel" style="display:none" role="region" aria-label="PK コース記録（penalty kick log）">
+    <div class="pk-row" id="pkKind" role="group" aria-label="どちらを記録するか（which kind）">
+      <span class="eyebrow">記録する</span>
+      <button class="btn pk-b on" data-pkkind="shootout" aria-label="PK戦を記録する">PK戦</button>
+      <button class="btn pk-b" data-pkkind="match" aria-label="試合中のPKを記録する">試合中のPK</button>
+    </div>
     <div class="pk-head">
       <b id="pkOrder">1 本目</b>
       <span class="eyebrow" id="pkScore"></span>

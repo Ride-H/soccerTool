@@ -1482,6 +1482,9 @@ self.onmessage = (e) => {
       else if (ev.type === "yellow") pins.push({ t: ev.t, kind: "yellow" });
       else if (ev.type === "red") pins.push({ t: ev.t, kind: "red" });
       else if (ev.type === "save") pins.push({ t: ev.t, kind: "save" });
+      // #196: 試合中の PK。決まればゴールと同じ印、外れ/セーブは save と同じ印で出す
+      else if (ev.type === "penalty")
+        pins.push({ t: ev.t, kind: ev.scored ? "goal" : "save", c: seriesColor(ev.team, true) });
     }
     if (sc.outcome) for (const r of sc.outcome.removed) pins.push({ t: r.t, kind: "ghost" });
     for (const k of teamOrder()) for (const s of (sc.subs[k] || []))
@@ -1603,6 +1606,9 @@ self.onmessage = (e) => {
         else if (ev.type === "yellow") toast(`警告 ${ev.min || ""} ${ev.label.replace("警告 ", "")}`, "#FFC61A");
         else if (ev.type === "red") toast(`退場 ${ev.min || ""} ${ev.label.replace(/^退場 /, "")}`, "#E5484D");
         else if (ev.type === "save") toast(ev.label, "#7FA6FF");
+        else if (ev.type === "penalty")
+          toast(`PK ${ev.min || ""} ${ev.scored ? "成功" : "失敗"}${ev.label ? " " + ev.label : ""}`,
+            ev.scored ? seriesColor(ev.team, true) : "#7FA6FF");
         else if (ev.type === "halftime" || ev.type === "fulltime") toast(ev.label, "#94A2BD");
       }
     }
@@ -2119,7 +2125,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
      規律は docs/RESPONSIBLE_ANALYSIS.md §6。表示は「これまでに記録された本数」だけで、
      確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
   const pkState = { open: false, approach: null, gkMove: null, cell: null,
-    approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker" };   // scope: kicker | team | all
+    approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker",
+    kind: "shootout" };   // scope: kicker|team|all ／ kind: shootout（PK戦）| match（試合中のPK）
 
   const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
 
@@ -2176,7 +2183,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const st = R.live.pkStanding(liveState.session, pkTeamKeys());
     if (pkState.scope === "all") return {};
     if (pkState.scope === "team") return { team: st.team };
-    return { team: st.team, kicker: +$("#pkKicker").value || null };
+    return { team: pkState.kind === "match" ? (liveState.team || st.team) : st.team,
+      kicker: +$("#pkKicker").value || null };
   };
 
   const pkRenderTally = () => {
@@ -2184,9 +2192,15 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const keys = pkTeamKeys();
     const st = R.live.pkStanding(liveState.session, keys);
     const m = R.live.matchOf(liveState.session);
-    $("#pkOrder").textContent = `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
+    $("#pkOrder").textContent = pkState.kind === "match"
+      ? `試合中の PK · ${E.clockAt(m, R.live.tAt(liveState.session, Date.now())).disp} · ${m.teams[liveState.team || st.team]?.name ?? ""}`
+      : `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
+    for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
+      el.classList.toggle("on", el.dataset.pkkind === pkState.kind);
+    $("#pkOrderRow").style.display = pkState.kind === "match" ? "none" : "";
+    $("#pkResult").style.display = pkState.kind === "match" ? "none" : "";
     $("#pkScore").textContent = keys.map((k) => `${m.teams[k]?.name ?? k} ${st.score[k] ?? 0}`).join(" - ");
-    const t = R.live.pkTally(liveState.session, pkFilter());
+    const t = R.live.pkTally(liveState.session, { ...pkFilter(), source: pkState.kind });
     // 各セルに「本数」を出す。割合は出さない（§6: 確率を表示しない）
     for (const el of document.querySelectorAll("#pkGrid .cell")) {
       const c = +el.dataset.cell;
@@ -2194,7 +2208,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       el.classList.toggle("on", pkState.cell === c);
     }
     // 母数を必ず併記する（§6）。割合には直さない。
-    const all = R.live.pkTally(liveState.session);
+    const all = R.live.pkTally(liveState.session, { source: "both" });
     const label = pkState.scope === "all" ? "記録ぜんぶ" : pkState.scope === "team" ? "このチーム" : "このキッカー";
     const mine = t.total ? `${label} 全 ${t.total} 本（決まった ${t.scored} 本）` : `${label}の記録はまだありません`;
     $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
@@ -2233,11 +2247,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     if (pkState.cell == null) { liveLog("コースをタップしてから ○ / ✕ を押してください"); return; }
     const keys = pkTeamKeys();
     const st = R.live.pkStanding(liveState.session, keys);
-    liveState.session = R.live.withPk(liveState.session, {
-      team: st.team, kicker: +$("#pkKicker").value || null, gk: +$("#pkGk").value || null,
+    const common = {
+      kicker: +$("#pkKicker").value || null, gk: +$("#pkGk").value || null,
       approach: pkState.approach, gkMove: pkState.gkMove, cell: pkState.cell, scored,
       approachAt: pkState.approachAt, gkMoveAt: pkState.gkMoveAt, kickAt: pkState.kickAt,
-    });
+    };
+    if (pkState.kind === "match") {
+      // 試合中の PK は試合時間を持ち、得点・シュートと同列に試合の記録へ入る。
+      // チームは順番ではなく「いま選んでいるチーム」（同じチームに連続で与えられ得る）。
+      const team = liveState.team || st.team;
+      // 試合時刻はライブの時計を正とする（App.t は分析側のスクラブでも動くため）
+      const t = R.live.tAt(liveState.session, Date.now());
+      liveState.session = R.live.withPenalty(liveState.session, { ...common, t, team });
+    } else {
+      liveState.session = R.live.withPk(liveState.session, { ...common, team: st.team });
+    }
     // 「蹴る何秒前に GK が動いたか」は記録から後で出せる（結果だけでは残らない情報）
     const lead = pkState.gkMoveAt && pkState.kickAt ? ((pkState.kickAt - pkState.gkMoveAt) / 1000).toFixed(1) : null;
     pkReset();
@@ -2252,7 +2276,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     if (!pkState.open || !liveState.session) return null;
     const keys = pkTeamKeys();
     const st = R.live.pkStanding(liveState.session, keys);
-    const t = R.live.pkTally(liveState.session, pkFilter());
+    const t = R.live.pkTally(liveState.session, { ...pkFilter(), source: pkState.kind });
     if (!t.total) return null;
     const m = R.live.matchOf(liveState.session);
     const half = E.halfOf(m, App.t);
@@ -2274,7 +2298,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   const bindPk = () => {
     $("#livePk").onclick = () => pkOpen(!pkState.open);
     $("#pkUndo").onclick = () => {
-      liveState.session = R.live.undoPk(liveState.session);
+      liveState.session = pkState.kind === "match"
+        ? R.live.undo(liveState.session) : R.live.undoPk(liveState.session);
       liveSave(); pkFillWho(); pkRenderTally();
       liveLog("直前の PK 記録を取り消しました");
     };
@@ -2305,6 +2330,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     };
     for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
       el.onclick = () => { pkState.scope = el.dataset.pkscope; pkRenderTally(); };
+    for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
+      el.onclick = () => { pkState.kind = el.dataset.pkkind; pkReset(); pkFillWho(); pkRenderTally(); };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);
   };

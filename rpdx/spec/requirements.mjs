@@ -524,6 +524,21 @@ export const REQUIREMENTS = [
       + "UI の変更（ボタンの余白）では落ちず、3D の退行（芝の色）では 78% で落ちることを注入で確認",
   },
   {
+    id: "TAC-12", area: "engine", status: "held", issue: 196,
+    text: "試合中の PK と PK 戦を別のデータとして持つ（互いの集計・順番・危険度を汚さない）",
+    source: "issue#196",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "試合中の PK: 試合時間を持ち、同じチームに連続で" },
+      { kind: "test", file: "live.test.mjs", name: "PK 戦と試合中の PK が互いの集計・順番を汚さない" },
+      { kind: "test", file: "live.test.mjs", name: "試合中の PK: 危険度に効く／PK 戦は効かない" },
+      { kind: "test", file: "live.test.mjs", name: "試合 ID: 入力のどの項目を変えても世界が作り直される" },
+    ],
+    note: "試合中の PK は試合時間 t を持ち同じチームに連続で与えられ得る／PK 戦は順番 n で交互。"
+      + "調査で「試合中の PK を表す型が存在しない」ことが分かり、既存の pk は実質 PK 戦のデータだった。"
+      + "実装中に試合 ID のハッシュが項目を手で並べており scored/cell が漏れる不具合（#182 と同じ型）を"
+      + "踏んだため、入力をまるごとハッシュに入れるよう変えた",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

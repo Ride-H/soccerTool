@@ -372,3 +372,115 @@ test("互換: PK より前に保存したセッションを読み込める", () 
   assert.equal(next.pk.length, 1);
   assert.deepEqual(L.fromObj(L.toObj(next), Date.now()).pk, next.pk, "保存し直しても往復する");
 });
+
+/* ---------------------------------------------------------------------------
+   #196 試合中の PK と PK 戦を別のデータとして持つ。
+   違い: 試合中の PK は試合時間 t を持ち／同じチームに連続で与えられ得る／危険度に効く。
+         PK 戦は試合時間を持たず／順番 n で交互／危険度に関係しない。
+   --------------------------------------------------------------------------- */
+test("#196 試合中の PK: 試合時間を持ち、同じチームに連続で与えられる", () => {
+  let s = L.create(cfg());
+  s = L.withPenalty(s, { t: 1320, team: "TMA", kicker: 9, gk: 1, cell: 0, scored: true });
+  s = L.withPenalty(s, { t: 2100, team: "TMA", kicker: 9, gk: 1, cell: 8, scored: false });
+  const m = L.matchOf(s);
+  const pens = m.events.filter((e) => e.type === "penalty");
+  assert.equal(pens.length, 2, "同じチームに 2 本続けて入る（PK 戦では起こらない）");
+  assert.deepEqual(pens.map((e) => e.t), [1320, 2100], "試合時間を持つ");
+  assert.equal(pens[0].min, "22'", "分表示が付く＝試合のイベントとして扱われる");
+  // 決まった PK は試合の得点になる。PK 戦の成否は試合スコアに入れない。
+  assert.deepEqual(m.meta.score, { TMA: 1, TMB: 0 });
+});
+
+test("#196 試合中の PK: 危険度に効く／PK 戦は効かない", () => {
+  const base = L.create(cfg());
+  const T = 1320;
+  const peak = (sess) => {
+    const m = L.matchOf(sess), sc = E.actualScenario(m);
+    let x = 0;
+    for (let t = T - 10; t <= T + 1; t++) x = Math.max(x, D.indexAt(m, sc, t).TMA.total);
+    return x;
+  };
+  const plain = peak(base);
+  const withPen = peak(L.withPenalty(base, { t: T, team: "TMA", cell: 0, scored: true }));
+  const withShootout = peak(L.withPk(base, { team: "TMA", cell: 4, scored: true }));
+  assert.ok(withPen > plain + 15, `試合中の PK は危険度を上げる（${withPen.toFixed(1)} vs ${plain.toFixed(1)}）`);
+  assert.equal(withShootout, plain, "PK 戦は試合中の危険度に影響しない");
+});
+
+test("#196 試合中の PK: ボールが PK スポットへ据えられ、決まればゴールへ入る", () => {
+  const T = 1320;
+  const m = L.matchOf(L.withPenalty(L.create(cfg()), { t: T, team: "TMA", cell: 0, scored: true }));
+  const sc = E.actualScenario(m);
+  const half = E.halfOf(m, T), dir = m.dir.TMA[half === 1 ? "h1" : "h2"];
+  const at = (t) => E.ballAt(m, sc, t).x * dir;   // 攻撃方向を正にそろえる
+  assert.ok(Math.abs(at(T - 5) - 41.5) < 1.5, `蹴る前はスポット付近（実測 ${at(T - 5).toFixed(1)}・スポットは 41.5）`);
+  // 「ゴール内」は x だけでは決まらない。枠の幅（±3.66m）も見る。
+  const inGoal = (mm, t) => { const b = E.ballAt(mm, E.actualScenario(mm), t);
+    return b.x * dir > 52.1 && Math.abs(b.y) < 3.66; };
+  assert.ok(inGoal(m, T), "決まった PK はゴール枠の中へ入る");
+
+  const miss = L.matchOf(L.withPenalty(L.create(cfg()), { t: T, team: "TMA", cell: 0, scored: false }));
+  assert.deepEqual(miss.meta.score, { TMA: 0, TMB: 0 }, "外した PK は得点にならない");
+  assert.ok(!inGoal(miss, T), "外した PK はゴール枠の外");
+  // #196: 成功と失敗で試合 ID が変わること（同じだと古い世界が返り続ける — #182 と同じ型）
+  assert.notEqual(m.meta.id, miss.meta.id, "成功/失敗で ID が変わる（キャッシュが古い世界を返さない）");
+});
+
+test("#196 PK 戦と試合中の PK が互いの集計・順番を汚さない", () => {
+  let s = L.create(cfg());
+  s = L.withPenalty(s, { t: 1320, team: "TMA", kicker: 9, cell: 0, scored: true });
+  s = L.withPenalty(s, { t: 2100, team: "TMA", kicker: 9, cell: 8, scored: false });
+  // 試合中の PK を 2 本入れても、PK 戦は 1 本目・先攻チームから
+  const st0 = L.pkStanding(s, ["TMA", "TMB"]);
+  assert.equal(st0.n, 1);
+  assert.equal(st0.team, "TMA");
+  assert.deepEqual(st0.taken, { TMA: 0, TMB: 0 }, "試合中の PK は PK 戦の本数に入らない");
+  assert.equal(L.pkResult(s, ["TMA", "TMB"]).decided, false);
+
+  s = L.withPk(s, { team: "TMA", kicker: 9, cell: 4, scored: true });
+  assert.equal(L.pkStanding(s, ["TMA", "TMB"]).team, "TMB", "PK 戦は交互");
+
+  // 集計は対象を選べる（数える関数を分けると片方だけ直る不具合を生む）
+  assert.equal(L.pkTally(s).total, 1, "既定は PK 戦");
+  assert.equal(L.pkTally(s, { source: "match" }).total, 2, "試合中の PK");
+  assert.equal(L.pkTally(s, { source: "both" }).total, 3);
+  assert.equal(L.pkTally(s, { source: "both", kicker: 9 }).total, 3);
+  assert.equal(L.pkTally(s, { source: "match" }).scored, 1);
+});
+
+test("#196 試合中の PK: 不正な入力を受け付けない", () => {
+  const s = L.create(cfg());
+  assert.throws(() => L.withPenalty(s, { team: "TMA", scored: true }), /t が必要/);
+  assert.throws(() => L.withPenalty(s, { t: 100, scored: true }), /team が必要/);
+  assert.throws(() => L.withPenalty(s, { t: 100, team: "TMA" }), /scored/);
+  assert.throws(() => L.withPenalty(s, { t: 100, team: "TMA", scored: true, cell: 9 }), /cell が範囲外/);
+});
+
+test("#196 保存往復: 試合中の PK と PK 戦が両方そのまま戻る", () => {
+  let s = L.create(cfg());
+  s = L.withPenalty(s, { t: 1320, team: "TMA", kicker: 9, cell: 0, scored: true });
+  s = L.withPk(s, { team: "TMB", kicker: 10, cell: 8, scored: false });
+  const back = L.fromObj(L.toObj(s), Date.now());
+  assert.equal(back.events.filter((e) => e.type === "penalty").length, 1);
+  assert.deepEqual(back.pk, s.pk);
+  assert.equal(L.pkTally(back, { source: "both" }).total, 2);
+});
+
+// #196: 入力のどのフィールドを変えても試合 ID が変わること。
+// ID の材料を手で並べていると、あとから足したフィールドが漏れて古い世界が返る（実際 scored で踏んだ）。
+test("#196 試合 ID: 入力のどの項目を変えても世界が作り直される", () => {
+  const base = L.create(cfg());
+  const id = (sess) => L.matchOf(sess).meta.id;
+  const p = { t: 1320, team: "TMA", kicker: 9, gk: 1, cell: 0, scored: true };
+  const ref = id(L.withPenalty(base, p));
+  const variants = {
+    scored: { ...p, scored: false },
+    cell: { ...p, cell: 5 },
+    kicker: { ...p, kicker: 11 },
+    gk: { ...p, gk: 12 },
+    t: { ...p, t: 1500 },
+    team: { ...p, team: "TMB" },
+  };
+  for (const [k, v] of Object.entries(variants))
+    assert.notEqual(id(L.withPenalty(base, v)), ref, `${k} を変えても ID が同じ（古い世界が返る）`);
+});
