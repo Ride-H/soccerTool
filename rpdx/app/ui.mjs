@@ -2140,6 +2140,35 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     // GK は既定で背番号 1（居なければ先頭）
     const gk1 = gkTeam.squad.find((p) => p.no === 1);
     if (gk1) $("#pkGk").value = String(gk1.no);
+    // 順番の計画があれば、その本目の予定選手を選んでおく（#191）
+    const planned = R.live.pkPlanned(liveState.session, st.team, st.taken[st.team] + 1);
+    if (planned != null && kick.squad.some((p) => p.no === planned)) $("#pkKicker").value = String(planned);
+  };
+
+  // 蹴る順番は記録とは別に持つ。順番を変えても記録済みの本は 1 本も動かない（#191）。
+  const pkRenderOrder = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    const list = (liveState.session.pkOrder || {})[st.team] || [];
+    const name = (no) => { const q = m.teams[st.team]?.squad.find((x) => x.no === no); return q ? `${no} ${q.ja ?? ""}`.trim() : String(no); };
+    $("#pkOrderList").textContent = list.length
+      ? `${m.teams[st.team]?.name ?? st.team} の順番: ${list.map((n, i) => `${i + 1}) ${name(n)}`).join(" / ")}`
+      : "順番は未設定（キッカーはその都度選べます）";
+  };
+
+  const pkRenderResult = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const r = R.live.pkResult(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    const nm = (k) => m.teams[k]?.name ?? k;
+    $("#pkResult").textContent = r.decided
+      ? `決着: ${nm(r.winner)} の勝ち（${r.reason}・${keys.map((k) => `${nm(k)} ${r.score[k]}`).join(" - ")}）`
+      : r.phase === "sudden"
+        ? `サドンデス（${keys.map((k) => `${nm(k)} ${r.score[k]}`).join(" - ")}）`
+        : `${R.live.PK_REGULAR} 本ずつ（${keys.map((k) => `${nm(k)} ${r.score[k]} / ${r.taken[k]}本`).join(" · ")}）`;
   };
 
   // 絞り込みは 1 か所で決める。格子とゴールの粒子が別々の集計を見ていると読み違える。
@@ -2171,6 +2200,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
     for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
       el.classList.toggle("on", el.dataset.pkscope === pkState.scope);
+    pkRenderOrder(); pkRenderResult();
     const f = pkFieldOf();
     // 凡例は危険度と別物であることを明示する（同じ見た目で別の意味の色が混ざると誤読する）
     $("#pkLegend").textContent = f
@@ -2249,6 +2279,22 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveLog("直前の PK 記録を取り消しました");
     };
     $("#pkKicker").onchange = () => pkRenderTally();
+    $("#pkOrderAdd").onclick = () => {
+      const keys = pkTeamKeys();
+      const st = R.live.pkStanding(liveState.session, keys);
+      const no = +$("#pkKicker").value;
+      if (!no) return;
+      const cur = (liveState.session.pkOrder || {})[st.team] || [];
+      liveState.session = R.live.withPkOrder(liveState.session, st.team, [...cur, no]);
+      liveSave(); pkRenderTally();
+      liveLog(`${st.team} の順番に ${no} を足しました`);
+    };
+    $("#pkOrderClear").onclick = () => {
+      const st = R.live.pkStanding(liveState.session, pkTeamKeys());
+      liveState.session = R.live.withPkOrder(liveState.session, st.team, []);
+      liveSave(); pkRenderTally();
+      liveLog("蹴る順番をクリアしました");
+    };
     for (const el of document.querySelectorAll("#pkPanel [data-pkapp]")) el.onclick = () => {
       pkState.approach = el.dataset.pkapp; pkState.approachAt = Date.now();
       for (const o of document.querySelectorAll("#pkPanel [data-pkapp]")) o.classList.toggle("on", o === el);

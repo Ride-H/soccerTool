@@ -281,3 +281,77 @@ test("#190 PK: セルごとの本数が 0 と 1 で区別でき、絞り込み�
   assert.equal(all.cells[8], 1, "別のセルに 1 本");
   assert.ok(all.cells[0] > all.cells[8] && all.cells[8] > all.cells[4], "0本 < 1本 < 2本 の順に区別できる");
 });
+
+/* ---------------------------------------------------------------------------
+   #191 PK 戦の進行。位置エンジンには載せない（engine.mjs の差分ゼロ）。
+   成否の予測はしない — ここに在るのは記録から数えた結果だけ（#187 §6）。
+   --------------------------------------------------------------------------- */
+const T2 = ["TMA", "TMB"];
+const kick = (s, team, scored) => L.withPk(s, { team, cell: 4, scored });
+
+test("#191 PK戦: 残り本数で追いつけなくなったら 5 本を待たずに決着する", () => {
+  let s = L.create(cfg());
+  assert.equal(L.pkResult(s, T2).decided, false, "開始時は未決着");
+  for (const [tm, ok] of [["TMA", 1], ["TMB", 0], ["TMA", 1], ["TMB", 0]]) s = kick(s, tm, !!ok);
+  assert.equal(L.pkResult(s, T2).decided, false, "2-0（2本ずつ）はまだ追いつける");
+  s = kick(s, "TMA", true); s = kick(s, "TMB", false);
+  const r = L.pkResult(s, T2);
+  assert.equal(r.decided, true, "3-0（3本ずつ）は残り 2 本で追いつけない");
+  assert.equal(r.winner, "TMA");
+  assert.equal(r.reason, "打ち切り");
+  assert.equal(r.phase, "regular");
+});
+
+test("#191 PK戦: 5 本ずつで同点ならサドンデスへ入り、同数で差がついたら決着する", () => {
+  let s = L.create(cfg());
+  for (let i = 0; i < 5; i++) { s = kick(s, "TMA", true); s = kick(s, "TMB", true); }
+  const tied = L.pkResult(s, T2);
+  assert.equal(tied.decided, false);
+  assert.equal(tied.phase, "sudden", "5-5 はサドンデス");
+  assert.deepEqual(tied.taken, { TMA: 5, TMB: 5 });
+
+  s = kick(s, "TMA", true);
+  assert.equal(L.pkResult(s, T2).decided, false, "片方だけ蹴った時点では決着しない");
+  s = kick(s, "TMB", false);
+  const r = L.pkResult(s, T2);
+  assert.equal(r.decided, true);
+  assert.equal(r.winner, "TMA");
+  assert.equal(r.reason, "サドンデス");
+
+  // サドンデスで両者決めれば続く
+  let s2 = L.create(cfg());
+  for (let i = 0; i < 5; i++) { s2 = kick(s2, "TMA", false); s2 = kick(s2, "TMB", false); }
+  s2 = kick(s2, "TMA", true); s2 = kick(s2, "TMB", true);
+  assert.equal(L.pkResult(s2, T2).decided, false, "0-0 から 1-1 は続行");
+});
+
+test("#191 PK戦: 5 本ずつ終えて差があればそこで決着する", () => {
+  let s = L.create(cfg());
+  for (let i = 0; i < 5; i++) { s = kick(s, "TMA", i < 4); s = kick(s, "TMB", i < 3); }
+  const r = L.pkResult(s, T2);
+  assert.equal(r.decided, true);
+  assert.equal(r.winner, "TMA");
+  assert.equal(r.reason, "5 本ずつ");
+  assert.deepEqual(r.score, { TMA: 4, TMB: 3 });
+});
+
+test("#191 PK戦: 順番を変えても記録済みの本は 1 本も動かない", () => {
+  let s = L.create(cfg());
+  s = kick(s, "TMA", true);
+  s = kick(s, "TMB", false);
+  const before = JSON.stringify(s.pk);
+  s = L.withPkOrder(s, "TMA", [10, 9, 7]);
+  s = L.withPkOrder(s, "TMA", [7, 9, 10]);          // 並べ替え
+  s = L.withPkOrder(s, "TMB", [1, 2]);
+  assert.equal(JSON.stringify(s.pk), before, "記録は不変");
+  assert.deepEqual(s.pkOrder.TMA, [7, 9, 10]);
+  // 計画は巡回する（サドンデスで一巡しても止まらない）
+  assert.deepEqual([1, 2, 3, 4].map((n) => L.pkPlanned(s, "TMA", n)), [7, 9, 10, 7]);
+  assert.equal(L.pkPlanned(s, "TMC", 1), null, "計画の無いチームは null");
+  assert.throws(() => L.withPkOrder(s, "TMA", "10,9"), /背番号の配列/);
+  assert.throws(() => L.withPkOrder(s, null, [1]), /team が必要/);
+  // 保存往復
+  const back = L.fromObj(L.toObj(s), Date.now());
+  assert.deepEqual(back.pkOrder, s.pkOrder);
+  assert.deepEqual(back.pk, s.pk);
+});

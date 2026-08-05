@@ -490,6 +490,19 @@ export const REQUIREMENTS = [
       + "確率を出さないため Wilson 区間・標本数閾値は不要（#187 §6 の設計上の効き）",
   },
   {
+    id: "UX-06", area: "ux", status: "held", issue: 191,
+    text: "PK 戦の進行（5 本ずつ・打ち切り・サドンデス）と蹴る順番を、位置エンジンに載せずに扱う",
+    source: "issue#191",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "PK戦: 残り本数で追いつけなくなったら" },
+      { kind: "test", file: "live.test.mjs", name: "PK戦: 5 本ずつで同点ならサドンデスへ入り" },
+      { kind: "test", file: "live.test.mjs", name: "PK戦: 順番を変えても記録済みの本は" },
+    ],
+    note: "engine.mjs の差分ゼロ。エンジンは 22 人の連続な f(t)、PK 戦は 2 人の逐次離散イベントで"
+      + "構造が違う（#179・#137 で、構造に合わないものを載せると較正済みレイヤーが壊れることを実測）。"
+      + "成否の予測はしない — 記録から数えた結果だけを持つ",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

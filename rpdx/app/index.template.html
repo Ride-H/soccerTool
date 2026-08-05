@@ -253,6 +253,12 @@
       <span class="spacer"></span>
       <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
     </div>
+    <div class="pk-row" id="pkOrderRow" role="group" aria-label="蹴る順番（kicking order）">
+      <span class="eyebrow">蹴る順番</span>
+      <button class="btn pk-b" id="pkOrderAdd" aria-label="いま選んでいる選手を順番の最後に足す">＋ この選手</button>
+      <button class="btn pk-b" id="pkOrderClear" aria-label="蹴る順番をクリアする">クリア</button>
+    </div>
+    <div id="pkOrderList" class="hint"></div>
     <div id="pkWho" class="pk-row">
       <select id="pkKicker" class="sel" aria-label="キッカー（kicker）"></select>
       <select id="pkGk" class="sel" aria-label="GK（goalkeeper）"></select>
@@ -281,6 +287,7 @@
       <button class="btn pk-b" data-pkscope="team" aria-label="このチームの記録">チーム</button>
       <button class="btn pk-b" data-pkscope="all" aria-label="記録ぜんぶ">ぜんぶ</button>
     </div>
+    <div id="pkResult" class="hint"></div>
     <div id="pkTally" class="hint"></div>
     <div id="pkLegend" class="hint"></div>
   </div>

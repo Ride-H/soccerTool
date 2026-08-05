@@ -134,6 +134,54 @@
     return { n: n + 1, team: next, score, taken };
   };
 
+  /* ---------------- PK 戦の進行（#191） ----------------
+     位置エンジンには載せない。エンジンは 22 人の連続な f(t)、PK 戦は 2 人の逐次離散イベントで
+     構造が違う（#179・#137 で、構造に合わないものを載せると較正済みレイヤーが壊れることを実測済み）。
+     ここは記録の上に乗る集計だけを持つ。成否の予測はしない（#187 §6）。 */
+  L.PK_REGULAR = 5;                        // 5 本ずつ → 同点ならサドンデス
+
+  // 決着判定。返値 { decided, winner, phase, score, taken, reason }
+  //   phase: "regular"（5 本ずつ）/ "sudden"（サドンデス）
+  L.pkResult = (s, teams) => {
+    const [a, b] = teams;
+    const N = L.PK_REGULAR;
+    const score = { [a]: 0, [b]: 0 }, taken = { [a]: 0, [b]: 0 };
+    for (const r of s.pk || []) { taken[r.team]++; if (r.scored) score[r.team]++; }
+    const rest = (t) => Math.max(0, N - taken[t]);
+    const base = { score, taken };
+    if (taken[a] <= N && taken[b] <= N) {
+      // 残り本数で追いつけなくなったら、5 本を待たずに決着。
+      // 両者が 5 本蹴り終えている場合は「打ち切り」ではなく通常の決着。
+      const early = taken[a] < N || taken[b] < N;
+      const why = early ? "打ち切り" : `${N} 本ずつ`;
+      if (score[a] > score[b] + rest(b)) return { decided: true, winner: a, phase: "regular", reason: why, ...base };
+      if (score[b] > score[a] + rest(a)) return { decided: true, winner: b, phase: "regular", reason: why, ...base };
+      if (taken[a] < N || taken[b] < N) return { decided: false, phase: "regular", ...base };
+      if (score[a] !== score[b])
+        return { decided: true, winner: score[a] > score[b] ? a : b, phase: "regular", reason: "5 本ずつ", ...base };
+      return { decided: false, phase: "sudden", ...base };
+    }
+    // サドンデス: 同数蹴った時点で差がついていれば決着
+    if (taken[a] === taken[b] && score[a] !== score[b])
+      return { decided: true, winner: score[a] > score[b] ? a : b, phase: "sudden", reason: "サドンデス", ...base };
+    return { decided: false, phase: "sudden", ...base };
+  };
+
+  /* 蹴る順番の計画。記録（pk）とは別に持つので、順番を後から変えても
+     記録済みの本は 1 本も動かない。 */
+  L.withPkOrder = (s, team, nos) => {
+    if (!team) throw new Error("順番には team が必要");
+    if (!Array.isArray(nos)) throw new Error("順番は背番号の配列");
+    return { ...s, pkOrder: { ...(s.pkOrder || {}), [team]: nos.slice() } };
+  };
+
+  // n 本目（1 始まり）にそのチームが蹴る予定の背番号。計画が無ければ null。
+  L.pkPlanned = (s, team, n) => {
+    const list = (s.pkOrder || {})[team];
+    if (!list || !list.length) return null;
+    return list[(n - 1) % list.length] ?? null;
+  };
+
   const minLabel = (s, t) => {
     const h2 = 2700 + (s.cfg.added1 ?? 2) * 60;
     const m = t < h2 ? Math.floor(t / 60) : 45 + Math.floor((t - h2) / 60);
@@ -264,13 +312,15 @@
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
   L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
     events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })),
-    pk: (s.pk || []).map((r) => ({ ...r })) });
+    pk: (s.pk || []).map((r) => ({ ...r })),
+    ...(s.pkOrder ? { pkOrder: JSON.parse(JSON.stringify(s.pkOrder)) } : {}) });
 
   L.fromObj = (o, wallMs) => {
     if (!o || !o.cfg) return null;
     const s = { cfg: o.cfg, clock: [], events: (o.events || []).map((e) => ({ ...e })).sort((a, b) => a.t - b.t),
       subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t),
-      pk: (o.pk || []).map((r) => ({ ...r })) };
+      pk: (o.pk || []).map((r) => ({ ...r })),
+      ...(o.pkOrder ? { pkOrder: JSON.parse(JSON.stringify(o.pkOrder)) } : {}) };
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
