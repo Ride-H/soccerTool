@@ -275,7 +275,14 @@
       <button class="btn pk-res" id="pkOk" aria-label="決まった（scored）">○ 決まった</button>
       <button class="btn pk-res" id="pkNg" aria-label="止められた・外れた（no goal）">✕ 止/外</button>
     </div>
+    <div class="pk-row" id="pkScope" role="group" aria-label="集計の範囲（tally scope）">
+      <span class="eyebrow">見る範囲</span>
+      <button class="btn pk-b on" data-pkscope="kicker" aria-label="このキッカーの記録">この選手</button>
+      <button class="btn pk-b" data-pkscope="team" aria-label="このチームの記録">チーム</button>
+      <button class="btn pk-b" data-pkscope="all" aria-label="記録ぜんぶ">ぜんぶ</button>
+    </div>
     <div id="pkTally" class="hint"></div>
+    <div id="pkLegend" class="hint"></div>
   </div>
 
   <div id="liveLog" class="hint"></div>

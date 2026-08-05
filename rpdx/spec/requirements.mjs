@@ -477,6 +477,19 @@ export const REQUIREMENTS = [
       + "が後から見られない。集計は本数と母数のみ（§6: 確率を出さない）",
   },
   {
+    id: "UX-05", area: "ux", status: "held", issue: 190,
+    text: "PK コースの記録本数をゴールマウス上に表示し、凡例と配色を危険度と分ける",
+    source: "issue#190",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "PK: セルごとの本数が 0 と 1 で区別でき" },
+      { kind: "test", file: "uicontract.test.mjs", name: "画面文言の「予測」「確率」は必ず否定とセット" },
+      { kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" },
+    ],
+    note: "既存の粒子場を再利用。粒の数＝本数（明るさではなく数で示すので 0 本には 1 粒も出ない）。"
+      + "色は青緑で危険度（距離×人数×時間）と分け、凡例に「危険度の色とは別物」と母数を出す。"
+      + "確率を出さないため Wilson 区間・標本数閾値は不要（#187 §6 の設計上の効き）",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

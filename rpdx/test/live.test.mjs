@@ -261,3 +261,23 @@ test("#189 PK: 順番は交互で、決まった本数が数えられる", () =>
   assert.deepEqual(st.score, { TMA: 1, TMB: 0 });
   assert.deepEqual(st.taken, { TMA: 1, TMB: 1 });
 });
+
+// #190: ゴールマウスへ流す本数は、0 本と 1 本が構造的に区別できること。
+// 粒子は本数に比例して置くので、0 本のセルには 1 粒も出ない（明るさではなく数で示す）。
+test("#190 PK: セルごとの本数が 0 と 1 で区別でき、絞り込みで母数が変わる", () => {
+  let s = L.create(cfg());
+  s = L.withPk(s, { team: "TMA", kicker: 9, cell: 0, scored: true });
+  s = L.withPk(s, { team: "TMB", kicker: 10, cell: 0, scored: false });
+  s = L.withPk(s, { team: "TMA", kicker: 9, cell: 8, scored: true });
+
+  const kicker = L.pkTally(s, { team: "TMA", kicker: 9 });
+  const team = L.pkTally(s, { team: "TMA" });
+  const all = L.pkTally(s);
+  assert.deepEqual([kicker.total, team.total, all.total], [2, 2, 3], "絞り込みで母数が変わる");
+
+  // 0 本のセルは 0（描画側はこれを見て 1 粒も置かない）
+  assert.equal(all.cells[4], 0, "記録の無いセルは 0");
+  assert.equal(all.cells[0], 2, "同じセルに 2 本");
+  assert.equal(all.cells[8], 1, "別のセルに 1 本");
+  assert.ok(all.cells[0] > all.cells[8] && all.cells[8] > all.cells[4], "0本 < 1本 < 2本 の順に区別できる");
+});

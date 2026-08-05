@@ -64,6 +64,7 @@
 | TAC-09 | engine | GK の 90 分換算走行距離が実サッカーの範囲（3,000〜6,000m）に入る | 未充足（#184） | gk.test.mjs 「GK: 歩き回りで走行距離が増える」 |
 | UX-03 | ux | PK カメラで、キッカー・GK・ゴールマウス左右端・クロスバー・ボールが 1 画面に入る | 担保 | 視覚 S5: PK カメラに要素が収まる |
 | UX-04 | ux | PK を 1 本ずつ記録できる（蹴る前の観測・コース・○×）。保存はライブセッションに載せる | 担保 | live.test.mjs 「PK: 1 本ずつ記録され、入力順に並び」<br>live.test.mjs 「PK: 保存と復元で記録が往復する」<br>live.test.mjs 「PK: 取り消しは PK の列だけを戻す」<br>ツール rpdx/tools/ui-probe.mjs |
+| UX-05 | ux | PK コースの記録本数をゴールマウス上に表示し、凡例と配色を危険度と分ける | 担保 | live.test.mjs 「PK: セルごとの本数が 0 と 1 で区別でき」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>ツール rpdx/tools/ui-probe.mjs |
 | POL-01 | docs | PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>uicontract.test.mjs 「「傾向がある」「次は」の断定を画面文言に入れない」 |
 | POL-02 | docs | 記録してよい場と、データ取得の適法性の責任範囲を README と統治文書に明示する | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」 |
 | UX-01 | ux | スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす | 担保 | ツール rpdx/tools/ui-probe.mjs |

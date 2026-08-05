@@ -1523,6 +1523,29 @@
           }
         }
       }
+      // #190 PK コースの記録本数: ゴールマウス上に、記録された本数ぶんの粒を流す。
+      // 危険度（距離×人数×時間）とは無関係の量なので、色をはっきり分ける（青緑）。
+      // 粒の位置は決定論のハッシュで散らす（毎フレーム動くと本数が読めない）。
+      if (scene.pkField) {
+        const F = scene.pkField;
+        const cw = F.gw / F.cols, ch = F.gh / F.rows;
+        const sgn = F.gx < 0 ? 1 : -1;                 // ゴール面のわずか内側へ浮かせる向き
+        for (let cell = 0; cell < F.cells.length; cell++) {
+          const n = F.cells[cell];
+          if (!n) continue;
+          const c = cell % F.cols, r = Math.floor(cell / F.cols);
+          const w0 = (c - (F.cols - 1) / 2) * cw, h0 = (r + 0.5) * ch;
+          // 1 本につき 6 粒。多いセルほど濃く見える（明るさではなく数で示す）
+          const q = Math.min(n * 6, 96);
+          for (let k = 0; k < q; k++) {
+            const u = ((cell * 131 + k * 7919) % 997) / 997;
+            const v = ((cell * 197 + k * 6131) % 991) / 991;
+            const ph = ((cell * 29 + k * 13) % 97) / 97;
+            partPush(F.gx + sgn * 0.35, h0 + (v - 0.5) * ch * 0.82, -(w0 + (u - 0.5) * cw * 0.82),
+              0.42, ph, 0.30, 0.92, 0.86, 0.30);
+          }
+        }
+      }
       if (field && options.fieldMode === "particles") {
         let maxAbs = 0;
         for (let i = 0; i < field.grid.length; i++) {

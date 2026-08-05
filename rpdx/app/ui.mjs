@@ -2119,7 +2119,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
      規律は docs/RESPONSIBLE_ANALYSIS.md §6。表示は「これまでに記録された本数」だけで、
      確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
   const pkState = { open: false, approach: null, gkMove: null, cell: null,
-    approachAt: 0, gkMoveAt: 0, kickAt: 0 };
+    approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker" };   // scope: kicker | team | all
 
   const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
 
@@ -2142,6 +2142,14 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     if (gk1) $("#pkGk").value = String(gk1.no);
   };
 
+  // 絞り込みは 1 か所で決める。格子とゴールの粒子が別々の集計を見ていると読み違える。
+  const pkFilter = () => {
+    const st = R.live.pkStanding(liveState.session, pkTeamKeys());
+    if (pkState.scope === "all") return {};
+    if (pkState.scope === "team") return { team: st.team };
+    return { team: st.team, kicker: +$("#pkKicker").value || null };
+  };
+
   const pkRenderTally = () => {
     if (!liveState.session) return;
     const keys = pkTeamKeys();
@@ -2149,8 +2157,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     const m = R.live.matchOf(liveState.session);
     $("#pkOrder").textContent = `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
     $("#pkScore").textContent = keys.map((k) => `${m.teams[k]?.name ?? k} ${st.score[k] ?? 0}`).join(" - ");
-    const kicker = +$("#pkKicker").value || null;
-    const t = R.live.pkTally(liveState.session, { team: st.team, kicker });
+    const t = R.live.pkTally(liveState.session, pkFilter());
     // 各セルに「本数」を出す。割合は出さない（§6: 確率を表示しない）
     for (const el of document.querySelectorAll("#pkGrid .cell")) {
       const c = +el.dataset.cell;
@@ -2159,8 +2166,16 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     }
     // 母数を必ず併記する（§6）。割合には直さない。
     const all = R.live.pkTally(liveState.session);
-    const mine = t.total ? `このキッカー 全 ${t.total} 本（決まった ${t.scored} 本）` : "このキッカーの記録はまだありません";
+    const label = pkState.scope === "all" ? "記録ぜんぶ" : pkState.scope === "team" ? "このチーム" : "このキッカー";
+    const mine = t.total ? `${label} 全 ${t.total} 本（決まった ${t.scored} 本）` : `${label}の記録はまだありません`;
     $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
+    for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
+      el.classList.toggle("on", el.dataset.pkscope === pkState.scope);
+    const f = pkFieldOf();
+    // 凡例は危険度と別物であることを明示する（同じ見た目で別の意味の色が混ざると誤読する）
+    $("#pkLegend").textContent = f
+      ? `ゴールの青緑の粒＝これまでに記録された本数（母数 ${f.total} 本）。危険度の色とは別物です。`
+      : "記録が入ると、ゴールに本数ぶんの粒が出ます。";
   };
 
   const pkBuildGrid = () => {
@@ -2201,6 +2216,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     liveLog(`記録しました（${scored ? "○" : "✕"}）${lead ? ` — GK は蹴る ${lead} 秒前に動いた` : ""}`);
   };
 
+  // #190: ゴールマウスへ流す「記録された本数」。割合・確率は作らない（§6）。
+  // 見ているゴールは、記録している側が攻める方向で決める。
+  const pkFieldOf = () => {
+    if (!pkState.open || !liveState.session) return null;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const t = R.live.pkTally(liveState.session, pkFilter());
+    if (!t.total) return null;
+    const m = R.live.matchOf(liveState.session);
+    const half = E.halfOf(m, App.t);
+    const dir = m.dir[st.team][half === 1 ? "h1" : "h2"];
+    return { gx: dir * 52.5, cells: t.cells, total: t.total, scored: t.scored,
+      cols: R.live.PK_COLS, rows: R.live.PK_ROWS, gw: R.live.PK_GOAL_W, gh: R.live.PK_GOAL_H };
+  };
+
   const pkOpen = (on) => {
     pkState.open = on;
     $("#pkPanel").style.display = on ? "block" : "none";
@@ -2227,6 +2257,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       pkState.gkMove = el.dataset.pkgk; pkState.gkMoveAt = Date.now();
       for (const o of document.querySelectorAll("#pkPanel [data-pkgk]")) o.classList.toggle("on", o === el);
     };
+    for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
+      el.onclick = () => { pkState.scope = el.dataset.pkscope; pkRenderTally(); };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);
   };
@@ -2932,6 +2964,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       options: App.options,
       selected: App.selected,
       hover: App.hover,
+      pkField: pkFieldOf(),                                // #190: PK コースの記録本数
       editMode: !!App.editFrame, editSel: editSelDesc(),   // #133: 掴み対象のハイライト・ボールアフォーダンス
       contribMap, ballTrail, playerTrail,
       speedLabels, psyAura,
