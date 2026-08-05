@@ -2115,7 +2115,124 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     setMatch(getTemplateMatch());
   };
 
+  /* ---------------- PK コース記録（#189） ----------------
+     規律は docs/RESPONSIBLE_ANALYSIS.md §6。表示は「これまでに記録された本数」だけで、
+     確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
+  const pkState = { open: false, approach: null, gkMove: null, cell: null,
+    approachAt: 0, gkMoveAt: 0, kickAt: 0 };
+
+  const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
+
+  const pkReset = () => {
+    pkState.approach = null; pkState.gkMove = null; pkState.cell = null;
+    pkState.approachAt = 0; pkState.gkMoveAt = 0; pkState.kickAt = 0;
+  };
+
+  const pkFillWho = () => {
+    if (!liveState.session) return;
+    const m = R.live.matchOf(liveState.session);
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const kick = m.teams[st.team], gkTeam = m.teams[keys.find((k) => k !== st.team)];
+    const opt = (sq) => sq.map((p) => `<option value="${p.no}">${p.no} ${p.ja ?? ""}</option>`).join("");
+    $("#pkKicker").innerHTML = opt(kick.squad);
+    $("#pkGk").innerHTML = opt(gkTeam.squad);
+    // GK は既定で背番号 1（居なければ先頭）
+    const gk1 = gkTeam.squad.find((p) => p.no === 1);
+    if (gk1) $("#pkGk").value = String(gk1.no);
+  };
+
+  const pkRenderTally = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    $("#pkOrder").textContent = `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
+    $("#pkScore").textContent = keys.map((k) => `${m.teams[k]?.name ?? k} ${st.score[k] ?? 0}`).join(" - ");
+    const kicker = +$("#pkKicker").value || null;
+    const t = R.live.pkTally(liveState.session, { team: st.team, kicker });
+    // 各セルに「本数」を出す。割合は出さない（§6: 確率を表示しない）
+    for (const el of document.querySelectorAll("#pkGrid .cell")) {
+      const c = +el.dataset.cell;
+      el.querySelector(".cnt").textContent = t.cells[c] ? `${t.cells[c]}本` : "—";
+      el.classList.toggle("on", pkState.cell === c);
+    }
+    // 母数を必ず併記する（§6）。割合には直さない。
+    const all = R.live.pkTally(liveState.session);
+    const mine = t.total ? `このキッカー 全 ${t.total} 本（決まった ${t.scored} 本）` : "このキッカーの記録はまだありません";
+    $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
+  };
+
+  const pkBuildGrid = () => {
+    const g = $("#pkGrid");
+    if (g.dataset.built) return;
+    const label = ["左下", "中下", "右下", "左中", "中央", "右中", "左上", "中上", "右上"];
+    // 上段が画面の上に来るように、行を上から並べる（セル番号は 0=低左）
+    let html = "";
+    for (let r = R.live.PK_ROWS - 1; r >= 0; r--)
+      for (let c = 0; c < R.live.PK_COLS; c++) {
+        const i = r * R.live.PK_COLS + c;
+        html += `<button class="cell" data-cell="${i}" aria-label="コース ${label[i]}">${label[i]}<span class="cnt">—</span></button>`;
+      }
+    g.innerHTML = html;
+    g.dataset.built = "1";
+    for (const el of document.querySelectorAll("#pkGrid .cell")) el.onclick = () => {
+      pkState.cell = +el.dataset.cell;
+      pkState.kickAt = Date.now();          // コースを押した時刻＝蹴った瞬間として扱う
+      pkRenderTally();
+    };
+  };
+
+  const pkCommit = (scored) => {
+    if (!liveState.session) return;
+    if (pkState.cell == null) { liveLog("コースをタップしてから ○ / ✕ を押してください"); return; }
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    liveState.session = R.live.withPk(liveState.session, {
+      team: st.team, kicker: +$("#pkKicker").value || null, gk: +$("#pkGk").value || null,
+      approach: pkState.approach, gkMove: pkState.gkMove, cell: pkState.cell, scored,
+      approachAt: pkState.approachAt, gkMoveAt: pkState.gkMoveAt, kickAt: pkState.kickAt,
+    });
+    // 「蹴る何秒前に GK が動いたか」は記録から後で出せる（結果だけでは残らない情報）
+    const lead = pkState.gkMoveAt && pkState.kickAt ? ((pkState.kickAt - pkState.gkMoveAt) / 1000).toFixed(1) : null;
+    pkReset();
+    liveSave();
+    pkFillWho(); pkRenderTally();
+    liveLog(`記録しました（${scored ? "○" : "✕"}）${lead ? ` — GK は蹴る ${lead} 秒前に動いた` : ""}`);
+  };
+
+  const pkOpen = (on) => {
+    pkState.open = on;
+    $("#pkPanel").style.display = on ? "block" : "none";
+    $("#liveEvents").style.display = on ? "none" : "";
+    if (!on) return;
+    pkBuildGrid(); pkReset(); pkFillWho(); pkRenderTally();
+    for (const el of document.querySelectorAll("#pkPanel .pk-b, #pkPanel .pk-res")) el.classList.remove("on");
+    if (renderer) renderer.setPreset("pk");
+  };
+
+  const bindPk = () => {
+    $("#livePk").onclick = () => pkOpen(!pkState.open);
+    $("#pkUndo").onclick = () => {
+      liveState.session = R.live.undoPk(liveState.session);
+      liveSave(); pkFillWho(); pkRenderTally();
+      liveLog("直前の PK 記録を取り消しました");
+    };
+    $("#pkKicker").onchange = () => pkRenderTally();
+    for (const el of document.querySelectorAll("#pkPanel [data-pkapp]")) el.onclick = () => {
+      pkState.approach = el.dataset.pkapp; pkState.approachAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkapp]")) o.classList.toggle("on", o === el);
+    };
+    for (const el of document.querySelectorAll("#pkPanel [data-pkgk]")) el.onclick = () => {
+      pkState.gkMove = el.dataset.pkgk; pkState.gkMoveAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkgk]")) o.classList.toggle("on", o === el);
+    };
+    $("#pkOk").onclick = () => pkCommit(true);
+    $("#pkNg").onclick = () => pkCommit(false);
+  };
+
   const bindLive = () => {
+    bindPk();
     const btn = $("#btnLive");
     if (btn) btn.onclick = () => (liveState.session ? liveExit() : liveEnter());
     $("#liveStart").onclick = () => {

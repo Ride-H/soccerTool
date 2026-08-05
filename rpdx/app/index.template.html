@@ -226,6 +226,7 @@
     <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
     <button class="btn live-btn primary" id="liveHalf" style="display:none" aria-label="後半を開始する（start second half）">▶ 後半開始</button>
     <button class="btn live-btn" id="liveResume" style="display:none" aria-label="前回の続きから復帰（resume saved live）">⏱ 続きから</button>
+    <button class="btn live-btn" id="livePk" aria-label="PK コース記録（penalty kick log）">⚽ PK</button>
     <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
     <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
   </div>
@@ -243,6 +244,40 @@
   <div id="liveTeams" role="group" aria-label="入力するチーム（team to record）"></div>
   <div id="liveEvents" role="group" aria-label="いま起きたこと（what just happened）"></div>
   <div id="liveSubPick" style="display:none"></div>
+
+  <!-- PK コース記録（#189）。表示は「これまでに記録された本数」— 確率は出さない（#187 §6） -->
+  <div id="pkPanel" style="display:none" role="region" aria-label="PK コース記録（penalty kick log）">
+    <div class="pk-head">
+      <b id="pkOrder">1 本目</b>
+      <span class="eyebrow" id="pkScore"></span>
+      <span class="spacer"></span>
+      <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
+    </div>
+    <div id="pkWho" class="pk-row">
+      <select id="pkKicker" class="sel" aria-label="キッカー（kicker）"></select>
+      <select id="pkGk" class="sel" aria-label="GK（goalkeeper）"></select>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: 助走側（run-up side before the kick）">
+      <span class="eyebrow">蹴る前 助走</span>
+      <button class="btn pk-b" data-pkapp="L" aria-label="助走は左から">左</button>
+      <button class="btn pk-b" data-pkapp="C" aria-label="助走は正面から">正面</button>
+      <button class="btn pk-b" data-pkapp="R" aria-label="助走は右から">右</button>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: GK の早い動き（keeper's early movement）">
+      <span class="eyebrow">蹴る前 GK</span>
+      <button class="btn pk-b" data-pkgk="L" aria-label="GKは左へ動いた">左</button>
+      <button class="btn pk-b" data-pkgk="C" aria-label="GKは中央">中央</button>
+      <button class="btn pk-b" data-pkgk="R" aria-label="GKは右へ動いた">右</button>
+      <button class="btn pk-b" data-pkgk="S" aria-label="GKは動かなかった">静止</button>
+    </div>
+    <div id="pkGrid" role="group" aria-label="コース（ゴールマウスの 3×3・course）"></div>
+    <div class="pk-row" role="group" aria-label="結果（result）">
+      <button class="btn pk-res" id="pkOk" aria-label="決まった（scored）">○ 決まった</button>
+      <button class="btn pk-res" id="pkNg" aria-label="止められた・外れた（no goal）">✕ 止/外</button>
+    </div>
+    <div id="pkTally" class="hint"></div>
+  </div>
+
   <div id="liveLog" class="hint"></div>
 </div>
 

@@ -464,6 +464,19 @@ export const REQUIREMENTS = [
       + "「入っているか」を直接は測れない",
   },
   {
+    id: "UX-04", area: "ux", status: "held", issue: 189,
+    text: "PK を 1 本ずつ記録できる（蹴る前の観測・コース・○×）。保存はライブセッションに載せる",
+    source: "issue#189",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "PK: 1 本ずつ記録され、入力順に並び" },
+      { kind: "test", file: "live.test.mjs", name: "PK: 保存と復元で記録が往復する" },
+      { kind: "test", file: "live.test.mjs", name: "PK: 取り消しは PK の列だけを戻す" },
+      { kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" },
+    ],
+    note: "蹴る前の観測（助走側・GK の早い動き）を時刻つきで残す。結果だけでは「GK が早く倒れるか」"
+      + "が後から見られない。集計は本数と母数のみ（§6: 確率を出さない）",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

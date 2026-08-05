@@ -44,6 +44,7 @@ const SCENES = [
   { name: "危険度タイムライン", open: `document.querySelector("#tlToggle").click(), "ok"` },
   { name: "選手インスペクタ", open: `document.querySelector("#inspector").classList.add("open"), "ok"` },
   { name: "ライブ実況バー", open: `document.querySelector("#btnLive").click(), "ok"` },
+  { name: "PK コース記録", open: `(document.querySelector("#btnLive").click(), document.querySelector("#livePk").click(), "ok")` },
 ];
 
 const probe = `(() => {

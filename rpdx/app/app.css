@@ -554,6 +554,26 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 .live-in::placeholder { color: var(--muted); }
 @media (max-width: 560px) { #liveEvents .btn { flex: 1 1 44%; } }
 
+/* ---------- PK コース記録（#189） ---------- */
+#pkPanel { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.pk-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pk-head .spacer { flex: 1; }
+.pk-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.pk-row .eyebrow { width: 74px; flex: 0 0 auto; }
+.pk-b.on, .pk-res.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+/* ゴールマウス 3×3。上段が画面の上に来るように、行を上から並べる */
+#pkGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px;
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px;
+  background: linear-gradient(180deg, rgba(196,212,240,.05), rgba(5,9,17,.5)); }
+#pkGrid .cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 44px; border: 1px solid var(--line); border-radius: 6px;
+  background: rgba(5,9,17,.5); color: var(--muted); cursor: pointer;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+}
+#pkGrid .cell.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+#pkGrid .cell .cnt { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
 /* =========================================================================
    #105 タッチ端末（指で操作する端末）向けの上書き。
    **ファイル末尾に置くこと**: 同じ詳細度の指定が後ろにあると後勝ちで無効化される

@@ -180,3 +180,84 @@ test("入力の種類: シュート・CK もボールと保持に効く／範囲
   for (const a of clamped.ballAnchors) assert.ok(a.t >= 0 && a.t <= end, `anchor t=${a.t}`);
   assert.deepEqual(clamped.meta.score, { TMA: 0, TMB: 1 });
 });
+
+/* ---------------------------------------------------------------------------
+   #189 PK コース記録の契約。
+   規律（docs/RESPONSIBLE_ANALYSIS.md §6）はここでも守る: 集計は本数と母数だけを返し、
+   確率は返さない。保存はライブセッションに載せる（保存の仕組みを二重に作らない）。
+   --------------------------------------------------------------------------- */
+test("#189 PK: 1 本ずつ記録され、入力順に並び、母数つきで数えられる", () => {
+  let s = L.create(cfg());
+  assert.deepEqual(s.pk, [], "初期は空");
+  s = L.withPk(s, { team: "TMA", kicker: 9, gk: 1, approach: "L", gkMove: "R", cell: 0, scored: true });
+  s = L.withPk(s, { team: "TMB", kicker: 10, gk: 12, approach: "C", gkMove: "S", cell: 8, scored: false });
+  s = L.withPk(s, { team: "TMA", kicker: 9, gk: 1, approach: "L", gkMove: "L", cell: 0, scored: true });
+  assert.deepEqual(s.pk.map((r) => r.n), [1, 2, 3], "入力順に番号が付く");
+
+  const t = L.pkTally(s, { team: "TMA", kicker: 9 });
+  assert.equal(t.total, 2, "母数");
+  assert.equal(t.scored, 2);
+  assert.equal(t.cells[0], 2, "左下 2 本");
+  assert.equal(t.cells.reduce((a, b) => a + b, 0), t.total, "セルの合計＝母数");
+  // 割合・確率は返さない（§6）
+  for (const k of Object.keys(t)) assert.ok(!/rate|prob|pct|ratio/i.test(k), `確率めいた項目 ${k} を返している`);
+
+  const all = L.pkTally(s);
+  assert.equal(all.total, 3);
+});
+
+test("#189 PK: 不正な入力を受け付けない", () => {
+  const s = L.create(cfg());
+  assert.throws(() => L.withPk(s, { cell: 0, scored: true }), /team が必要/);
+  assert.throws(() => L.withPk(s, { team: "TMA", cell: 9, scored: true }), /cell が範囲外/);
+  assert.throws(() => L.withPk(s, { team: "TMA", cell: -1, scored: true }), /cell が範囲外/);
+  assert.throws(() => L.withPk(s, { team: "TMA", cell: 0 }), /scored/);
+  assert.throws(() => L.withPk(s, { team: "TMA", cell: 0, scored: true, approach: "X" }), /助走側/);
+  assert.throws(() => L.withPk(s, { team: "TMA", cell: 0, scored: true, gkMove: "X" }), /GK の動き/);
+});
+
+test("#189 PK: 取り消しは PK の列だけを戻す・元のセッションを書き換えない", () => {
+  let s = L.withEvent(L.create(cfg()), { t: 100, type: "goal", team: "TMA", no: 9 });
+  s = L.withPk(s, { team: "TMA", cell: 4, scored: true });
+  const snapshot = JSON.stringify(s);
+  const back = L.undoPk(s);
+  assert.equal(back.pk.length, 0);
+  assert.equal(back.events.length, 1, "イベントは触らない");
+  assert.equal(JSON.stringify(s), snapshot, "元のセッションは不変");
+  assert.equal(L.undoPk(L.create(cfg())).pk.length, 0, "空でも壊れない");
+});
+
+test("#189 PK: 保存と復元で記録が往復する（保存の仕組みを増やさない）", () => {
+  let s = L.create(cfg());
+  s = L.withPk(s, { team: "TMA", kicker: 9, gk: 1, approach: "R", gkMove: "L", cell: 5, scored: false,
+    approachAt: 1000, gkMoveAt: 1800, kickAt: 2000 });
+  const back = L.fromObj(L.toObj(s), Date.now());
+  assert.deepEqual(back.pk, s.pk, "PK 記録がそのまま戻る");
+  // 蹴る前の観測は時刻つきで残る（結果だけでは「GK が早く倒れるか」が分からない）
+  assert.equal(back.pk[0].kickAt - back.pk[0].gkMoveAt, 200);
+});
+
+test("#189 PK: ゴールマウスの格子が 3×3 で、セル中心がゴール内に収まる", () => {
+  assert.equal(L.PK_COLS * L.PK_ROWS, 9);
+  for (let c = 0; c < 9; c++) {
+    const p = L.pkCellCenter(c);
+    assert.ok(Math.abs(p.w) <= L.PK_GOAL_W / 2, `セル ${c} の幅 ${p.w} がゴール外`);
+    assert.ok(p.h > 0 && p.h <= L.PK_GOAL_H, `セル ${c} の高さ ${p.h} がゴール外`);
+  }
+  assert.equal(L.pkCellCenter(4).w, 0, "中央のセルは幅の中心");
+  assert.ok(L.pkCellCenter(0).h < L.pkCellCenter(6).h, "0 は下段・6 は上段");
+});
+
+test("#189 PK: 順番は交互で、決まった本数が数えられる", () => {
+  let s = L.create(cfg());
+  assert.equal(L.pkStanding(s, ["TMA", "TMB"]).n, 1);
+  assert.equal(L.pkStanding(s, ["TMA", "TMB"]).team, "TMA", "先攻は 1 番目のチーム");
+  s = L.withPk(s, { team: "TMA", cell: 0, scored: true });
+  assert.equal(L.pkStanding(s, ["TMA", "TMB"]).team, "TMB", "次は相手");
+  s = L.withPk(s, { team: "TMB", cell: 1, scored: false });
+  const st = L.pkStanding(s, ["TMA", "TMB"]);
+  assert.equal(st.n, 3);
+  assert.equal(st.team, "TMA");
+  assert.deepEqual(st.score, { TMA: 1, TMB: 0 });
+  assert.deepEqual(st.taken, { TMA: 1, TMB: 1 });
+});

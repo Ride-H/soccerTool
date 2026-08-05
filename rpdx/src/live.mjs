@@ -28,6 +28,7 @@
     clock: [],        // 時計の区間: {wall, t, rate}
     events: [],       // 入力したイベント（時刻昇順）
     subs: [],         // 入力した交代 {t, team, out, in}
+    pk: [],           // PK コース記録（#189・入力順）
   });
 
   /* ---------------- 時計 ---------------- */
@@ -73,6 +74,64 @@
     if (lastSub && (!lastEv || lastSub.t >= lastEv.t)) return { ...s, subs: s.subs.slice(0, -1) };
     if (lastEv) return { ...s, events: s.events.slice(0, -1) };
     return s;
+  };
+
+  /* ---------------- PK コース記録（#189） ----------------
+     規律は docs/RESPONSIBLE_ANALYSIS.md §6。ここに入るのは**観測して記帳した事実**だけで、
+     確率も次の 1 本の予想も持たない。集計は本数と母数で返す（pkTally）。 */
+
+  // ゴールマウス 7.32×2.44m を 3×3 に切る。番号は 0=低左 1=低中 2=低右 / 3..5=中段 / 6..8=上段。
+  // 5×3 も検討したが、1 セルあたりの本数が 1 本以下になり、分けても傾向が見えにくくなる。
+  L.PK_COLS = 3;
+  L.PK_ROWS = 3;
+  L.PK_GOAL_W = 7.32;
+  L.PK_GOAL_H = 2.44;
+
+  // セル番号 → ゴール面上の中心［m］。w は幅方向（キッカーから見て左が負）、h は高さ。
+  L.pkCellCenter = (cell) => {
+    const c = cell % L.PK_COLS, r = Math.floor(cell / L.PK_COLS);
+    return { w: (c - (L.PK_COLS - 1) / 2) * (L.PK_GOAL_W / L.PK_COLS),
+      h: (r + 0.5) * (L.PK_GOAL_H / L.PK_ROWS) };
+  };
+
+  const PK_SIDE = { L: 1, C: 1, R: 1 };          // 助走側 / GK の動き（S=静止は GK のみ）
+  const PK_GK = { L: 1, C: 1, R: 1, S: 1 };
+
+  // rec: { team, kicker, gk, approach, gkMove, cell, scored, approachAt?, gkMoveAt?, kickAt? }
+  // 蹴る**前**の観測（助走側・GK の早期の動き）は時刻つきで残す。結果だけを記録しても
+  // 「GK が早く倒れるか」は後から見られない。
+  L.withPk = (s, rec) => {
+    if (!rec || !rec.team) throw new Error("PK 記録には team が必要");
+    if (!Number.isInteger(rec.cell) || rec.cell < 0 || rec.cell >= L.PK_COLS * L.PK_ROWS)
+      throw new Error("PK 記録の cell が範囲外");
+    if (typeof rec.scored !== "boolean") throw new Error("PK 記録には scored（○×）が必要");
+    if (rec.approach != null && !PK_SIDE[rec.approach]) throw new Error("助走側は L/C/R");
+    if (rec.gkMove != null && !PK_GK[rec.gkMove]) throw new Error("GK の動きは L/C/R/S");
+    const pk = s.pk || [];
+    return { ...s, pk: [...pk, { n: pk.length + 1, ...rec }] };
+  };
+
+  // PK の取り消しは PK の列だけを見る（イベント・交代とは入力の文脈が別）
+  L.undoPk = (s) => ((s.pk && s.pk.length) ? { ...s, pk: s.pk.slice(0, -1) } : s);
+
+  // 集計は**本数と母数**で返す。割合は返さない（§6: 確率を表示しない）。
+  L.pkTally = (s, filter = {}) => {
+    const rows = (s.pk || []).filter((r) =>
+      (!filter.team || r.team === filter.team) && (filter.kicker == null || r.kicker === filter.kicker));
+    const cells = new Array(L.PK_COLS * L.PK_ROWS).fill(0);
+    let scored = 0;
+    for (const r of rows) { cells[r.cell]++; if (r.scored) scored++; }
+    return { cells, total: rows.length, scored };
+  };
+
+  // 5 本ずつ → 同点ならサドンデス。返値は { n, team, decided, score }（#191 が使う土台）
+  L.pkStanding = (s, teams) => {
+    const [a, b] = teams;
+    const score = { [a]: 0, [b]: 0 }, taken = { [a]: 0, [b]: 0 };
+    for (const r of s.pk || []) { taken[r.team] = (taken[r.team] || 0) + 1; if (r.scored) score[r.team]++; }
+    const n = (s.pk || []).length;
+    const next = n % 2 === 0 ? a : b;                 // 交互（先攻は teams[0]）
+    return { n: n + 1, team: next, score, taken };
   };
 
   const minLabel = (s, t) => {
@@ -204,12 +263,14 @@
      「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
   L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
-    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
+    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })),
+    pk: (s.pk || []).map((r) => ({ ...r })) });
 
   L.fromObj = (o, wallMs) => {
     if (!o || !o.cfg) return null;
     const s = { cfg: o.cfg, clock: [], events: (o.events || []).map((e) => ({ ...e })).sort((a, b) => a.t - b.t),
-      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t) };
+      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t),
+      pk: (o.pk || []).map((r) => ({ ...r })) };
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;

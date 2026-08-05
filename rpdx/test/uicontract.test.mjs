@@ -100,13 +100,15 @@ test("#187 規律: 統治文書に PK コース記録の特則がある（黙っ
 // 現状のコードはすべて否定形（「非予測」「予測ではありません」「予測値ではありません」）で、
 // その状態を固定する。PK の集計文言が「確率」を素で使ったらここで落ちる。
 test("#187 規律: 画面文言の「予測」「確率」は必ず否定とセット", () => {
-  const NEG = ["非予測", "ではなく", "ではありません", "ではあり", "ません"];
+  // 否定と分かる形。日本語の否定は「ません」だけでなく「〜ない」も取る
+  //（実測: 「確率は出さない」という規律のコメント自体が引っかかった）。
+  const NEG = [/非予測/, /ではなく/, /ではあり/, /ません/, /ない/];
   const bad = [];
   for (const f of [...appFiles, "index.template.html"]) {
     const src = readFileSync(join(appDir, f), "utf8");
     src.split("\n").forEach((line, i) => {
       if (!/予測|確率/.test(line)) return;
-      if (NEG.some((n) => line.includes(n))) return;
+      if (NEG.some((n) => n.test(line))) return;
       bad.push(`${f}:${i + 1} ${line.trim().slice(0, 70)}`);
     });
   }

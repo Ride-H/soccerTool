@@ -561,6 +561,26 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 .live-in::placeholder { color: var(--muted); }
 @media (max-width: 560px) { #liveEvents .btn { flex: 1 1 44%; } }
 
+/* ---------- PK コース記録（#189） ---------- */
+#pkPanel { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.pk-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pk-head .spacer { flex: 1; }
+.pk-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.pk-row .eyebrow { width: 74px; flex: 0 0 auto; }
+.pk-b.on, .pk-res.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+/* ゴールマウス 3×3。上段が画面の上に来るように、行を上から並べる */
+#pkGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px;
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px;
+  background: linear-gradient(180deg, rgba(196,212,240,.05), rgba(5,9,17,.5)); }
+#pkGrid .cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 44px; border: 1px solid var(--line); border-radius: 6px;
+  background: rgba(5,9,17,.5); color: var(--muted); cursor: pointer;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+}
+#pkGrid .cell.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+#pkGrid .cell .cnt { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
 /* =========================================================================
    #105 タッチ端末（指で操作する端末）向けの上書き。
    **ファイル末尾に置くこと**: 同じ詳細度の指定が後ろにあると後勝ちで無効化される
@@ -823,6 +843,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
     <button class="btn live-btn primary" id="liveHalf" style="display:none" aria-label="後半を開始する（start second half）">▶ 後半開始</button>
     <button class="btn live-btn" id="liveResume" style="display:none" aria-label="前回の続きから復帰（resume saved live）">⏱ 続きから</button>
+    <button class="btn live-btn" id="livePk" aria-label="PK コース記録（penalty kick log）">⚽ PK</button>
     <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
     <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
   </div>
@@ -840,6 +861,40 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   <div id="liveTeams" role="group" aria-label="入力するチーム（team to record）"></div>
   <div id="liveEvents" role="group" aria-label="いま起きたこと（what just happened）"></div>
   <div id="liveSubPick" style="display:none"></div>
+
+  <!-- PK コース記録（#189）。表示は「これまでに記録された本数」— 確率は出さない（#187 §6） -->
+  <div id="pkPanel" style="display:none" role="region" aria-label="PK コース記録（penalty kick log）">
+    <div class="pk-head">
+      <b id="pkOrder">1 本目</b>
+      <span class="eyebrow" id="pkScore"></span>
+      <span class="spacer"></span>
+      <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
+    </div>
+    <div id="pkWho" class="pk-row">
+      <select id="pkKicker" class="sel" aria-label="キッカー（kicker）"></select>
+      <select id="pkGk" class="sel" aria-label="GK（goalkeeper）"></select>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: 助走側（run-up side before the kick）">
+      <span class="eyebrow">蹴る前 助走</span>
+      <button class="btn pk-b" data-pkapp="L" aria-label="助走は左から">左</button>
+      <button class="btn pk-b" data-pkapp="C" aria-label="助走は正面から">正面</button>
+      <button class="btn pk-b" data-pkapp="R" aria-label="助走は右から">右</button>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: GK の早い動き（keeper's early movement）">
+      <span class="eyebrow">蹴る前 GK</span>
+      <button class="btn pk-b" data-pkgk="L" aria-label="GKは左へ動いた">左</button>
+      <button class="btn pk-b" data-pkgk="C" aria-label="GKは中央">中央</button>
+      <button class="btn pk-b" data-pkgk="R" aria-label="GKは右へ動いた">右</button>
+      <button class="btn pk-b" data-pkgk="S" aria-label="GKは動かなかった">静止</button>
+    </div>
+    <div id="pkGrid" role="group" aria-label="コース（ゴールマウスの 3×3・course）"></div>
+    <div class="pk-row" role="group" aria-label="結果（result）">
+      <button class="btn pk-res" id="pkOk" aria-label="決まった（scored）">○ 決まった</button>
+      <button class="btn pk-res" id="pkNg" aria-label="止められた・外れた（no goal）">✕ 止/外</button>
+    </div>
+    <div id="pkTally" class="hint"></div>
+  </div>
+
   <div id="liveLog" class="hint"></div>
 </div>
 
@@ -8231,6 +8286,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     clock: [],        // 時計の区間: {wall, t, rate}
     events: [],       // 入力したイベント（時刻昇順）
     subs: [],         // 入力した交代 {t, team, out, in}
+    pk: [],           // PK コース記録（#189・入力順）
   });
 
   /* ---------------- 時計 ---------------- */
@@ -8276,6 +8332,64 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
     if (lastSub && (!lastEv || lastSub.t >= lastEv.t)) return { ...s, subs: s.subs.slice(0, -1) };
     if (lastEv) return { ...s, events: s.events.slice(0, -1) };
     return s;
+  };
+
+  /* ---------------- PK コース記録（#189） ----------------
+     規律は docs/RESPONSIBLE_ANALYSIS.md §6。ここに入るのは**観測して記帳した事実**だけで、
+     確率も次の 1 本の予想も持たない。集計は本数と母数で返す（pkTally）。 */
+
+  // ゴールマウス 7.32×2.44m を 3×3 に切る。番号は 0=低左 1=低中 2=低右 / 3..5=中段 / 6..8=上段。
+  // 5×3 も検討したが、1 セルあたりの本数が 1 本以下になり、分けても傾向が見えにくくなる。
+  L.PK_COLS = 3;
+  L.PK_ROWS = 3;
+  L.PK_GOAL_W = 7.32;
+  L.PK_GOAL_H = 2.44;
+
+  // セル番号 → ゴール面上の中心［m］。w は幅方向（キッカーから見て左が負）、h は高さ。
+  L.pkCellCenter = (cell) => {
+    const c = cell % L.PK_COLS, r = Math.floor(cell / L.PK_COLS);
+    return { w: (c - (L.PK_COLS - 1) / 2) * (L.PK_GOAL_W / L.PK_COLS),
+      h: (r + 0.5) * (L.PK_GOAL_H / L.PK_ROWS) };
+  };
+
+  const PK_SIDE = { L: 1, C: 1, R: 1 };          // 助走側 / GK の動き（S=静止は GK のみ）
+  const PK_GK = { L: 1, C: 1, R: 1, S: 1 };
+
+  // rec: { team, kicker, gk, approach, gkMove, cell, scored, approachAt?, gkMoveAt?, kickAt? }
+  // 蹴る**前**の観測（助走側・GK の早期の動き）は時刻つきで残す。結果だけを記録しても
+  // 「GK が早く倒れるか」は後から見られない。
+  L.withPk = (s, rec) => {
+    if (!rec || !rec.team) throw new Error("PK 記録には team が必要");
+    if (!Number.isInteger(rec.cell) || rec.cell < 0 || rec.cell >= L.PK_COLS * L.PK_ROWS)
+      throw new Error("PK 記録の cell が範囲外");
+    if (typeof rec.scored !== "boolean") throw new Error("PK 記録には scored（○×）が必要");
+    if (rec.approach != null && !PK_SIDE[rec.approach]) throw new Error("助走側は L/C/R");
+    if (rec.gkMove != null && !PK_GK[rec.gkMove]) throw new Error("GK の動きは L/C/R/S");
+    const pk = s.pk || [];
+    return { ...s, pk: [...pk, { n: pk.length + 1, ...rec }] };
+  };
+
+  // PK の取り消しは PK の列だけを見る（イベント・交代とは入力の文脈が別）
+  L.undoPk = (s) => ((s.pk && s.pk.length) ? { ...s, pk: s.pk.slice(0, -1) } : s);
+
+  // 集計は**本数と母数**で返す。割合は返さない（§6: 確率を表示しない）。
+  L.pkTally = (s, filter = {}) => {
+    const rows = (s.pk || []).filter((r) =>
+      (!filter.team || r.team === filter.team) && (filter.kicker == null || r.kicker === filter.kicker));
+    const cells = new Array(L.PK_COLS * L.PK_ROWS).fill(0);
+    let scored = 0;
+    for (const r of rows) { cells[r.cell]++; if (r.scored) scored++; }
+    return { cells, total: rows.length, scored };
+  };
+
+  // 5 本ずつ → 同点ならサドンデス。返値は { n, team, decided, score }（#191 が使う土台）
+  L.pkStanding = (s, teams) => {
+    const [a, b] = teams;
+    const score = { [a]: 0, [b]: 0 }, taken = { [a]: 0, [b]: 0 };
+    for (const r of s.pk || []) { taken[r.team] = (taken[r.team] || 0) + 1; if (r.scored) score[r.team]++; }
+    const n = (s.pk || []).length;
+    const next = n % 2 === 0 ? a : b;                 // 交互（先攻は teams[0]）
+    return { n: n + 1, team: next, score, taken };
   };
 
   const minLabel = (s, t) => {
@@ -8407,12 +8521,14 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
      「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
   L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
-    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })) });
+    events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })),
+    pk: (s.pk || []).map((r) => ({ ...r })) });
 
   L.fromObj = (o, wallMs) => {
     if (!o || !o.cfg) return null;
     const s = { cfg: o.cfg, clock: [], events: (o.events || []).map((e) => ({ ...e })).sort((a, b) => a.t - b.t),
-      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t) };
+      subs: (o.subs || []).map((x) => ({ ...x })).sort((a, b) => a.t - b.t),
+      pk: (o.pk || []).map((r) => ({ ...r })) };
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
@@ -13674,7 +13790,124 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     setMatch(getTemplateMatch());
   };
 
+  /* ---------------- PK コース記録（#189） ----------------
+     規律は docs/RESPONSIBLE_ANALYSIS.md §6。表示は「これまでに記録された本数」だけで、
+     確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
+  const pkState = { open: false, approach: null, gkMove: null, cell: null,
+    approachAt: 0, gkMoveAt: 0, kickAt: 0 };
+
+  const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
+
+  const pkReset = () => {
+    pkState.approach = null; pkState.gkMove = null; pkState.cell = null;
+    pkState.approachAt = 0; pkState.gkMoveAt = 0; pkState.kickAt = 0;
+  };
+
+  const pkFillWho = () => {
+    if (!liveState.session) return;
+    const m = R.live.matchOf(liveState.session);
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const kick = m.teams[st.team], gkTeam = m.teams[keys.find((k) => k !== st.team)];
+    const opt = (sq) => sq.map((p) => `<option value="${p.no}">${p.no} ${p.ja ?? ""}</option>`).join("");
+    $("#pkKicker").innerHTML = opt(kick.squad);
+    $("#pkGk").innerHTML = opt(gkTeam.squad);
+    // GK は既定で背番号 1（居なければ先頭）
+    const gk1 = gkTeam.squad.find((p) => p.no === 1);
+    if (gk1) $("#pkGk").value = String(gk1.no);
+  };
+
+  const pkRenderTally = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    $("#pkOrder").textContent = `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
+    $("#pkScore").textContent = keys.map((k) => `${m.teams[k]?.name ?? k} ${st.score[k] ?? 0}`).join(" - ");
+    const kicker = +$("#pkKicker").value || null;
+    const t = R.live.pkTally(liveState.session, { team: st.team, kicker });
+    // 各セルに「本数」を出す。割合は出さない（§6: 確率を表示しない）
+    for (const el of document.querySelectorAll("#pkGrid .cell")) {
+      const c = +el.dataset.cell;
+      el.querySelector(".cnt").textContent = t.cells[c] ? `${t.cells[c]}本` : "—";
+      el.classList.toggle("on", pkState.cell === c);
+    }
+    // 母数を必ず併記する（§6）。割合には直さない。
+    const all = R.live.pkTally(liveState.session);
+    const mine = t.total ? `このキッカー 全 ${t.total} 本（決まった ${t.scored} 本）` : "このキッカーの記録はまだありません";
+    $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
+  };
+
+  const pkBuildGrid = () => {
+    const g = $("#pkGrid");
+    if (g.dataset.built) return;
+    const label = ["左下", "中下", "右下", "左中", "中央", "右中", "左上", "中上", "右上"];
+    // 上段が画面の上に来るように、行を上から並べる（セル番号は 0=低左）
+    let html = "";
+    for (let r = R.live.PK_ROWS - 1; r >= 0; r--)
+      for (let c = 0; c < R.live.PK_COLS; c++) {
+        const i = r * R.live.PK_COLS + c;
+        html += `<button class="cell" data-cell="${i}" aria-label="コース ${label[i]}">${label[i]}<span class="cnt">—</span></button>`;
+      }
+    g.innerHTML = html;
+    g.dataset.built = "1";
+    for (const el of document.querySelectorAll("#pkGrid .cell")) el.onclick = () => {
+      pkState.cell = +el.dataset.cell;
+      pkState.kickAt = Date.now();          // コースを押した時刻＝蹴った瞬間として扱う
+      pkRenderTally();
+    };
+  };
+
+  const pkCommit = (scored) => {
+    if (!liveState.session) return;
+    if (pkState.cell == null) { liveLog("コースをタップしてから ○ / ✕ を押してください"); return; }
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    liveState.session = R.live.withPk(liveState.session, {
+      team: st.team, kicker: +$("#pkKicker").value || null, gk: +$("#pkGk").value || null,
+      approach: pkState.approach, gkMove: pkState.gkMove, cell: pkState.cell, scored,
+      approachAt: pkState.approachAt, gkMoveAt: pkState.gkMoveAt, kickAt: pkState.kickAt,
+    });
+    // 「蹴る何秒前に GK が動いたか」は記録から後で出せる（結果だけでは残らない情報）
+    const lead = pkState.gkMoveAt && pkState.kickAt ? ((pkState.kickAt - pkState.gkMoveAt) / 1000).toFixed(1) : null;
+    pkReset();
+    liveSave();
+    pkFillWho(); pkRenderTally();
+    liveLog(`記録しました（${scored ? "○" : "✕"}）${lead ? ` — GK は蹴る ${lead} 秒前に動いた` : ""}`);
+  };
+
+  const pkOpen = (on) => {
+    pkState.open = on;
+    $("#pkPanel").style.display = on ? "block" : "none";
+    $("#liveEvents").style.display = on ? "none" : "";
+    if (!on) return;
+    pkBuildGrid(); pkReset(); pkFillWho(); pkRenderTally();
+    for (const el of document.querySelectorAll("#pkPanel .pk-b, #pkPanel .pk-res")) el.classList.remove("on");
+    if (renderer) renderer.setPreset("pk");
+  };
+
+  const bindPk = () => {
+    $("#livePk").onclick = () => pkOpen(!pkState.open);
+    $("#pkUndo").onclick = () => {
+      liveState.session = R.live.undoPk(liveState.session);
+      liveSave(); pkFillWho(); pkRenderTally();
+      liveLog("直前の PK 記録を取り消しました");
+    };
+    $("#pkKicker").onchange = () => pkRenderTally();
+    for (const el of document.querySelectorAll("#pkPanel [data-pkapp]")) el.onclick = () => {
+      pkState.approach = el.dataset.pkapp; pkState.approachAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkapp]")) o.classList.toggle("on", o === el);
+    };
+    for (const el of document.querySelectorAll("#pkPanel [data-pkgk]")) el.onclick = () => {
+      pkState.gkMove = el.dataset.pkgk; pkState.gkMoveAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkgk]")) o.classList.toggle("on", o === el);
+    };
+    $("#pkOk").onclick = () => pkCommit(true);
+    $("#pkNg").onclick = () => pkCommit(false);
+  };
+
   const bindLive = () => {
+    bindPk();
     const btn = $("#btnLive");
     if (btn) btn.onclick = () => (liveState.session ? liveExit() : liveEnter());
     $("#liveStart").onclick = () => {
