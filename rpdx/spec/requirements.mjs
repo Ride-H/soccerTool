@@ -550,8 +550,9 @@ export const REQUIREMENTS = [
     text: "スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす",
     source: "issue#105",
     checks: [{ kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" }],
-    note: "7 画面（分析初期・左右の引き出し・表示切替・タイムライン・インスペクタ・ライブバー）を"
-      + "pointer:coarse / hover:none を再現して実測。147 件 → 0 件。ピンチズーム/2本指パンは実装済み",
+    note: "8 画面を pointer:coarse / hover:none を再現して実測。147 件 → 0 件。"
+      + "ピンチズーム/2本指パンは実装済み。#195: 画面ごとに「開いた目的を果たす操作部」を宣言し、"
+      + "スクロールせずに見えていることまで見る（一覧はスクロールしてよい／操作盤はさせない）",
   },
   {
     id: "UX-02", area: "ux", status: "waived",

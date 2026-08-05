@@ -36,18 +36,26 @@ const RESET = `(() => {
 })()`;
 
 // 測る画面。open は「その画面を出す操作」。要素が無ければその画面は飛ばす。
+// mustSee: その画面を開いた目的を果たすために、**スクロールせずに見えていなければ**
+// ならない操作部。これを宣言しないと、開いたのに画面外にある操作を見逃す
+// （#195: PK パネルが下端の 300px 超はみ出したまま指摘 0 件だった）。
+//
+// 引き出し（dockL/dockR）に mustSee を置かないのは意図的。あれは縦スクロールする一覧で、
+// はみ出しが正常だから。**一覧はスクロールしてよい／操作盤はスクロールさせない**の区別。
 const SCENES = [
   { name: "分析画面（初期表示）", open: `"ok"` },
   { name: "左の引き出し（設定・危険度）", open: `document.querySelector("#toggleL").click(), "ok"` },
   { name: "右の引き出し（名簿・配置）", open: `document.querySelector("#toggleR").click(), "ok"` },
-  { name: "表示切替バー", open: `document.querySelector("#viewToggle").click(), "ok"` },
-  { name: "危険度タイムライン", open: `document.querySelector("#tlToggle").click(), "ok"` },
-  { name: "選手インスペクタ", open: `document.querySelector("#inspector").classList.add("open"), "ok"` },
-  { name: "ライブ実況バー", open: `document.querySelector("#btnLive").click(), "ok"` },
-  { name: "PK コース記録", open: `(document.querySelector("#btnLive").click(), document.querySelector("#livePk").click(), "ok")` },
+  { name: "表示切替バー", open: `document.querySelector("#viewToggle").click(), "ok"`, mustSee: ["#viewbar .cam"] },
+  { name: "危険度タイムライン", open: `document.querySelector("#tlToggle").click(), "ok"`, mustSee: ["#btnPlay"] },
+  { name: "選手インスペクタ", open: `document.querySelector("#inspector").classList.add("open"), "ok"`, mustSee: ["#inspClose"] },
+  { name: "ライブ実況バー", open: `document.querySelector("#btnLive").click(), "ok"`, mustSee: ["#liveStart", "#liveUndo"] },
+  { name: "PK コース記録", open: `(document.querySelector("#btnLive").click(), document.querySelector("#livePk").click(), "ok")`,
+    mustSee: ["#pkGrid", "#pkOk", "#pkNg"] },
 ];
 
-const probe = `(() => {
+const probeFor = (mustSee) => `(() => {
+  const MUST = ${JSON.stringify(mustSee || [])};
   const lum = (c) => { const m = c.match(/[\\d.]+/g).map(Number);
     const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
     return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]); };
@@ -88,9 +96,9 @@ const probe = `(() => {
     }
     return false;
   };
-  const out = { targets: [], texts: [], hidden: 0,
+  const out = { targets: [], texts: [], hidden: 0, unseen: [],
     scrollX: document.documentElement.scrollWidth > window.innerWidth + 1,
-    scrollW: document.documentElement.scrollWidth, winW: window.innerWidth };
+    scrollW: document.documentElement.scrollWidth, winW: window.innerWidth, winH: window.innerHeight };
   // 入力欄も「押す/触る」標的。ボタンだけ見ていると、小さすぎる入力欄を見逃す。
   for (const b of document.querySelectorAll("button, input:not([type=hidden]), select, textarea")) {
     const r = b.getBoundingClientRect();
@@ -137,6 +145,19 @@ const probe = `(() => {
     const st = getComputedStyle(el);
     out.texts.push({ txt: txt.slice(0, 14), size: parseFloat(st.fontSize), fg: st.color, bg: bgOf(el) });
   }
+  // その画面を開いた目的を果たす操作部が、スクロールせずに見えているか
+  for (const sel of MUST) {
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || !shown(el)) continue;
+      const okY = r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5;
+      const okX = r.left >= -0.5 && r.right <= window.innerWidth + 0.5;
+      if (!okY || !okX) out.unseen.push({ sel,
+        label: ((el.textContent || el.getAttribute("aria-label") || el.tagName) + "").trim().slice(0, 14),
+        top: Math.round(r.top), bottom: Math.round(r.bottom) });
+      break;   // 同じ選択子は代表 1 個で足りる
+    }
+  }
   return JSON.stringify(out);
 })()`;
 
@@ -150,9 +171,18 @@ const ratio = (fg, bg) => {
 
 export const MIN_TARGET = 44, MIN_FONT = 11, MIN_CONTRAST = 4.5, MIN_CONTRAST_LG = 3;
 
+// 直す予定が決まっている不備は、ここに Issue 番号つきで書いて通す。
+// **ここに書いたものだけ**を許し、増えたら落ちる（他のゲートと同じ流儀）。
+// 黙って除外するのではなく、実測の出力に「既知」として毎回出す。
+export const KNOWN_UNSEEN = {
+  // #197: PK パネルをライブバーの中にぶら下げたため縦に伸び、格子と ○× が下端より下に出る。
+  // 全画面モードへ作り直して解消する。入れ物の問題なので、この Issue で直す。
+  "PK コース記録": ["#pkGrid", "#pkOk", "#pkNg"],
+};
+
 // 1 画面ぶんの判定。返値 { name, targets, texts, findings[] }
 const judge = (name, data) => {
-  const findings = [];
+  const findings = [], known = [];
   const seen = new Set();
   const add = (msg) => { if (!seen.has(msg)) { seen.add(msg); findings.push(msg); } };
   for (const t of data.targets) {
@@ -165,7 +195,14 @@ const judge = (name, data) => {
   }
   for (const x of data.texts) if (x.size < MIN_FONT) add(`文字が小さい: 「${x.txt}」 ${x.size}px`);
   if (data.scrollX) add(`横スクロールが出ている（内容 ${data.scrollW}px > 画面 ${data.winW}px）`);
-  return { name, nTargets: data.targets.length, nTexts: data.texts.length, hidden: data.hidden, findings };
+  const allow = KNOWN_UNSEEN[name] || [];
+  for (const u of data.unseen || []) {
+    const msg = `開いても画面に出ていない: 「${u.label}」（${u.sel}・上${u.top} 下${u.bottom} / 画面 ${data.winH}）`;
+    if (allow.includes(u.sel)) known.push(msg + " ← 既知（#197 で解消予定）");
+    else add(msg);
+  }
+  return { name, nTargets: data.targets.length, nTexts: data.texts.length, hidden: data.hidden,
+    unseen: (data.unseen || []).length, findings, known };
 };
 
 // 実測を走らせて画面ごとの結果を返す（テストからも呼べるようにエクスポート）
@@ -186,7 +223,7 @@ export const uiProbe = async ({ url = URL_, width = W, height = H, scene = "", t
     const okOpen = await p.evaluate(`(() => { try { return ${sc.open}; } catch (e) { return "skip:" + e.message; } })()`);
     if ((okOpen + "").startsWith("skip:")) { results.push({ name: sc.name, skipped: (okOpen + "").slice(5) }); continue; }
     await sleep(450);
-    results.push(judge(sc.name, JSON.parse(await p.evaluate(probe))));
+    results.push(judge(sc.name, JSON.parse(await p.evaluate(probeFor(sc.mustSee)))));
   }
   await p.dispose(); await b.close();
   return results;
@@ -201,7 +238,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (r.skipped) { console.log(`\n## ${r.name}\n  — この画面は出せませんでした（${r.skipped}）`); continue; }
     total += r.findings.length;
     console.log(`\n## ${r.name}（標的 ${r.nTargets} 個 / 文字 ${r.nTexts} 箇所 / この画面に出ていない標的 ${r.hidden} 個）`);
-    if (!r.findings.length) { console.log("  ✓ 指摘なし"); continue; }
+    for (const k of r.known || []) console.log(`  ・ ${k}`);
+    if (!r.findings.length) { console.log("  ✓ 指摘なし（既知を除く）"); continue; }
     // 同じ種類が大量に出ると読めないので、種類ごとに数を出してから並べる
     const byKind = {};
     for (const f of r.findings) { const k = f.split(":")[0]; (byKind[k] ||= []).push(f); }
