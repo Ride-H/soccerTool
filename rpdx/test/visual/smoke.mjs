@@ -207,6 +207,22 @@ const main = async () => {
     compareGolden("cinematic_shadow_t1732", s4, readFileSync(join(outDir, "cinematic_shadow_t1732.png")));
   }
 
+  /* ---- S6: 粒子の予算 ----
+     粒子は上限に達すると**後から積むぶんが黙って落ちる**。新しい粒子の用途を足したときに
+     危険度場が痩せていても、絵は出ているので目視では気づけない。数で見る。
+     実測（1280×800・t=1732）: 既定 1808/9000（20%）。 */
+  {
+    const page = await browser.newPage({ width: 1280, height: 800 });
+    await page.navigate(`file://${distHtml}?play=0&t=1732`);
+    let ready = false, t0 = Date.now();
+    while (!ready && Date.now() - t0 < 40000) { await sleep(300); ready = await page.evaluate("!!(globalThis.RPDX && RPDX.app && RPDX.app.match)"); }
+    await sleep(2500);
+    const r = JSON.parse(await page.evaluate("JSON.stringify(RPDX.app.renderer.partStats())"));
+    await page.dispose();
+    check("S6: 粒子が上限を圧迫していない", r.used > 0 && r.used < r.cap * 0.7,
+      `${r.used}/${r.cap}（${((r.used / r.cap) * 100).toFixed(0)}%・基準 70%未満）`);
+  }
+
   /* ---- S5 (#188): PK カメラの画角 ----
      キッカー・GK・ゴールマウス左右端・クロスバー・ボールが 1 画面に入ること。
      画素ではなく正規化デバイス座標で見る（api.project）。画素だと GPU 差で揺れるうえ、

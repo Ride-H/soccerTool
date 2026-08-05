@@ -355,3 +355,20 @@ test("#191 PK戦: 順番を変えても記録済みの本は 1 本も動かな�
   assert.deepEqual(back.pkOrder, s.pkOrder);
   assert.deepEqual(back.pk, s.pk);
 });
+
+// リリース前検査: 旧バージョンで保存したバンドル（pk / pkOrder が無い）を読み込めること。
+// 利用者の端末には前の版で保存したセッションが残っている。読めなくなると記録が消える。
+test("互換: PK より前に保存したセッションを読み込める", () => {
+  const base = L.create(cfg());
+  const old = L.toObj(L.withEvent(base, { t: 100, type: "goal", team: "TMA", no: 9 }));
+  delete old.pk;            // 旧版には無かった項目
+  delete old.pkOrder;
+  const back = L.fromObj(old, Date.now());
+  assert.ok(back, "読み込めること");
+  assert.deepEqual(back.pk, [], "PK は空で始まる");
+  assert.equal(back.events.length, 1, "旧版の記録は残る");
+  // 読み込んだあと PK を足せる（片方向の互換で終わらせない）
+  const next = L.withPk(back, { team: "TMA", cell: 0, scored: true });
+  assert.equal(next.pk.length, 1);
+  assert.deepEqual(L.fromObj(L.toObj(next), Date.now()).pk, next.pk, "保存し直しても往復する");
+});
