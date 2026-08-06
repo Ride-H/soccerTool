@@ -2335,6 +2335,36 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     liveLog(`記録しました（${scored ? "○" : "✕"}）${lead ? ` — GK は蹴る ${lead} 秒前に動いた` : ""}`);
   };
 
+  // #199: 蓄積の読み書き。端末内のみ・外部送信なし（§6）。
+  const PK_LS = "rpdx.shootouts.v1";
+  const pkStoreRead = () => {
+    try { const v = JSON.parse(localStorage.getItem(PK_LS) || "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  };
+  const pkStoreWrite = (arr) => {
+    try { localStorage.setItem(PK_LS, JSON.stringify(arr)); } catch { liveLog("⚠ 端末に保存できませんでした"); }
+  };
+
+  // 選手ごとの記録。**本数と母数だけ**を出し、順位は付けない（§6）。
+  const pkRenderHistory = () => {
+    const box = $("#pkHist");
+    const docs = pkStoreRead();
+    const rows = R.live.pkAccumulate(docs);
+    if (!rows.length) {
+      box.textContent = "まだ記録がありません。PK 戦のあと「記録に残す」を押すと、ここに溜まります。";
+      return;
+    }
+    const label = ["左下", "中下", "右下", "左中", "中央", "右中", "左上", "中上", "右上"];
+    const line = (e) => {
+      const top = e.cells.map((n, i) => ({ n, i })).filter((x) => x.n > 0)
+        .map((x) => `${label[x.i]} ${x.n}本`).join("・");
+      return `${e.name}（${e.team}${e.no != null ? " #" + e.no : ""}）— 全 ${e.total} 本 / 決まった ${e.scored} 本 / PK戦 ${e.shootouts} 回${top ? " ／ " + top : ""}`;
+    };
+    box.innerHTML = `<div>この端末の記録 ${docs.length} 件から（並びはチーム名→選手名。良し悪しの順ではありません）</div>`
+      + rows.map((e) => `<div>${line(e)}</div>`).join("")
+      + `<div style="margin-top:4px">同じ名前を同じ選手として数えます。名前を変えると別人になります。</div>`;
+  };
+
   // #190: ゴールマウスへ流す「記録された本数」。割合・確率は作らない（§6）。
   // 見ているゴールは、記録している側が攻める方向で決める。
   const pkFieldOf = () => {
@@ -2477,6 +2507,23 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       };
       rd.onerror = () => liveLog("⚠ ファイル読込に失敗");
       rd.readAsText(f);
+    };
+    // #199: 蓄積の箱は 1 つ。中身は #198 の PK 戦の文書そのもの（新しい形式は作らない）。
+    $("#pkKeep").onclick = () => {
+      if (!liveState.session) return;
+      const n = (liveState.session.pk || []).length;
+      if (!n) { liveLog("残す PK 戦の記録がありません"); return; }
+      const doc = JSON.parse(R.scenlib.serializeShootout(liveState.session, R.live.matchOf(liveState.session)));
+      const all = pkStoreRead();
+      all.push(doc);
+      pkStoreWrite(all);
+      liveLog(`記録に残しました（この端末に ${all.length} 件・送信なし）`);
+    };
+    $("#pkHistory").onclick = () => {
+      const box = $("#pkHist");
+      const on = box.style.display === "none";
+      box.style.display = on ? "block" : "none";
+      if (on) pkRenderHistory();
     };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);

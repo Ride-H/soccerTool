@@ -602,6 +602,20 @@ export const REQUIREMENTS = [
       + "試合データを持たない相手にも渡せるよう自己完結させる（customMatch と同じ考え方）",
   },
   {
+    id: "UX-12", area: "ux", status: "held", issue: 199,
+    text: "複数の PK 戦をまたいで選手ごとに本数を数える（順位付けをしない・端末内のみ）",
+    source: "issue#199",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "蓄積: 複数の PK 戦をまたいで選手ごとに合算する" },
+      { kind: "test", file: "live.test.mjs", name: "蓄積: 同一性はチーム名＋選手名" },
+      { kind: "test", file: "uicontract.test.mjs", name: "端末内へ書くキーは登録済みのものだけ" },
+    ],
+    note: "蓄積の単位は #198 の PK 戦の文書そのもの（新しい形式は作らない）。保存箱は 1 つで"
+      + "見え方を導出する。安定した選手 ID が無い（チーム名・選手名・背番号はすべて編集可能）ため、"
+      + "チーム名＋選手名で紐づけ「名前を変えると別人」と画面に明示する。自動の名寄せは、"
+      + "別人を合算したときに気づけないので採らない。並びはチーム名→選手名（§6: 順位付けをしない）",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

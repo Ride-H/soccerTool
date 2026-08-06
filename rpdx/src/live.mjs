@@ -205,6 +205,47 @@
     return list[(n - 1) % list.length] ?? null;
   };
 
+  /* ---------------- 選手ごとの蓄積（#199） ----------------
+     蓄積の単位は #198 の PK 戦の文書そのもの。新しい形式は作らない。
+     集計はそこから毎回導出する（保存箱は 1 つ、見え方が複数）。
+
+     **選手の同一性**: 安定した ID が無い（チーム名・選手名・背番号はすべて編集可能で、
+     TMA/TMB はテンプレ固定）。チーム名＋選手名で紐づけ、背番号は補助表示にする。
+     自動で賢く名寄せしようとすると、別人を合算したときに気づけない。
+     「名前を変えると別人として数える」という単純な規則のほうが安全で、画面にも明示する。
+
+     規律（docs/RESPONSIBLE_ANALYSIS.md §6）: 本数と母数だけを返す。確率は返さない。
+     **順位付けもしない** — 並びはチーム名→選手名で、成否の良し悪しでは並べない。 */
+  L.playerKey = (teamName, playerName) => `${teamName ?? "?"}／${playerName ?? "?"}`;
+
+  L.pkAccumulate = (docs) => {
+    const byPlayer = new Map();
+    for (const d of docs || []) {
+      const teams = d.teams || {};
+      for (const k of d.kicks || []) {
+        const t = teams[k.team];
+        const teamName = t?.name ?? k.team ?? "?";
+        const p = (t?.squad || []).find((x) => x.no === k.kicker);
+        const name = p?.ja ?? (k.kicker != null ? String(k.kicker) : "?");
+        const key = L.playerKey(teamName, name);
+        let e = byPlayer.get(key);
+        if (!e) {
+          e = { key, team: teamName, name, no: k.kicker ?? null,
+            cells: new Array(L.PK_COLS * L.PK_ROWS).fill(0), total: 0, scored: 0, shootouts: 0 };
+          byPlayer.set(key, e);
+        }
+        if (Number.isInteger(k.cell) && k.cell >= 0 && k.cell < e.cells.length) e.cells[k.cell]++;
+        e.total++;
+        if (k.scored) e.scored++;
+        e._docs = e._docs || new Set();
+        e._docs.add(d.savedAt ?? d.label ?? docs.indexOf(d));
+      }
+    }
+    const out = [...byPlayer.values()].map((e) => { e.shootouts = e._docs ? e._docs.size : 0; delete e._docs; return e; });
+    // 並びは中立に（チーム名 → 選手名）。成否で並べると順位表になる（§6 で禁止）。
+    return out.sort((a, b) => (a.team < b.team ? -1 : a.team > b.team ? 1 : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  };
+
   const minLabel = (s, t) => {
     const h2 = 2700 + (s.cfg.added1 ?? 2) * 60;
     const m = t < h2 ? Math.floor(t / 60) : 45 + Math.floor((t - h2) / 60);

@@ -642,3 +642,95 @@ test("#203 区切り: 時計を先へ飛ばしても「次のピリオド」を�
   const j3 = L.withClock(sx, "sync", at(10), m.time.h4.end);
   assert.equal(L.breakAt(L.withClock(j3, "pause", at(11)), m, at(11)), null);
 });
+
+/* ---------------------------------------------------------------------------
+   #199 選手ごとの蓄積。単位は #198 の PK 戦の文書そのもの（新しい形式は作らない）。
+   規律（§6）: 本数と母数だけ・確率を返さない・順位付けをしない。
+   --------------------------------------------------------------------------- */
+const shootDoc = (kicks, savedAt) => {
+  let s = L.create(cfg());
+  for (const k of kicks) s = L.withPk(s, k);
+  const o = JSON.parse(RPDX.scenlib.serializeShootout(s, L.matchOf(s)));
+  o.savedAt = savedAt;
+  return o;
+};
+
+test("#199 蓄積: 複数の PK 戦をまたいで選手ごとに合算する", () => {
+  const d1 = shootDoc([{ team: "TMA", kicker: 9, cell: 0, scored: true },
+    { team: "TMB", kicker: 10, cell: 8, scored: false }], 1);
+  const d2 = shootDoc([{ team: "TMA", kicker: 9, cell: 0, scored: false },
+    { team: "TMA", kicker: 11, cell: 4, scored: true }], 2);
+  const acc = L.pkAccumulate([d1, d2]);
+
+  const a9 = acc.find((e) => e.no === 9);
+  assert.equal(a9.total, 2, "2 回の PK 戦を合算");
+  assert.equal(a9.scored, 1);
+  assert.equal(a9.shootouts, 2, "何回の PK 戦にまたがるか");
+  assert.equal(a9.cells[0], 2, "同じセルが積み上がる");
+  assert.equal(a9.cells.reduce((x, y) => x + y, 0), a9.total, "セルの合計＝母数");
+
+  // 割合・確率は返さない（§6）
+  for (const k of Object.keys(a9)) assert.ok(!/rate|prob|pct|ratio|rank/i.test(k), `${k} を返している`);
+  // 順位付けをしない: 並びはチーム名 → 選手名で、成否では並ばない
+  const names = acc.map((e) => e.key);
+  assert.deepEqual(names, [...names].sort(), "中立な並び（成否の良し悪しではない）");
+});
+
+test("#199 蓄積: 同一性はチーム名＋選手名（名前が違えば別人）", () => {
+  const d = shootDoc([{ team: "TMA", kicker: 9, cell: 0, scored: true }], 1);
+  const renamed = JSON.parse(JSON.stringify(d));
+  const p = renamed.teams.TMA.squad.find((x) => x.no === 9);
+  p.ja = "別の名前";
+  const acc = L.pkAccumulate([d, renamed]);
+  assert.equal(acc.length, 2, "名前を変えると別人として数える");
+  assert.equal(acc[0].total, 1);
+  assert.equal(acc[1].total, 1);
+  // チーム名が違っても別人
+  const otherTeam = JSON.parse(JSON.stringify(d));
+  otherTeam.teams.TMA.name = "別のチーム";
+  assert.equal(L.pkAccumulate([d, otherTeam]).length, 2);
+  assert.equal(L.playerKey("A", "B"), "A／B");
+});
+
+test("#199 蓄積: 空・欠損・範囲外でも壊れない", () => {
+  assert.deepEqual(L.pkAccumulate(), []);
+  assert.deepEqual(L.pkAccumulate([]), []);
+  assert.deepEqual(L.pkAccumulate([{ kicks: [] }]), []);
+  // teams が無い（古い文書）／kicker が無い／cell が範囲外
+  const acc = L.pkAccumulate([{ kicks: [
+    { team: "TMA", cell: 0, scored: true },
+    { team: "TMA", kicker: 9, cell: 99, scored: false },
+  ] }]);
+  assert.ok(acc.length >= 1, "teams が無くても数えられる");
+  const bad = acc.find((e) => e.no === 9);
+  assert.equal(bad.total, 1, "範囲外のセルでも本数は数える");
+  assert.equal(bad.cells.reduce((x, y) => x + y, 0), 0, "範囲外はセルに入れない");
+});
+
+// #199: 集計の分岐を全て通す（label だけの文書・savedAt 無し・cells 未定義の kick など）。
+test("#199 蓄積: 文書の書かれ方が違っても数えられる", () => {
+  // savedAt が無く label で区別される文書（古い書き出し）
+  const a = L.pkAccumulate([
+    { label: "1回目", teams: { TMA: { name: "青", squad: [{ no: 9, ja: "九番" }] } },
+      kicks: [{ team: "TMA", kicker: 9, cell: 0, scored: true }] },
+    { label: "2回目", teams: { TMA: { name: "青", squad: [{ no: 9, ja: "九番" }] } },
+      kicks: [{ team: "TMA", kicker: 9, cell: 1, scored: false }] },
+  ]);
+  assert.equal(a.length, 1, "同じ選手として合算");
+  assert.equal(a[0].total, 2);
+  assert.equal(a[0].shootouts, 2, "label で別の PK 戦として数える");
+  assert.equal(a[0].name, "九番");
+  assert.equal(a[0].team, "青");
+
+  // squad はあるが該当の背番号が無い → 背番号を名前の代わりにする
+  const b = L.pkAccumulate([{ teams: { TMA: { name: "青", squad: [] } },
+    kicks: [{ team: "TMA", kicker: 7, cell: 2, scored: true }] }]);
+  assert.equal(b[0].name, "7");
+
+  // kicker も無い → "?" で数える（記録を落とさない）
+  const c = L.pkAccumulate([{ teams: {}, kicks: [{ team: "TMA", cell: 3, scored: false }] }]);
+  assert.equal(c[0].name, "?");
+  assert.equal(c[0].no, null);
+  assert.equal(c[0].total, 1);
+  assert.equal(L.playerKey(), "?／?");
+});

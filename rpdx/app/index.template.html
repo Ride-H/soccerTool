@@ -298,9 +298,12 @@
       <span class="eyebrow">記録の受け渡し</span>
       <button class="btn pk-b" id="pkExport" aria-label="この PK 戦を JSON で書き出す">書き出す</button>
       <button class="btn pk-b" id="pkImport" aria-label="PK 戦の JSON を読み込む">読み込む</button>
+      <button class="btn pk-b" id="pkKeep" aria-label="この PK 戦を記録に残す">記録に残す</button>
+      <button class="btn pk-b" id="pkHistory" aria-label="選手ごとの記録を見る">選手ごと</button>
       <input type="file" id="pkFile" accept="application/json,.json" style="display:none">
     </div>
     <div id="pkResult" class="hint" aria-live="polite"></div>
+    <div id="pkHist" class="hint" style="display:none"></div>
     <div id="pkTally" class="hint"></div>
     <div id="pkLegend" class="hint"></div>
   </div>
