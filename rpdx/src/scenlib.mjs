@@ -231,6 +231,8 @@
         // #201: アディショナルタイムを含める。入れないと往復で既定値（+2/+5）へ戻り、
         // 設定したロスタイムが黙って消える（実測: 終端 6180 → 5820 秒）。
         added1: match.time.h1.added, added2: match.time.h2.added,
+        // #202: 延長の有無と延長の AT。これが欠けると別の端末で開いた瞬間に延長が消える。
+        ...(match.time.h3 ? { extra: true, added3: match.time.h3.added, added4: match.time.h4.added } : {}),
         home: teamCfg(ha), away: teamCfg(aw),
       };
     }

@@ -321,29 +321,62 @@
      前半終了は必ず起きるので、人が時計合わせで入れ直す必要は無い。
      壁時計が前半終了を越えていたら、**その瞬間の時刻ちょうど**で止めた session を返す。
      純関数（同じ入力なら同じ結果）にしてあるので、毎フレーム呼んでよい。 */
+  /* ---------------- ピリオドの区切り（#183 → #202 で一般化） ----------------
+     前半終了だけでなく、後半終了（延長へ入るか決める）・延長前半終了にも同じ処理が要る。
+     h2 専用に書いていたものを、どのピリオド境界でも効く形へ広げた。
+     ピリオドの順序は h1 → h2 → h3 → h4。 */
+  const PERIODS = ["h1", "h2", "h3", "h4"];
+  const periodsOf = (match) => PERIODS.filter((k) => match && match.time && match.time[k]);
+
+  // 次に始めるピリオド（いま止まっている区切りの次）。無ければ null。
+  const nextPeriod = (s, match, wallMs) => {
+    const ks = periodsOf(match);
+    const t = L.tAt(s, wallMs);
+    for (let i = 0; i < ks.length - 1; i++) {
+      const cur = match.time[ks[i]];
+      // 開始済みのピリオドは飛ばす（時計の区間に印が付く）。
+      // h2 の印は #183 からの互換 — 保存済みのセッションは p を持たない。
+      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
+      if (t >= cur.end - 0.5) return ks[i + 1];
+    }
+    return null;
+  };
+
+  // 走っている時計が、いま居るピリオドの終わりに達したら止める（達していなければ null）
   L.atHalfBreak = (s, match, wallMs) => {
     if (!L.isRunning(s) || !match || !match.time || !match.time.h1) return null;
-    // 後半を始めたら二度と止めない。h1.end と h2.start は同じ時刻なので、
-    // 時刻の比較だけだと後半開始の直後にまた止まってしまう（実機で発覚）。
-    if (s.clock.some((c) => c.h2)) return null;
-    const end = match.time.h1.end;
-    if (L.tAt(s, wallMs) < end) return null;
-    const seg = s.clock[s.clock.length - 1];
-    // 前半終了に達した瞬間の壁時計（その時刻で止めれば、止めた位置は常に end ちょうど）
-    const wallAtEnd = seg.wall + (end - seg.t) * 1000;
-    return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
+    const ks = periodsOf(match);
+    const t = L.tAt(s, wallMs);
+    for (let i = 0; i < ks.length - 1; i++) {
+      const end = match.time[ks[i]].end;
+      // 次のピリオドを始めたら、その境界では二度と止めない。
+      // 境界の時刻は前後で同じなので、時刻の比較だけだと開始直後にまた止まる（#183 で実機発覚）。
+      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
+      if (t < end) continue;
+      const seg = s.clock[s.clock.length - 1];
+      const wallAtEnd = seg.wall + (end - seg.t) * 1000;
+      return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
+    }
+    return null;
   };
 
-  // 後半へ進む（前半終了で止まっている状態から、後半の先頭で再開する）
+  // 次のピリオドへ進む（区切りで止まっている状態から、その先頭で再開する）
   L.startSecondHalf = (s, match, wallMs) => {
-    const t0 = match && match.time && match.time.h2 ? match.time.h2.start : L.tAt(s, wallMs);
-    return { ...s, clock: [...s.clock, { wall: wallMs, t: t0, rate: 1, h2: true }] };
+    const k = nextPeriod(s, match, wallMs) || "h2";
+    const t0 = match && match.time && match.time[k] ? match.time[k].start : L.tAt(s, wallMs);
+    // h2 の印は #183 からの互換（保存済みのセッションが持っている）
+    return { ...s, clock: [...s.clock, { wall: wallMs, t: t0, rate: 1, p: k, ...(k === "h2" ? { h2: true } : {}) }] };
   };
 
-  // 前半終了で止まっているか（UI が「後半開始」を出す判断に使う）
-  L.isAtHalfBreak = (s, match, wallMs) =>
-    !!(match && match.time && match.time.h1 && !L.isRunning(s) && !s.clock.some((c) => c.h2)
-      && Math.abs(L.tAt(s, wallMs) - match.time.h1.end) < 0.5);
+  // ピリオドの区切りで止まっているか（UI が「◯◯開始」を出す判断に使う）。
+  // 返値は次のピリオドのキー（null なら区切りではない）。
+  L.breakAt = (s, match, wallMs) => {
+    if (!match || !match.time || L.isRunning(s)) return null;
+    return nextPeriod(s, match, wallMs);
+  };
+
+  // 互換: 前半終了で止まっているか
+  L.isAtHalfBreak = (s, match, wallMs) => L.breakAt(s, match, wallMs) === "h2";
 
   // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
   // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。
@@ -353,7 +386,7 @@
      保存の仕組みは作らない。既存のバンドル（scenlib.serializeBundle）へ載せるための
      「素の値へ落とす／戻す」だけをここに置く。復帰した時計は必ず止まっている
      （読み込んだ瞬間に試合時刻が走り出すと、見ていない間の時間が進んでしまう）。 */
-  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}) })),
+  L.toObj = (s) => ({ cfg: s.cfg, clock: s.clock.map((c) => ({ wall: c.wall, t: c.t, rate: c.rate, ...(c.h2 ? { h2: true } : {}), ...(c.p ? { p: c.p } : {}) })),
     events: s.events.map((e) => ({ ...e })), subs: s.subs.map((x) => ({ ...x })),
     pk: (s.pk || []).map((r) => ({ ...r })),
     ...(s.pkOrder ? { pkOrder: JSON.parse(JSON.stringify(s.pkOrder)) } : {}) });
@@ -367,9 +400,16 @@
     // 保存時点の試合時刻を求め、その時刻で「停止」の 1 区間だけを持たせる
     const saved = { ...s, clock: (o.clock || []).map((c) => ({ ...c })) };
     const at = (o.clock && o.clock.length) ? L.tAt(saved, o.savedAt ?? Date.now()) : 0;
-    // 後半に入っていたかどうかは引き継ぐ（復帰後にまた前半終了で止まらないように）
+    // どのピリオドまで開始したかを引き継ぐ（復帰後にまた区切りで止まらないように）。
+    // #202: h2 だけでなく延長（h3/h4）の印も引き継ぐ。落とすと復帰のたびに
+    // 「延長前半終了」へ戻り、同じ区切りで何度も止まる。
     const wasH2 = (o.clock || []).some((c) => c.h2);
-    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0, ...(wasH2 ? { h2: true } : {}) }];
+    const started = [...new Set((o.clock || []).map((c) => c.p).filter(Boolean))];
+    const last = started.length ? started[started.length - 1] : null;
+    s.clock = [{ wall: wallMs ?? Date.now(), t: at, rate: 0,
+      ...(wasH2 ? { h2: true } : {}), ...(last ? { p: last } : {}) }];
+    // 途中のピリオドの印も残す（h4 まで進んでいたら h2・h3 も開始済み）
+    for (const k of started.slice(0, -1)) s.clock.unshift({ wall: s.clock[0].wall, t: at, rate: 0, p: k });
     return s;
   };
 

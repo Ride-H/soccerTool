@@ -523,3 +523,77 @@ test("#201 AT: 保存と復元で往復する（既定値なら従来と同じ�
   const plain = L.create(cfg());
   assert.equal(L.matchOf(plain).time.h2.added, 5);
 });
+
+/* ---------------------------------------------------------------------------
+   #202 自作の試合で延長戦を作る。
+   エンジン側は #141 で h3/h4 に一般対応済みなので、生成経路とピリオド進行だけを足す。
+   --------------------------------------------------------------------------- */
+test("#202 延長: 未指定なら従来どおり／指定すると h3/h4 が生える", () => {
+  const G2 = RPDX.generic;
+  const plain = G2.createMatch(G2.template());
+  assert.equal(plain.time.h3, undefined, "未指定なら延長のキーごと生えない");
+  assert.equal(E.playedRange(plain).t1, 2700 + 2 * 60 + 2700 + 5 * 60);
+
+  const ex = G2.createMatch({ ...G2.template(), extra: true, added3: 2, added4: 3 });
+  assert.ok(ex.time.h3 && ex.time.h4, "延長のピリオドが生える");
+  assert.equal(ex.time.h3.start, ex.time.h2.end, "延長前半は後半終了から始まる");
+  assert.equal(ex.time.h3.end - ex.time.h3.start, 900 + 2 * 60, "延長前半は 15 分 + AT");
+  assert.equal(ex.time.h4.end - ex.time.h4.start, 900 + 3 * 60, "延長後半は 15 分 + AT");
+  // #141 の一般対応がそのまま効く（105+X / 120+X 表示）
+  assert.match(E.clockAt(ex, ex.time.h4.end).disp, /^120\+3/, "終端は 120+3");
+  assert.equal(E.playedRange(ex).t1, ex.time.h4.end);
+});
+
+test("#202 延長: 後半終了で止まり、延長前半・延長後半へ順に進む", () => {
+  const cfgX = { ...cfg(), extra: true, added2: 4, added3: 2, added4: 3 };
+  let s = L.withClock(L.create(cfgX), "start", T0);
+  const m = L.matchOf(s);
+  const at = (t) => T0 + t * 1000;
+
+  s = L.atHalfBreak(s, m, at(m.time.h1.end + 3));
+  assert.ok(s, "前半終了で止まる");
+  assert.equal(L.breakAt(s, m, at(m.time.h1.end + 3)), "h2");
+  s = L.startSecondHalf(s, m, at(m.time.h1.end + 60));
+
+  const wallAtFT = at(m.time.h1.end + 60 + (m.time.h2.end - m.time.h2.start) + 3);
+  const stopped = L.atHalfBreak(s, m, wallAtFT);
+  assert.ok(stopped, "後半終了でも止まる（#183 は前半しか見ていなかった）");
+  assert.equal(Math.round(L.tAt(stopped, wallAtFT)), m.time.h2.end);
+  assert.equal(L.breakAt(stopped, m, wallAtFT), "h3", "次は延長前半");
+
+  const inET = L.startSecondHalf(stopped, m, wallAtFT + 60_000);
+  assert.ok(L.isRunning(inET), "延長前半が動く");
+  assert.equal(L.atHalfBreak(inET, m, wallAtFT + 61_000), null, "開始直後に止め直さない");
+  assert.equal(L.breakAt(inET, m, wallAtFT + 61_000), null, "動いている間は区切りではない");
+});
+
+test("#202 延長: 途中で延長を足しても記録が失われず、保存で往復する", () => {
+  let s = L.withClock(L.create(cfg()), "start", T0);
+  s = L.withEvent(s, { t: 1200, type: "goal", team: "TMA", no: 9 });
+  s = L.withPk(s, { team: "TMA", cell: 0, scored: true });
+  const end0 = E.playedRange(L.matchOf(s)).t1;
+
+  s = L.withCfg(s, { ...s.cfg, extra: true });
+  const m = L.matchOf(s);
+  assert.ok(m.time.h3, "後から延長を足せる");
+  assert.ok(E.playedRange(m).t1 > end0, "終端が伸びる");
+  assert.equal(s.events.length, 1, "イベントは保持");
+  assert.equal(s.pk.length, 1, "PK 戦の記録は保持");
+
+  const back = L.fromObj(L.toObj(s), Date.now());
+  assert.equal(back.cfg.extra, true);
+  assert.equal(E.playedRange(L.matchOf(back)).t1, E.playedRange(m).t1);
+});
+
+test("#202 延長: 復帰しても開始済みのピリオドで止め直さない", () => {
+  const cfgX = { ...cfg(), extra: true };
+  let s = L.withClock(L.create(cfgX), "start", T0);
+  const m = L.matchOf(s);
+  const at = (t) => T0 + t * 1000;
+  s = L.startSecondHalf(L.atHalfBreak(s, m, at(m.time.h1.end + 3)), m, at(m.time.h1.end + 60));
+  const wFT = at(m.time.h1.end + 60 + (m.time.h2.end - m.time.h2.start) + 3);
+  s = L.startSecondHalf(L.atHalfBreak(s, m, wFT), m, wFT + 60_000);   // 延長前半へ
+  const back = L.fromObj(L.toObj(s), wFT + 200_000);
+  assert.notEqual(L.breakAt(back, m, wFT + 200_000), "h2", "復帰後に後半開始へ戻らない");
+  assert.notEqual(L.breakAt(back, m, wFT + 200_000), "h3", "復帰後に延長前半開始へも戻らない");
+});

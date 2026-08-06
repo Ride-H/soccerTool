@@ -561,6 +561,20 @@ export const REQUIREMENTS = [
       + "（実測 終端 6180 → 5820 秒）。記録は live.withCfg が保持する",
   },
   {
+    id: "UX-09", area: "ux", status: "held", issue: 202,
+    text: "自作の試合で延長戦を行える（後半終了で選び、延長前半・延長後半へ進む）",
+    source: "issue#202",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "延長: 未指定なら従来どおり" },
+      { kind: "test", file: "live.test.mjs", name: "延長: 後半終了で止まり、延長前半・延長後半へ順に進む" },
+      { kind: "test", file: "live.test.mjs", name: "延長: 途中で延長を足しても記録が失われず" },
+      { kind: "test", file: "bundle.test.mjs", name: "バンドル: 延長の有無と延長の AT が往復する" },
+    ],
+    note: "エンジンは #141 で h3/h4 に一般対応済みだったので、生成経路とピリオド進行だけを足した。"
+      + "#183 のハーフタイム処理（h2 専用）を、どのピリオド境界でも効く形へ一般化。"
+      + "復帰時に開始済みピリオドの印を引き継がないと、同じ区切りで何度も止まる",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

@@ -174,3 +174,22 @@ test("#201 バンドル: アディショナルタイムが往復する", () => {
   const pb = JSON.parse(SCN.serializeBundle(plain, E.actualScenario(plain), null));
   assert.equal(G.createMatch(pb.customMatch).time.h2.added, 5);
 });
+
+// #202: 延長の有無と延長の AT がバンドルの往復で失われないこと。
+// 欠けると別の端末で開いた瞬間に延長が消え、120 分の試合が 90 分に化ける。
+test("#202 バンドル: 延長の有無と延長の AT が往復する", () => {
+  const G = RPDX.generic;
+  const m = G.createMatch({ ...G.template(), extra: true, added3: 2, added4: 3 });
+  const b = JSON.parse(SCN.serializeBundle(m, E.actualScenario(m), null));
+  assert.equal(b.customMatch.extra, true);
+  assert.equal(b.customMatch.added3, 2);
+  assert.equal(b.customMatch.added4, 3);
+  const back = G.createMatch(b.customMatch);
+  assert.equal(E.playedRange(back).t1, E.playedRange(m).t1, "終端が一致する");
+  assert.match(E.clockAt(back, E.playedRange(back).t1).disp, /^120\+3/);
+
+  // 延長なしの試合には extra が生えない（従来のバンドルと同じ形）
+  const plain = G.createMatch(G.template());
+  const pb = JSON.parse(SCN.serializeBundle(plain, E.actualScenario(plain), null));
+  assert.ok(!("extra" in pb.customMatch), "延長なしなら extra を書かない");
+});

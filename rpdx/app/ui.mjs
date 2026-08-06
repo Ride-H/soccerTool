@@ -2015,9 +2015,20 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
-    const atBreak = R.live.isAtHalfBreak(liveState.session, App.match, Date.now());
-    $("#liveHalf").style.display = atBreak ? "" : "none";
-    bar.classList.toggle("half", atBreak);
+    // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
+    const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
+    const PLAB = { h2: "▶ 後半開始", h3: "▶ 延長前半開始", h4: "▶ 延長後半開始" };
+    $("#liveHalf").style.display = nextP ? "" : "none";
+    if (nextP) $("#liveHalf").textContent = PLAB[nextP] || "▶ 次へ";
+    // 後半終了で止まっていて、まだ延長を決めていないときだけ「延長」を出す
+    const m0 = App.match, atFT = !nextP && !R.live.isRunning(liveState.session)
+      && m0.time && Math.abs(R.live.tAt(liveState.session, Date.now()) - m0.time.h2.end) < 0.5;
+    const ex = $("#liveExtra");
+    if (ex) {
+      ex.style.display = (atFT || nextP === "h3") ? "" : "none";
+      ex.textContent = liveState.session.cfg.extra ? "延長をやめる" : "＋ 延長を行う";
+    }
+    bar.classList.toggle("half", !!nextP);
     // 名簿の設定は試合開始前だけ出す（始まったら入力に集中させる）
     const started = liveState.session.clock.length > 0;
     $("#liveSetup").style.display = started ? "none" : "";
@@ -2492,10 +2503,20 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
     };
     $("#liveHalf").onclick = () => {
+      const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
       liveState.session = R.live.startSecondHalf(liveState.session, App.match, Date.now());
       liveSave(); liveRenderBar();
-      liveLog("後半開始です");
+      liveLog({ h2: "後半開始です", h3: "延長前半開始です", h4: "延長後半開始です" }[nextP] || "再開しました");
     };
+    // #202: 後半終了の時点で延長へ入るかを選ぶ。延長を作るのは cfg の差し替えで、
+    // 入力済みの記録は live.withCfg が保持する。
+    $("#liveExtra") && ($("#liveExtra").onclick = () => {
+      const cfg = liveState.session.cfg;
+      const on = !cfg.extra;
+      liveState.session = R.live.withCfg(liveState.session, { ...cfg, extra: on });
+      liveRebuild(); liveSave(); liveRenderBar();
+      liveLog(on ? "延長を行います（120分まで）" : "延長を行いません");
+    });
     $("#liveExit").onclick = liveExit;
   };
 
