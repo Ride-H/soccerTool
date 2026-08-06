@@ -247,3 +247,35 @@ test("#198 PK 戦: 試合のバンドルは従来どおり読める（kind の�
   const sh = SCN.serializeShootout(s, L.matchOf(s));
   assert.ok(SCN.parseShootout(sh).shootout, "PK 戦は PK 戦として読める");
 });
+
+// #198: 書き出し・読み込みの分岐を全て通す（省略時の既定・順番なし・チーム欠けなど）。
+test("#198 PK 戦: 省略できる項目と境界を全て通す", () => {
+  const L = RPDX.live, G = RPDX.generic;
+  // セッションが無い／live が無い場合は null
+  assert.equal(SCN.serializeShootout(null, null), null);
+
+  // 記録も順番も無い状態（order を書かない）
+  const empty = L.create(G.template());
+  const eo = JSON.parse(SCN.serializeShootout(empty, L.matchOf(empty)));
+  assert.deepEqual(eo.kicks, []);
+  assert.ok(!("order" in eo), "順番が無ければ書かない");
+  assert.ok(eo.label.includes("vs"), "既定のラベルが作られる");
+
+  // ラベルを明示できる
+  const named = JSON.parse(SCN.serializeShootout(empty, L.matchOf(empty), "県大会 決勝"));
+  assert.equal(named.label, "県大会 決勝");
+
+  // 読み込み: teams / order が無くても既定で埋まる
+  const r = SCN.parseShootout(JSON.stringify({ kind: "rpdx-shootout", kicks: [] }));
+  assert.deepEqual(r.shootout.teams, {});
+  assert.deepEqual(r.shootout.order, {});
+
+  // 読み込み: オブジェクトをそのまま渡せる（文字列だけではない）
+  const asObj = SCN.parseShootout({ kind: "rpdx-shootout", kicks: [{ team: "A", cell: 0, scored: true }] });
+  assert.equal(asObj.shootout.kicks.length, 1);
+
+  // 読み込み: null / 配列でない kicks
+  assert.match(SCN.parseShootout("null").error, /オブジェクトではありません/);
+  assert.match(SCN.parseShootout('{"kind":"rpdx-shootout","kicks":"x"}').error, /kicks がありません/);
+  assert.match(SCN.parseShootout(JSON.stringify({ kind: "rpdx-shootout", kicks: [null] })).error, /team がありません/);
+});
