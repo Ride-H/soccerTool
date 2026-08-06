@@ -539,6 +539,16 @@ export const REQUIREMENTS = [
       + "踏んだため、入力をまるごとハッシュに入れるよう変えた",
   },
   {
+    id: "UX-07", area: "ux", status: "held", issue: 197,
+    text: "PK 戦は全画面モードで、危険度・タイムラインを消し、試合時刻を終端に置く",
+    source: "issue#197",
+    checks: [{ kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" }],
+    note: "入るときに試合時刻・カメラ・フォーカス・再生状態を預かり、抜けたら戻す。"
+      + "隠したパネルは inert でタブ順から外す（#42: display:none だけだとフォーカスが body へ飛ぶ）。"
+      + "Esc で抜けられる。**品質ティア（#152）には触らない** — 消すのはモードの判断であり描画予算の"
+      + "判断ではない。実測: 格子と ○× が 320/360/390px でスクロールなしに収まる",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

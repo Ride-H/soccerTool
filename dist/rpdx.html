@@ -581,6 +581,32 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 #pkGrid .cell.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
 #pkGrid .cell .cnt { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 
+/* ---------- PK 戦モード（#197・全画面） ----------
+   PK 戦では危険度・D²-Field・PSY・支配率・タイムライン・走行距離が意味を持たない。
+   それらを消してライブバーを全画面の操作盤にする。
+   **品質ティア（#152）には触らない** — 消すのはモードの判断で、描画予算の判断ではない。
+   各機能が独自にON/OFF基準を持つと基準がブレる、というのが #152 の趣旨。 */
+body.pk-mode #dockL, body.pk-mode #dockR,
+body.pk-mode #timelineWrap, body.pk-mode #tlToggle,
+body.pk-mode #viewbar, body.pk-mode #viewToggle,
+body.pk-mode #toggleL, body.pk-mode #toggleR,
+body.pk-mode #statusband, body.pk-mode #inspector,
+body.pk-mode #editBar, body.pk-mode #keyhelp { display: none !important; }
+
+body.pk-mode #liveBar {
+  position: fixed; left: 8px; right: 8px; top: 96px; bottom: 8px;
+  width: auto; max-width: none; z-index: 34;
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+body.pk-mode #pkPanel { flex: 1; margin-top: 6px; }
+/* 格子を余った高さいっぱいに使う（スクロールせずに押せるように） */
+body.pk-mode #pkGrid { flex: 1; min-height: 132px; }
+body.pk-mode #pkGrid .cell { min-height: 52px; }
+body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { display: none; }
+@media (min-width: 900px) {
+  body.pk-mode #liveBar { left: 50%; right: auto; transform: translateX(-50%); width: min(560px, 92vw); }
+}
+
 /* =========================================================================
    #105 タッチ端末（指で操作する端末）向けの上書き。
    **ファイル末尾に置くこと**: 同じ詳細度の指定が後ろにあると後勝ちで無効化される
@@ -598,6 +624,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   #viewbar .btn { min-width: 44px; }                       /* 2文字ラベルで 33px まで痩せる */
   .speedgrp button { min-width: 44px; min-height: 44px; }
   .gk-toggle .btn, .zone-toggle .btn { min-width: 44px; }
+  .pk-b, .pk-res { min-width: 44px; }   /* 1 文字ラベル（左/右）が 36px まで痩せる */
   #inspector .close { width: 44px; height: 44px; top: 2px; right: 2px; font-size: 18px; }
 
   /* #105: 文字はスタンドで読む前提。11px を下回らせない（実測で 8.5px まであった）。 */
@@ -870,8 +897,8 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       <button class="btn pk-b" data-pkkind="match" aria-label="試合中のPKを記録する">試合中のPK</button>
     </div>
     <div class="pk-head">
-      <b id="pkOrder">1 本目</b>
-      <span class="eyebrow" id="pkScore"></span>
+      <b id="pkOrder" aria-live="polite">1 本目</b>
+      <span class="eyebrow" id="pkScore" aria-live="polite"></span>
       <span class="spacer"></span>
       <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
     </div>
@@ -909,7 +936,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
       <button class="btn pk-b" data-pkscope="team" aria-label="このチームの記録">チーム</button>
       <button class="btn pk-b" data-pkscope="all" aria-label="記録ぜんぶ">ぜんぶ</button>
     </div>
-    <div id="pkResult" class="hint"></div>
+    <div id="pkResult" class="hint" aria-live="polite"></div>
     <div id="pkTally" class="hint"></div>
     <div id="pkLegend" class="hint"></div>
   </div>
@@ -13940,7 +13967,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
      確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
   const pkState = { open: false, approach: null, gkMove: null, cell: null,
     approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker",
-    kind: "shootout" };   // scope: kicker|team|all ／ kind: shootout（PK戦）| match（試合中のPK）
+    kind: "shootout", mode: false };   // scope: kicker|team|all ／ kind: shootout|match ／ mode: 全画面か
 
   const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
 
@@ -14099,14 +14126,58 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       cols: R.live.PK_COLS, rows: R.live.PK_ROWS, gw: R.live.PK_GOAL_W, gh: R.live.PK_GOAL_H };
   };
 
+  // #197: PK 戦は分析画面と目的が違うので全画面モードにする。
+  // 入るときに預かるもの（抜けたら戻す）: 試合時刻・カメラ・フォーカス。
+  const pkSaved = { t: null, cam: null, focus: null, playing: false };
+
+  // モード中は隠したパネルをタブ順から外す（#42: キーボード操作・フォーカス可視化）。
+  // display:none だけだとフォーカスが body へ飛び、キーボード利用者が迷子になる。
+  const PK_HIDDEN = ["#dockL", "#dockR", "#timelineWrap", "#viewbar", "#inspector", "#editBar"];
+  const pkInert = (on) => {
+    for (const sel of PK_HIDDEN) { const el = $(sel); if (el) el.inert = on; }
+  };
+
+  const pkEnterMode = () => {
+    if (pkState.mode) return;
+    pkState.mode = true;
+    pkSaved.t = App.t; pkSaved.cam = App.camPreset || "broadcast";
+    pkSaved.focus = document.activeElement; pkSaved.playing = App.playing;
+    setPlaying(false);
+    // PK 戦は試合が終わったあとの出来事。時刻を終端へ置く（前半 00:00 のままにしない）
+    App.t = E.playedRange(App.match).t1;
+    document.body.classList.add("pk-mode");
+    pkInert(true);
+    if (renderer) renderer.setPreset("pk");
+    App.camPreset = "pk";
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === "pk"));
+    const first = $("#pkGrid") && $("#pkGrid").querySelector(".cell");
+    if (first) first.focus();
+    liveLog("PK 戦モード（Esc で戻る）");
+  };
+
+  const pkExitMode = () => {
+    if (!pkState.mode) return;
+    pkState.mode = false;
+    document.body.classList.remove("pk-mode");
+    pkInert(false);
+    if (pkSaved.t != null) App.t = pkSaved.t;
+    if (renderer && pkSaved.cam) renderer.setPreset(pkSaved.cam);
+    App.camPreset = pkSaved.cam;
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === pkSaved.cam));
+    if (pkSaved.focus && pkSaved.focus.focus) pkSaved.focus.focus();
+    if (pkSaved.playing) setPlaying(true);
+  };
+
   const pkOpen = (on) => {
     pkState.open = on;
     $("#pkPanel").style.display = on ? "block" : "none";
     $("#liveEvents").style.display = on ? "none" : "";
-    if (!on) return;
+    if (!on) { pkExitMode(); return; }
     pkBuildGrid(); pkReset(); pkFillWho(); pkRenderTally();
     for (const el of document.querySelectorAll("#pkPanel .pk-b, #pkPanel .pk-res")) el.classList.remove("on");
-    if (renderer) renderer.setPreset("pk");
+    // PK 戦のときだけ全画面。試合中の PK は試合を見ながら記録するので分析画面のまま。
+    if (pkState.kind === "shootout") pkEnterMode();
+    else if (renderer) renderer.setPreset("pk");
   };
 
   const bindPk = () => {
@@ -14145,7 +14216,11 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
       el.onclick = () => { pkState.scope = el.dataset.pkscope; pkRenderTally(); };
     for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
-      el.onclick = () => { pkState.kind = el.dataset.pkkind; pkReset(); pkFillWho(); pkRenderTally(); };
+      el.onclick = () => {
+        pkState.kind = el.dataset.pkkind;
+        if (pkState.kind === "shootout") pkEnterMode(); else pkExitMode();
+        pkReset(); pkFillWho(); pkRenderTally();
+      };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);
   };
@@ -14237,7 +14312,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveLog("前半終了です。ハーフタイムの入力もできます。「後半開始」で再開してください");
     }
     const range = E.playedRange(App.match);
-    App.t = clamp(liveTimeNow(), 0, range.t1);
+    // #197: PK 戦は試合が終わったあとの出来事なので、試合時刻は終端で止める。
+    // ここで上書きすると、モードに入って終端へ置いた時刻が毎フレーム巻き戻る。
+    App.t = pkState.mode ? range.t1 : clamp(liveTimeNow(), 0, range.t1);
     const el = $("#liveClock");
     if (el) el.textContent = E.clockAt(App.match, App.t).disp;
   };
@@ -14588,7 +14665,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       const i = +e.code.slice(5) - 1;
       const cams = document.querySelectorAll("#viewbar .cam");
       if (cams[i]) cams[i].click();
-    } else if (e.key === "?") document.body.classList.toggle("showkeys");
+    } else if (e.key === "Escape" && pkState.mode) { pkOpen(false); e.preventDefault(); }
+    else if (e.key === "?") document.body.classList.toggle("showkeys");
   });
 
   /* ------------------------------ メインループ ------------------------------ */

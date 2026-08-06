@@ -253,8 +253,8 @@
       <button class="btn pk-b" data-pkkind="match" aria-label="試合中のPKを記録する">試合中のPK</button>
     </div>
     <div class="pk-head">
-      <b id="pkOrder">1 本目</b>
-      <span class="eyebrow" id="pkScore"></span>
+      <b id="pkOrder" aria-live="polite">1 本目</b>
+      <span class="eyebrow" id="pkScore" aria-live="polite"></span>
       <span class="spacer"></span>
       <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
     </div>
@@ -292,7 +292,7 @@
       <button class="btn pk-b" data-pkscope="team" aria-label="このチームの記録">チーム</button>
       <button class="btn pk-b" data-pkscope="all" aria-label="記録ぜんぶ">ぜんぶ</button>
     </div>
-    <div id="pkResult" class="hint"></div>
+    <div id="pkResult" class="hint" aria-live="polite"></div>
     <div id="pkTally" class="hint"></div>
     <div id="pkLegend" class="hint"></div>
   </div>

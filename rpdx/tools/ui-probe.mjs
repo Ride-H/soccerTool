@@ -174,11 +174,7 @@ export const MIN_TARGET = 44, MIN_FONT = 11, MIN_CONTRAST = 4.5, MIN_CONTRAST_LG
 // 直す予定が決まっている不備は、ここに Issue 番号つきで書いて通す。
 // **ここに書いたものだけ**を許し、増えたら落ちる（他のゲートと同じ流儀）。
 // 黙って除外するのではなく、実測の出力に「既知」として毎回出す。
-export const KNOWN_UNSEEN = {
-  // #197: PK パネルをライブバーの中にぶら下げたため縦に伸び、格子と ○× が下端より下に出る。
-  // 全画面モードへ作り直して解消する。入れ物の問題なので、この Issue で直す。
-  "PK コース記録": ["#pkGrid", "#pkOk", "#pkNg"],
-};
+export const KNOWN_UNSEEN = {};
 
 // 1 画面ぶんの判定。返値 { name, targets, texts, findings[] }
 const judge = (name, data) => {

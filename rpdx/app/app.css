@@ -574,6 +574,32 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
 #pkGrid .cell.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
 #pkGrid .cell .cnt { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 
+/* ---------- PK 戦モード（#197・全画面） ----------
+   PK 戦では危険度・D²-Field・PSY・支配率・タイムライン・走行距離が意味を持たない。
+   それらを消してライブバーを全画面の操作盤にする。
+   **品質ティア（#152）には触らない** — 消すのはモードの判断で、描画予算の判断ではない。
+   各機能が独自にON/OFF基準を持つと基準がブレる、というのが #152 の趣旨。 */
+body.pk-mode #dockL, body.pk-mode #dockR,
+body.pk-mode #timelineWrap, body.pk-mode #tlToggle,
+body.pk-mode #viewbar, body.pk-mode #viewToggle,
+body.pk-mode #toggleL, body.pk-mode #toggleR,
+body.pk-mode #statusband, body.pk-mode #inspector,
+body.pk-mode #editBar, body.pk-mode #keyhelp { display: none !important; }
+
+body.pk-mode #liveBar {
+  position: fixed; left: 8px; right: 8px; top: 96px; bottom: 8px;
+  width: auto; max-width: none; z-index: 34;
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+body.pk-mode #pkPanel { flex: 1; margin-top: 6px; }
+/* 格子を余った高さいっぱいに使う（スクロールせずに押せるように） */
+body.pk-mode #pkGrid { flex: 1; min-height: 132px; }
+body.pk-mode #pkGrid .cell { min-height: 52px; }
+body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { display: none; }
+@media (min-width: 900px) {
+  body.pk-mode #liveBar { left: 50%; right: auto; transform: translateX(-50%); width: min(560px, 92vw); }
+}
+
 /* =========================================================================
    #105 タッチ端末（指で操作する端末）向けの上書き。
    **ファイル末尾に置くこと**: 同じ詳細度の指定が後ろにあると後勝ちで無効化される
@@ -591,6 +617,7 @@ input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-co
   #viewbar .btn { min-width: 44px; }                       /* 2文字ラベルで 33px まで痩せる */
   .speedgrp button { min-width: 44px; min-height: 44px; }
   .gk-toggle .btn, .zone-toggle .btn { min-width: 44px; }
+  .pk-b, .pk-res { min-width: 44px; }   /* 1 文字ラベル（左/右）が 36px まで痩せる */
   #inspector .close { width: 44px; height: 44px; top: 2px; right: 2px; font-size: 18px; }
 
   /* #105: 文字はスタンドで読む前提。11px を下回らせない（実測で 8.5px まであった）。 */

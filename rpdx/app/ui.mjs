@@ -2126,7 +2126,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
      確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
   const pkState = { open: false, approach: null, gkMove: null, cell: null,
     approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker",
-    kind: "shootout" };   // scope: kicker|team|all ／ kind: shootout（PK戦）| match（試合中のPK）
+    kind: "shootout", mode: false };   // scope: kicker|team|all ／ kind: shootout|match ／ mode: 全画面か
 
   const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
 
@@ -2285,14 +2285,58 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       cols: R.live.PK_COLS, rows: R.live.PK_ROWS, gw: R.live.PK_GOAL_W, gh: R.live.PK_GOAL_H };
   };
 
+  // #197: PK 戦は分析画面と目的が違うので全画面モードにする。
+  // 入るときに預かるもの（抜けたら戻す）: 試合時刻・カメラ・フォーカス。
+  const pkSaved = { t: null, cam: null, focus: null, playing: false };
+
+  // モード中は隠したパネルをタブ順から外す（#42: キーボード操作・フォーカス可視化）。
+  // display:none だけだとフォーカスが body へ飛び、キーボード利用者が迷子になる。
+  const PK_HIDDEN = ["#dockL", "#dockR", "#timelineWrap", "#viewbar", "#inspector", "#editBar"];
+  const pkInert = (on) => {
+    for (const sel of PK_HIDDEN) { const el = $(sel); if (el) el.inert = on; }
+  };
+
+  const pkEnterMode = () => {
+    if (pkState.mode) return;
+    pkState.mode = true;
+    pkSaved.t = App.t; pkSaved.cam = App.camPreset || "broadcast";
+    pkSaved.focus = document.activeElement; pkSaved.playing = App.playing;
+    setPlaying(false);
+    // PK 戦は試合が終わったあとの出来事。時刻を終端へ置く（前半 00:00 のままにしない）
+    App.t = E.playedRange(App.match).t1;
+    document.body.classList.add("pk-mode");
+    pkInert(true);
+    if (renderer) renderer.setPreset("pk");
+    App.camPreset = "pk";
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === "pk"));
+    const first = $("#pkGrid") && $("#pkGrid").querySelector(".cell");
+    if (first) first.focus();
+    liveLog("PK 戦モード（Esc で戻る）");
+  };
+
+  const pkExitMode = () => {
+    if (!pkState.mode) return;
+    pkState.mode = false;
+    document.body.classList.remove("pk-mode");
+    pkInert(false);
+    if (pkSaved.t != null) App.t = pkSaved.t;
+    if (renderer && pkSaved.cam) renderer.setPreset(pkSaved.cam);
+    App.camPreset = pkSaved.cam;
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === pkSaved.cam));
+    if (pkSaved.focus && pkSaved.focus.focus) pkSaved.focus.focus();
+    if (pkSaved.playing) setPlaying(true);
+  };
+
   const pkOpen = (on) => {
     pkState.open = on;
     $("#pkPanel").style.display = on ? "block" : "none";
     $("#liveEvents").style.display = on ? "none" : "";
-    if (!on) return;
+    if (!on) { pkExitMode(); return; }
     pkBuildGrid(); pkReset(); pkFillWho(); pkRenderTally();
     for (const el of document.querySelectorAll("#pkPanel .pk-b, #pkPanel .pk-res")) el.classList.remove("on");
-    if (renderer) renderer.setPreset("pk");
+    // PK 戦のときだけ全画面。試合中の PK は試合を見ながら記録するので分析画面のまま。
+    if (pkState.kind === "shootout") pkEnterMode();
+    else if (renderer) renderer.setPreset("pk");
   };
 
   const bindPk = () => {
@@ -2331,7 +2375,11 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
       el.onclick = () => { pkState.scope = el.dataset.pkscope; pkRenderTally(); };
     for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
-      el.onclick = () => { pkState.kind = el.dataset.pkkind; pkReset(); pkFillWho(); pkRenderTally(); };
+      el.onclick = () => {
+        pkState.kind = el.dataset.pkkind;
+        if (pkState.kind === "shootout") pkEnterMode(); else pkExitMode();
+        pkReset(); pkFillWho(); pkRenderTally();
+      };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);
   };
@@ -2423,7 +2471,9 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       liveLog("前半終了です。ハーフタイムの入力もできます。「後半開始」で再開してください");
     }
     const range = E.playedRange(App.match);
-    App.t = clamp(liveTimeNow(), 0, range.t1);
+    // #197: PK 戦は試合が終わったあとの出来事なので、試合時刻は終端で止める。
+    // ここで上書きすると、モードに入って終端へ置いた時刻が毎フレーム巻き戻る。
+    App.t = pkState.mode ? range.t1 : clamp(liveTimeNow(), 0, range.t1);
     const el = $("#liveClock");
     if (el) el.textContent = E.clockAt(App.match, App.t).disp;
   };
@@ -2774,7 +2824,8 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       const i = +e.code.slice(5) - 1;
       const cams = document.querySelectorAll("#viewbar .cam");
       if (cams[i]) cams[i].click();
-    } else if (e.key === "?") document.body.classList.toggle("showkeys");
+    } else if (e.key === "Escape" && pkState.mode) { pkOpen(false); e.preventDefault(); }
+    else if (e.key === "?") document.body.classList.toggle("showkeys");
   });
 
   /* ------------------------------ メインループ ------------------------------ */
