@@ -228,6 +228,9 @@
       bundle.customMatch = {
         seed: match.meta.id.replace(/^custom-/, ""),
         competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        // #201: アディショナルタイムを含める。入れないと往復で既定値（+2/+5）へ戻り、
+        // 設定したロスタイムが黙って消える（実測: 終端 6180 → 5820 秒）。
+        added1: match.time.h1.added, added2: match.time.h2.added,
         home: teamCfg(ha), away: teamCfg(aw),
       };
     }

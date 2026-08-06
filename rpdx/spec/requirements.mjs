@@ -549,6 +549,18 @@ export const REQUIREMENTS = [
       + "判断ではない。実測: 格子と ○× が 320/360/390px でスクロールなしに収まる",
   },
   {
+    id: "UX-08", area: "ux", status: "held", issue: 201,
+    text: "アディショナルタイムを試合中に入力でき、終端と保存へ反映される",
+    source: "issue#201",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "AT: 変更すると終端が動き、入力済みの記録は" },
+      { kind: "test", file: "bundle.test.mjs", name: "バンドル: アディショナルタイムが往復する" },
+    ],
+    note: "実際のロスタイムは試合終盤に発表されるので、試合中に変えられる必要がある。"
+      + "着手時に「バンドルの customMatch に added が無く、往復で既定値へ戻る」潜在バグを発見して同時に修正"
+      + "（実測 終端 6180 → 5820 秒）。記録は live.withCfg が保持する",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

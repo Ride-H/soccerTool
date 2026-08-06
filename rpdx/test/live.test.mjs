@@ -484,3 +484,42 @@ test("#196 試合 ID: 入力のどの項目を変えても世界が作り直さ�
   for (const [k, v] of Object.entries(variants))
     assert.notEqual(id(L.withPenalty(base, v)), ref, `${k} を変えても ID が同じ（古い世界が返る）`);
 });
+
+/* ---------------------------------------------------------------------------
+   #201 アディショナルタイムを試合ごとに入力できる。
+   実際のロスタイムは試合終盤に発表されるので、試合中に変えられる必要がある。
+   --------------------------------------------------------------------------- */
+test("#201 AT: 変更すると終端が動き、入力済みの記録は 1 件も失われない", () => {
+  let s = L.withClock(L.create(cfg()), "start", T0);
+  s = L.withEvent(s, { t: 1200, type: "goal", team: "TMA", no: 9 });
+  s = L.withPenalty(s, { t: 2000, team: "TMB", cell: 4, scored: true });
+  s = L.withPk(s, { team: "TMA", cell: 0, scored: true });
+  s = L.withSub(s, { t: 2400, team: "TMA", out: Object.values(L.matchOf(s).teams.TMA.phases[0].assign)[5], in: 99 });
+  const end0 = E.playedRange(L.matchOf(s)).t1;
+
+  s = L.withCfg(s, { ...s.cfg, added2: 9 });
+  const end1 = E.playedRange(L.matchOf(s)).t1;
+  assert.equal(end1 - end0, (9 - 5) * 60, "後半 AT を +5 → +9 にすると終端が 4 分伸びる");
+  assert.equal(s.events.length, 2, "イベントは保持");
+  assert.equal(s.pk.length, 1, "PK 戦の記録は保持");
+  assert.equal(s.subs.length, 1, "交代は保持");
+
+  // 減らす方向でも同じ（記録が範囲外になっても既存の丸め規則で壊れない）
+  const shrunk = L.withCfg(s, { ...s.cfg, added2: 0 });
+  const m = L.matchOf(shrunk);
+  const end2 = E.playedRange(m).t1;
+  assert.ok(end2 < end1, "減らせば終端は縮む");
+  for (const ev of m.events) assert.ok(ev.t >= 0 && ev.t <= end2, `イベント ${ev.type} が範囲外 ${ev.t}`);
+  for (const a of m.ballAnchors) assert.ok(a.t >= 0 && a.t <= end2, `アンカーが範囲外 ${a.t}`);
+});
+
+test("#201 AT: 保存と復元で往復する（既定値なら従来と同じ）", () => {
+  const s = L.withCfg(L.create(cfg()), { ...cfg(), added1: 4, added2: 9 });
+  const back = L.fromObj(L.toObj(s), Date.now());
+  assert.equal(back.cfg.added1, 4);
+  assert.equal(back.cfg.added2, 9);
+  assert.equal(E.playedRange(L.matchOf(back)).t1, E.playedRange(L.matchOf(s)).t1);
+  // 既定値のままなら 90+5（従来と同じ）
+  const plain = L.create(cfg());
+  assert.equal(L.matchOf(plain).time.h2.added, 5);
+});

@@ -69,6 +69,7 @@
 | OPS-08 | ops | 視覚回帰の golden は 3D レンダリングだけを比較し、UI の変更で再ベースラインを要求しない | 担保 | 視覚 golden 差分（許容内） |
 | TAC-12 | engine | 試合中の PK と PK 戦を別のデータとして持つ（互いの集計・順番・危険度を汚さない） | 担保 | live.test.mjs 「試合中の PK: 試合時間を持ち、同じチームに連続で」<br>live.test.mjs 「PK 戦と試合中の PK が互いの集計・順番を汚さない」<br>live.test.mjs 「試合中の PK: 危険度に効く／PK 戦は効かない」<br>live.test.mjs 「試合 ID: 入力のどの項目を変えても世界が作り直される」 |
 | UX-07 | ux | PK 戦は全画面モードで、危険度・タイムラインを消し、試合時刻を終端に置く | 担保 | ツール rpdx/tools/ui-probe.mjs |
+| UX-08 | ux | アディショナルタイムを試合中に入力でき、終端と保存へ反映される | 担保 | live.test.mjs 「AT: 変更すると終端が動き、入力済みの記録は」<br>bundle.test.mjs 「バンドル: アディショナルタイムが往復する」 |
 | POL-01 | docs | PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>uicontract.test.mjs 「「傾向がある」「次は」の断定を画面文言に入れない」 |
 | POL-02 | docs | 記録してよい場と、データ取得の適法性の責任範囲を README と統治文書に明示する | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」 |
 | UX-01 | ux | スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす | 担保 | ツール rpdx/tools/ui-probe.mjs |

@@ -147,3 +147,30 @@ test("#92b残: editEntry はアトミック（重複番号拒否時に名前も�
     assert.ok(m.events.filter(e => e.type === "goal" && e.team === team).some(e => e.no === 77));
   }
 });
+
+// #201: アディショナルタイムがバンドルの往復で失われないこと。
+// customMatch は「読み込み側が試合データを持っていなくても再構築できる」ことが約束なので、
+// 試合の長さを決める AT が欠けていると、別の端末で開いた瞬間に終端が既定値へ戻る
+// （実測: 終端 6180 → 5820 秒）。
+test("#201 バンドル: アディショナルタイムが往復する", () => {
+  const G = RPDX.generic;
+  const m = G.createMatch({ ...G.template(), added1: 4, added2: 9 });
+  assert.equal(m.time.h1.added, 4);
+  assert.equal(m.time.h2.added, 9);
+  const end = E.playedRange(m).t1;
+
+  const b = JSON.parse(SCN.serializeBundle(m, E.actualScenario(m), null));
+  assert.ok(b.customMatch, "未較正の試合はロスターを同梱する");
+  assert.equal(b.customMatch.added1, 4, "前半 AT がバンドルに入る");
+  assert.equal(b.customMatch.added2, 9, "後半 AT がバンドルに入る");
+
+  const back = G.createMatch(b.customMatch);
+  assert.equal(back.time.h1.added, 4);
+  assert.equal(back.time.h2.added, 9);
+  assert.equal(E.playedRange(back).t1, end, "終端が一致する");
+
+  // 既定値のままなら従来と同じ（+2 / +5）
+  const plain = G.createMatch(G.template());
+  const pb = JSON.parse(SCN.serializeBundle(plain, E.actualScenario(plain), null));
+  assert.equal(G.createMatch(pb.customMatch).time.h2.added, 5);
+});

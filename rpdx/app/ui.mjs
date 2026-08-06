@@ -2395,6 +2395,45 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     };
     // 時計合わせは画面内で完結させる（スマホで prompt は押しにくく、
     // 自動検証でも画面が止まるため使わない）
+    // #201: アディショナルタイム。実際のロスタイムは試合終盤に発表されるので、
+    // 試合中に変えられる必要がある。既存の #liveSubPick へ小パネルを出す流儀に合わせる。
+    $("#liveAt").onclick = () => {
+      const wrap = $("#liveSubPick");
+      const draw = () => {
+        const m = R.live.matchOf(liveState.session);
+        const cur = { a1: m.time.h1.added, a2: m.time.h2.added };
+        wrap.innerHTML = "";
+        const h = document.createElement("div"); h.className = "hint";
+        h.textContent = `アディショナルタイム（いま 前半+${cur.a1} / 後半+${cur.a2} 分・終端 ${E.clockAt(m, E.playedRange(m).t1).disp}）`;
+        wrap.appendChild(h);
+        for (const [key, label, now] of [["added1", "前半", cur.a1], ["added2", "後半", cur.a2]]) {
+          const g = document.createElement("div"); g.className = "live-nums";
+          const lab = document.createElement("span"); lab.className = "eyebrow";
+          lab.textContent = `${label} +${now} 分`; g.appendChild(lab);
+          for (const d of [-1, +1]) {
+            const b = document.createElement("button");
+            b.className = "btn"; b.textContent = d > 0 ? "＋1分" : "−1分";
+            b.setAttribute("aria-label", `${label}のアディショナルタイムを${d > 0 ? "増やす" : "減らす"}`);
+            b.onclick = () => {
+              const v = clamp((liveState.session.cfg[key] ?? (key === "added1" ? 2 : 5)) + d, 0, 30);
+              // cfg の差し替えで終端が動く。入力済みの記録は live.withCfg が保持する。
+              liveState.session = R.live.withCfg(liveState.session, { ...liveState.session.cfg, [key]: v });
+              liveRebuild(); liveSave(); liveRenderBar(); draw();
+            };
+            g.appendChild(b);
+          }
+          wrap.appendChild(g);
+        }
+        const close = document.createElement("button");
+        close.className = "btn"; close.textContent = "閉じる";
+        close.setAttribute("aria-label", "アディショナルタイムの設定を閉じる");
+        close.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+        wrap.appendChild(close);
+      };
+      wrap.style.display = wrap.style.display === "none" || !wrap.innerHTML ? "block" : "none";
+      if (wrap.style.display === "block") draw();
+    };
+
     $("#liveSync").onclick = () => {
       const wrap = $("#liveSubPick");
       const draw = () => {
