@@ -243,6 +243,49 @@
     return JSON.stringify(bundle, null, 2);
   };
 
+  /* ---------------- PK 戦を単独の文書として出す（#198） ----------------
+     書き出しの**機構**は既存と同じ（呼び出し側が Blob で落とす）。増やすのは文書の種類だけ。
+     #181 の決まり「保存の仕組みは既にある。新しい保存機構を足してはいけない」に従う。
+
+     PK 戦は試合とは別の記録なので、試合データを持っていない相手にも渡せるよう
+     **チーム名と選手名を同梱**して自己完結させる（customMatch と同じ考え方）。 */
+  SCN.serializeShootout = (session, match, label) => {
+    const L = R.live;
+    if (!L || !session) return null;
+    const keys = R.engine.teamKeys(match);
+    const teams = {};
+    for (const k of keys) {
+      const t = match.teams[k];
+      teams[k] = { name: t?.name ?? k,
+        squad: (t?.squad ?? []).map((p) => ({ no: p.no, ja: p.ja ?? p.name ?? String(p.no) })) };
+    }
+    return JSON.stringify({
+      v: 1, kind: "rpdx-shootout",
+      label: label || `${teams[keys[0]]?.name ?? keys[0]} vs ${teams[keys[1]]?.name ?? keys[1]}`,
+      savedAt: Date.now(), teams,
+      kicks: (session.pk || []).map((r) => ({ ...r })),
+      ...(session.pkOrder ? { order: JSON.parse(JSON.stringify(session.pkOrder)) } : {}),
+    }, null, 2);
+  };
+
+  // 読み込み。形が違えば error を返す（呼び出し側が kind で振り分ける）。
+  SCN.parseShootout = (input) => {
+    let o;
+    try { o = typeof input === "string" ? JSON.parse(input) : input; }
+    catch (e) { return { error: "JSON 解析に失敗: " + (e && e.message || e) }; }
+    if (!o || typeof o !== "object") return { error: "不正な形式（オブジェクトではありません）" };
+    if (o.kind !== "rpdx-shootout") return { error: "PK 戦の記録ではありません（kind が違う）" };
+    if (!Array.isArray(o.kicks)) return { error: "kicks がありません" };
+    const cells = (R.live?.PK_COLS ?? 3) * (R.live?.PK_ROWS ?? 3);
+    for (const [i, k] of o.kicks.entries()) {
+      if (!k || !k.team) return { error: `${i + 1} 本目に team がありません` };
+      if (!Number.isInteger(k.cell) || k.cell < 0 || k.cell >= cells)
+        return { error: `${i + 1} 本目の cell が範囲外` };
+      if (typeof k.scored !== "boolean") return { error: `${i + 1} 本目に scored がありません` };
+    }
+    return { shootout: { ...o, teams: o.teams || {}, order: o.order || {} } };
+  };
+
   SCN.parseBundle = (match, input) => {
     const S = R.subs, E = R.engine;
     let o;

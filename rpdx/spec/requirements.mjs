@@ -589,6 +589,19 @@ export const REQUIREMENTS = [
       + "（下限だけで判定していた）を発見して修正",
   },
   {
+    id: "UX-11", area: "ux", status: "held", issue: 198,
+    text: "PK 戦を単独の JSON として書き出し・読み込みでき、チーム名と選手名を同梱する",
+    source: "issue#198",
+    checks: [
+      { kind: "test", file: "bundle.test.mjs", name: "PK 戦: 単独 JSON で往復し、チーム名と選手名を同梱する" },
+      { kind: "test", file: "bundle.test.mjs", name: "PK 戦: 別の文書や壊れた記録を受け付けない" },
+      { kind: "test", file: "bundle.test.mjs", name: "PK 戦: 試合のバンドルは従来どおり読める" },
+    ],
+    note: "書き出しの機構は既存と同じ（Blob）。増やすのは文書の種類（kind: rpdx-shootout）だけ"
+      + "（#181「保存の仕組みは既にある。新しい保存機構を足してはいけない」）。"
+      + "試合データを持たない相手にも渡せるよう自己完結させる（customMatch と同じ考え方）",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

@@ -72,6 +72,7 @@
 | UX-08 | ux | アディショナルタイムを試合中に入力でき、終端と保存へ反映される | 担保 | live.test.mjs 「AT: 変更すると終端が動き、入力済みの記録は」<br>bundle.test.mjs 「バンドル: アディショナルタイムが往復する」 |
 | UX-09 | ux | 自作の試合で延長戦を行える（後半終了で選び、延長前半・延長後半へ進む） | 担保 | live.test.mjs 「延長: 未指定なら従来どおり」<br>live.test.mjs 「延長: 後半終了で止まり、延長前半・延長後半へ順に進む」<br>live.test.mjs 「延長: 途中で延長を足しても記録が失われず」<br>bundle.test.mjs 「バンドル: 延長の有無と延長の AT が往復する」 |
 | UX-10 | ux | 試合が終わって同点なら、延長するか／PK 戦へ進むかをその場で選べ、選ぶと PK 戦モードへ移る | 担保 | live.test.mjs 「終端: 最後のピリオドの終端と同点かを返す」<br>live.test.mjs 「区切り: 時計を先へ飛ばしても」<br>ツール rpdx/tools/ui-probe.mjs |
+| UX-11 | ux | PK 戦を単独の JSON として書き出し・読み込みでき、チーム名と選手名を同梱する | 担保 | bundle.test.mjs 「PK 戦: 単独 JSON で往復し、チーム名と選手名を同梱する」<br>bundle.test.mjs 「PK 戦: 別の文書や壊れた記録を受け付けない」<br>bundle.test.mjs 「PK 戦: 試合のバンドルは従来どおり読める」 |
 | POL-01 | docs | PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」<br>uicontract.test.mjs 「画面文言の「予測」「確率」は必ず否定とセット」<br>uicontract.test.mjs 「「傾向がある」「次は」の断定を画面文言に入れない」 |
 | POL-02 | docs | 記録してよい場と、データ取得の適法性の責任範囲を README と統治文書に明示する | 担保 | uicontract.test.mjs 「統治文書に PK コース記録の特則がある」 |
 | UX-01 | ux | スマホ幅・タッチ端末で、全画面のタップ標的が 44px 以上・文字 11px 以上・コントラスト AA を満たす | 担保 | ツール rpdx/tools/ui-probe.mjs |

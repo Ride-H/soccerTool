@@ -2445,6 +2445,39 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
         if (pkState.kind === "shootout") pkEnterMode(); else pkExitMode();
         pkReset(); pkFillWho(); pkRenderTally();
       };
+    // #198: 書き出しの機構は既存と同じ（Blob で落とす）。増やすのは文書の種類だけ。
+    // #181「保存の仕組みは既にある。新しい保存機構を足してはいけない」に従う。
+    $("#pkExport").onclick = () => {
+      if (!liveState.session) return;
+      const n = (liveState.session.pk || []).length;
+      if (!n) { liveLog("書き出す PK 戦の記録がありません"); return; }
+      const json = R.scenlib.serializeShootout(liveState.session, R.live.matchOf(liveState.session));
+      try {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+        a.download = "rpdx-shootout.json"; a.click();
+        liveLog(`PK 戦を書き出しました（${n} 本・端末内のみ）`);
+      } catch (e) { liveLog("⚠ 書き出し失敗: " + (e && e.message)); }
+    };
+    $("#pkImport").onclick = () => $("#pkFile").click();
+    $("#pkFile").onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const r = R.scenlib.parseShootout(rd.result);
+        if (r.error) { liveLog("⚠ 読み込み失敗: " + r.error); return; }
+        // 記録だけを差し替える（試合・イベント・交代には触らない）
+        liveState.session = { ...liveState.session, pk: r.shootout.kicks.map((k) => ({ ...k })),
+          ...(Object.keys(r.shootout.order).length ? { pkOrder: r.shootout.order } : {}) };
+        liveSave(); pkFillWho(); pkRenderTally();
+        const names = Object.values(r.shootout.teams).map((t) => t.name).join(" vs ");
+        liveLog(`PK 戦を読み込みました（${r.shootout.kicks.length} 本・${names}）`);
+      };
+      rd.onerror = () => liveLog("⚠ ファイル読込に失敗");
+      rd.readAsText(f);
+    };
     $("#pkOk").onclick = () => pkCommit(true);
     $("#pkNg").onclick = () => pkCommit(false);
   };
