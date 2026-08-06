@@ -575,6 +575,20 @@ export const REQUIREMENTS = [
       + "復帰時に開始済みピリオドの印を引き継がないと、同じ区切りで何度も止まる",
   },
   {
+    id: "UX-10", area: "ux", status: "held", issue: 203,
+    text: "試合が終わって同点なら、延長するか／PK 戦へ進むかをその場で選べ、選ぶと PK 戦モードへ移る",
+    source: "issue#203",
+    checks: [
+      { kind: "test", file: "live.test.mjs", name: "終端: 最後のピリオドの終端と同点かを返す" },
+      { kind: "test", file: "live.test.mjs", name: "区切り: 時計を先へ飛ばしても" },
+      { kind: "tool", cmd: "rpdx/tools/ui-probe.mjs" },
+    ],
+    note: "live.matchEnd は事実（終端か・同点か・スコア）だけを返し、決めるのは UI。"
+      + "prompt/confirm は使わず画面内の操作で選ばせる。最初の選択肢へフォーカスを移す（#42）。"
+      + "一度断られたら聞き直さない。実機で「時計を先へ飛ばすと次のピリオドを取り違える」不具合"
+      + "（下限だけで判定していた）を発見して修正",
+  },
+  {
     id: "POL-01", area: "docs", status: "held", issue: 187,
     text: "PK コース記録は事実（記録）層として扱い、確率・次の 1 本・順位付けを表示しない",
     source: "issue#187",

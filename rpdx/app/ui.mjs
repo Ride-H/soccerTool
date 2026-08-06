@@ -2003,6 +2003,57 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     return out;
   };
 
+  // #203: 試合終了の分岐。判断材料は live.matchEnd（事実）だけを見て、決めるのはここ。
+  const liveRenderEnd = () => {
+    const box = $("#liveEnd");
+    if (!box || !liveState.session) return;
+    const end = R.live.matchEnd(liveState.session, App.match, Date.now());
+    const m = App.match;
+    const hasExtra = !!(m.time && m.time.h3);
+    // 出す条件: 最後のピリオドの終端に達していて、同点で、まだ断られていない
+    const show = end.atEnd && end.tied && liveState.endChoice !== "no" && !pkState.mode;
+    box.style.display = show ? "" : "none";
+    if (!show) { box.innerHTML = ""; return; }
+    if (box.dataset.k === (hasExtra ? "pk" : "ex")) return;   // 同じ状態なら描き直さない
+    box.dataset.k = hasExtra ? "pk" : "ex";
+    box.innerHTML = "";
+    const label = document.createElement("span");
+    label.className = "eyebrow";
+    const nm = Object.keys(end.score).map((k) => `${m.teams[k]?.name ?? k} ${end.score[k]}`).join(" - ");
+    label.textContent = `${hasExtra ? "延長終了" : "試合終了"} ${nm} — 同点です`;
+    box.appendChild(label);
+    const add = (text, aria, fn) => {
+      const b = document.createElement("button");
+      b.className = "btn pk-b"; b.textContent = text; b.setAttribute("aria-label", aria);
+      b.onclick = fn; box.appendChild(b); return b;
+    };
+    let first;
+    if (!hasExtra) {
+      // 90 分終了で同点 → まず延長をやるか
+      first = add("延長を行う", "延長戦を行う", () => {
+        liveState.session = R.live.withCfg(liveState.session, { ...liveState.session.cfg, extra: true });
+        liveState.endChoice = null;
+        liveRebuild(); liveSave(); liveRenderBar();
+        liveLog("延長を行います。「▶ 延長前半開始」で再開してください");
+      });
+      add("PK 戦へ", "延長を行わず PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    } else {
+      // 延長も終わって同点 → PK 戦へ
+      first = add("PK 戦へ", "PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    }
+    add("このまま終了", "選択せずに終了する", () => { liveState.endChoice = "no"; liveRenderEnd(); });
+    if (first) first.focus();   // #42: キーボードで選べるようにフォーカスを移す
+  };
+
+  // PK 戦モードへ入る（記録の種類も PK 戦へ揃える）
+  const pkGoShootout = () => {
+    pkState.kind = "shootout";
+    $("#liveEnd").style.display = "none";
+    if (!pkState.open) pkOpen(true); else pkEnterMode();
+    liveRenderTallySafe();
+  };
+  const liveRenderTallySafe = () => { try { pkRenderTally(); } catch { /* パネル未構築 */ } };
+
   const liveRenderBar = () => {
     const bar = $("#liveBar");
     if (!bar) return;
@@ -2015,7 +2066,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
-    // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
+      // #203: 試合が終わって同点なら、延長するか／PK 戦へ進むかをその場で選ばせる。
+    // 一度断られたら聞き直さない（liveState.endChoice に覚える）。
+    liveRenderEnd();
+  // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
     const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
     const PLAB = { h2: "▶ 後半開始", h3: "▶ 延長前半開始", h4: "▶ 延長後半開始" };
     $("#liveHalf").style.display = nextP ? "" : "none";

@@ -943,6 +943,10 @@ body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { d
     <div id="pkLegend" class="hint"></div>
   </div>
 
+  <!-- #203 試合終了の分岐（延長するか → PK 戦へ）。prompt/confirm は使わない -->
+  <div id="liveEnd" class="pk-row" style="display:none" role="group" aria-live="polite"
+       aria-label="試合終了の選択（end of match）"></div>
+
   <div id="liveLog" class="hint"></div>
 </div>
 
@@ -8654,11 +8658,13 @@ body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { d
     const ks = periodsOf(match);
     const t = L.tAt(s, wallMs);
     for (let i = 0; i < ks.length - 1; i++) {
-      const cur = match.time[ks[i]];
-      // 開始済みのピリオドは飛ばす（時計の区間に印が付く）。
-      // h2 の印は #183 からの互換 — 保存済みのセッションは p を持たない。
-      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
-      if (t >= cur.end - 0.5) return ks[i + 1];
+      // **上限も見る**。下限だけで判定すると、時計を後ろへ飛ばした（時計合わせ・延長の追加）
+      // ときに「次は後半」と返してしまう。実機で発覚: 90+5:00 なのに「▶ 後半開始」が出た。
+      if (t < match.time[ks[i]].end - 0.5) continue;
+      if (t >= match.time[ks[i + 1]].end) continue;
+      // 開始済みのピリオドなら区切りではない（h2 の印は #183 からの互換）。
+      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) return null;
+      return ks[i + 1];
     }
     return null;
   };
@@ -8673,7 +8679,7 @@ body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { d
       // 次のピリオドを始めたら、その境界では二度と止めない。
       // 境界の時刻は前後で同じなので、時刻の比較だけだと開始直後にまた止まる（#183 で実機発覚）。
       if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
-      if (t < end) continue;
+      if (t < end || t >= match.time[ks[i + 1]].end) continue;
       const seg = s.clock[s.clock.length - 1];
       const wallAtEnd = seg.wall + (end - seg.t) * 1000;
       return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
@@ -8698,6 +8704,24 @@ body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { d
 
   // 互換: 前半終了で止まっているか
   L.isAtHalfBreak = (s, match, wallMs) => L.breakAt(s, match, wallMs) === "h2";
+
+  /* ---------------- 試合の終わりの判定（#203） ----------------
+     PK 戦は「試合が終わって同点のとき」に行う。どのピリオドで終わるかは延長の有無で
+     変わるので、**最後のピリオドの終端**に達したかで見る。
+     返値 { atEnd, tied, score, lastPeriod } — 判断は UI が行い、ここは事実だけを返す。 */
+  L.matchEnd = (s, match, wallMs) => {
+    const ks = periodsOf(match);
+    const last = ks[ks.length - 1];
+    const end = match && match.time && match.time[last] ? match.time[last].end : null;
+    const t = L.tAt(s, wallMs);
+    const score = L.matchOf(s).meta.score || {};
+    const vals = Object.values(score);
+    return {
+      atEnd: end != null && t >= end - 0.5,
+      tied: vals.length === 2 && vals[0] === vals[1],
+      score, lastPeriod: last,
+    };
+  };
 
   // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
   // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。
@@ -13901,6 +13925,57 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     return out;
   };
 
+  // #203: 試合終了の分岐。判断材料は live.matchEnd（事実）だけを見て、決めるのはここ。
+  const liveRenderEnd = () => {
+    const box = $("#liveEnd");
+    if (!box || !liveState.session) return;
+    const end = R.live.matchEnd(liveState.session, App.match, Date.now());
+    const m = App.match;
+    const hasExtra = !!(m.time && m.time.h3);
+    // 出す条件: 最後のピリオドの終端に達していて、同点で、まだ断られていない
+    const show = end.atEnd && end.tied && liveState.endChoice !== "no" && !pkState.mode;
+    box.style.display = show ? "" : "none";
+    if (!show) { box.innerHTML = ""; return; }
+    if (box.dataset.k === (hasExtra ? "pk" : "ex")) return;   // 同じ状態なら描き直さない
+    box.dataset.k = hasExtra ? "pk" : "ex";
+    box.innerHTML = "";
+    const label = document.createElement("span");
+    label.className = "eyebrow";
+    const nm = Object.keys(end.score).map((k) => `${m.teams[k]?.name ?? k} ${end.score[k]}`).join(" - ");
+    label.textContent = `${hasExtra ? "延長終了" : "試合終了"} ${nm} — 同点です`;
+    box.appendChild(label);
+    const add = (text, aria, fn) => {
+      const b = document.createElement("button");
+      b.className = "btn pk-b"; b.textContent = text; b.setAttribute("aria-label", aria);
+      b.onclick = fn; box.appendChild(b); return b;
+    };
+    let first;
+    if (!hasExtra) {
+      // 90 分終了で同点 → まず延長をやるか
+      first = add("延長を行う", "延長戦を行う", () => {
+        liveState.session = R.live.withCfg(liveState.session, { ...liveState.session.cfg, extra: true });
+        liveState.endChoice = null;
+        liveRebuild(); liveSave(); liveRenderBar();
+        liveLog("延長を行います。「▶ 延長前半開始」で再開してください");
+      });
+      add("PK 戦へ", "延長を行わず PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    } else {
+      // 延長も終わって同点 → PK 戦へ
+      first = add("PK 戦へ", "PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    }
+    add("このまま終了", "選択せずに終了する", () => { liveState.endChoice = "no"; liveRenderEnd(); });
+    if (first) first.focus();   // #42: キーボードで選べるようにフォーカスを移す
+  };
+
+  // PK 戦モードへ入る（記録の種類も PK 戦へ揃える）
+  const pkGoShootout = () => {
+    pkState.kind = "shootout";
+    $("#liveEnd").style.display = "none";
+    if (!pkState.open) pkOpen(true); else pkEnterMode();
+    liveRenderTallySafe();
+  };
+  const liveRenderTallySafe = () => { try { pkRenderTally(); } catch { /* パネル未構築 */ } };
+
   const liveRenderBar = () => {
     const bar = $("#liveBar");
     if (!bar) return;
@@ -13913,7 +13988,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
     $("#liveState").textContent = running ? "進行中" : "停止中";
     $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
-    // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
+      // #203: 試合が終わって同点なら、延長するか／PK 戦へ進むかをその場で選ばせる。
+    // 一度断られたら聞き直さない（liveState.endChoice に覚える）。
+    liveRenderEnd();
+  // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
     const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
     const PLAB = { h2: "▶ 後半開始", h3: "▶ 延長前半開始", h4: "▶ 延長後半開始" };
     $("#liveHalf").style.display = nextP ? "" : "none";

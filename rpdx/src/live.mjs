@@ -333,11 +333,13 @@
     const ks = periodsOf(match);
     const t = L.tAt(s, wallMs);
     for (let i = 0; i < ks.length - 1; i++) {
-      const cur = match.time[ks[i]];
-      // 開始済みのピリオドは飛ばす（時計の区間に印が付く）。
-      // h2 の印は #183 からの互換 — 保存済みのセッションは p を持たない。
-      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
-      if (t >= cur.end - 0.5) return ks[i + 1];
+      // **上限も見る**。下限だけで判定すると、時計を後ろへ飛ばした（時計合わせ・延長の追加）
+      // ときに「次は後半」と返してしまう。実機で発覚: 90+5:00 なのに「▶ 後半開始」が出た。
+      if (t < match.time[ks[i]].end - 0.5) continue;
+      if (t >= match.time[ks[i + 1]].end) continue;
+      // 開始済みのピリオドなら区切りではない（h2 の印は #183 からの互換）。
+      if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) return null;
+      return ks[i + 1];
     }
     return null;
   };
@@ -352,7 +354,7 @@
       // 次のピリオドを始めたら、その境界では二度と止めない。
       // 境界の時刻は前後で同じなので、時刻の比較だけだと開始直後にまた止まる（#183 で実機発覚）。
       if (s.clock.some((c) => c.p === ks[i + 1] || (ks[i + 1] === "h2" && c.h2))) continue;
-      if (t < end) continue;
+      if (t < end || t >= match.time[ks[i + 1]].end) continue;
       const seg = s.clock[s.clock.length - 1];
       const wallAtEnd = seg.wall + (end - seg.t) * 1000;
       return { ...s, clock: [...s.clock, { wall: wallAtEnd, t: end, rate: 0 }] };
@@ -377,6 +379,24 @@
 
   // 互換: 前半終了で止まっているか
   L.isAtHalfBreak = (s, match, wallMs) => L.breakAt(s, match, wallMs) === "h2";
+
+  /* ---------------- 試合の終わりの判定（#203） ----------------
+     PK 戦は「試合が終わって同点のとき」に行う。どのピリオドで終わるかは延長の有無で
+     変わるので、**最後のピリオドの終端**に達したかで見る。
+     返値 { atEnd, tied, score, lastPeriod } — 判断は UI が行い、ここは事実だけを返す。 */
+  L.matchEnd = (s, match, wallMs) => {
+    const ks = periodsOf(match);
+    const last = ks[ks.length - 1];
+    const end = match && match.time && match.time[last] ? match.time[last].end : null;
+    const t = L.tAt(s, wallMs);
+    const score = L.matchOf(s).meta.score || {};
+    const vals = Object.values(score);
+    return {
+      atEnd: end != null && t >= end - 0.5,
+      tied: vals.length === 2 && vals[0] === vals[1],
+      score, lastPeriod: last,
+    };
+  };
 
   // 名簿（cfg）の差し替え。入力済みのイベント・交代・時計はそのまま持ち越す。
   // 世界は cfg から作り直されるので、チーム名や選手名を後から直しても記録は消えない。

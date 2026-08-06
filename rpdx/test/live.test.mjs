@@ -597,3 +597,48 @@ test("#202 延長: 復帰しても開始済みのピリオドで止め直さな�
   assert.notEqual(L.breakAt(back, m, wFT + 200_000), "h2", "復帰後に後半開始へ戻らない");
   assert.notEqual(L.breakAt(back, m, wFT + 200_000), "h3", "復帰後に延長前半開始へも戻らない");
 });
+
+/* ---------------------------------------------------------------------------
+   #203 試合の終わりの判定。判断材料（事実）だけを返し、選ばせるのは UI の仕事。
+   --------------------------------------------------------------------------- */
+test("#203 終端: 最後のピリオドの終端と同点かを返す", () => {
+  const at = (t) => T0 + t * 1000;
+  // 延長なし・0-0
+  let s = L.withClock(L.create(cfg()), "start", T0);
+  let m = L.matchOf(s);
+  let end = E.playedRange(m).t1;
+  assert.equal(L.matchEnd(s, m, at(end - 60)).atEnd, false, "途中では終端ではない");
+  let r = L.matchEnd(s, m, at(end + 1));
+  assert.equal(r.atEnd, true);
+  assert.equal(r.tied, true);
+  assert.equal(r.lastPeriod, "h2");
+
+  // 勝敗が付いていれば同点ではない
+  s = L.withEvent(s, { t: 1000, type: "goal", team: "TMA", no: 9 });
+  m = L.matchOf(s);
+  assert.equal(L.matchEnd(s, m, at(E.playedRange(m).t1 + 1)).tied, false);
+
+  // 延長ありなら、後半終端はまだ終端ではない
+  const sx = L.withClock(L.create({ ...cfg(), extra: true }), "start", T0);
+  const mx = L.matchOf(sx);
+  assert.equal(L.matchEnd(sx, mx, at(mx.time.h2.end + 1)).atEnd, false, "延長があるので後半終端は終わりではない");
+  assert.equal(L.matchEnd(sx, mx, at(mx.time.h4.end + 1)).atEnd, true, "延長終端が終わり");
+  assert.equal(L.matchEnd(sx, mx, at(mx.time.h4.end + 1)).lastPeriod, "h4");
+});
+
+test("#203 区切り: 時計を先へ飛ばしても「次のピリオド」を取り違えない", () => {
+  // 実機で発覚: 下限だけで判定していたため、90+5:00 に居るのに「▶ 後半開始」が出た。
+  const at = (t) => T0 + t * 1000;
+  const sx = L.withClock(L.create({ ...cfg(), extra: true }), "start", T0);
+  const m = L.matchOf(sx);
+  // 時計合わせで後半終端まで飛ばす（ピリオドの印は付かない）
+  const jumped = L.withClock(sx, "sync", at(10), m.time.h2.end);
+  assert.equal(L.breakAt(L.withClock(jumped, "pause", at(11)), m, at(11)), "h3",
+    "後半終端に居るなら次は延長前半（後半ではない）");
+  // 延長前半の終端まで飛ばしたら次は延長後半
+  const j2 = L.withClock(sx, "sync", at(10), m.time.h3.end);
+  assert.equal(L.breakAt(L.withClock(j2, "pause", at(11)), m, at(11)), "h4");
+  // 最後のピリオドの終端では、次は無い
+  const j3 = L.withClock(sx, "sync", at(10), m.time.h4.end);
+  assert.equal(L.breakAt(L.withClock(j3, "pause", at(11)), m, at(11)), null);
+});
