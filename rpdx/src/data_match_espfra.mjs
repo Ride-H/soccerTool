@@ -98,7 +98,7 @@
     dir: { FRA: { h1: +1, h2: -1 }, ESP: { h1: -1, h2: +1 } },
     kickoffBy: { h1: "FRA", h2: "ESP" },
     possessionPlus: "ESP",             // P(t) > 0 = スペイン保持（実測51%）
-    possessionShareGain: 0.14,          // チェーン較正ノブ（実測51/49へ・モデル値）
+    possessionShareGain: 0.14,         // チェーン較正ノブ（実測51/49へ・モデル値）
     teamOrder: ["FRA", "ESP"],
 
     teams: {

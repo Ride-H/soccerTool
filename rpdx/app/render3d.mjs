@@ -8,6 +8,11 @@
   const N = R.noise;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, u) => a + (b - a) * u;
+  // #char-lab: キャラ中核は共有コア character.mjs（単一の真実源）から取得。ここで再定義しない。
+  const { SKEL, buildBodyMesh, BODY_MESH, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace,
+    PHASE_RATE, STRIDE_MAX, IK_L1, IK_L2, VS_SKIN, FS_SKIN, BONE, LM } = R.character;
+  // #153: 決定論シーケンシャル乱数 — 視覚要素に素の乱数関数は使わない（視覚回帰の再現性契約・visualgate.test が走査）
+  const seqRand = (seed) => { let s = seed | 0; return () => N.hash((s = (s + 0x9e3779b9) | 0)); };
 
   /* ------------------------------ mat4 ------------------------------ */
   const M4 = {
@@ -23,6 +28,12 @@
       const f = 1 / Math.tan(fov / 2), o = new Float32Array(16);
       o[0] = f / asp; o[5] = f; o[10] = (far + near) / (near - far); o[11] = -1;
       o[14] = (2 * far * near) / (near - far);
+      return o;
+    },
+    ortho(l, r, b, t, near, far) {   // #157 シャドウマップ用の平行投影（-1..1 クリップ）
+      const o = new Float32Array(16);
+      o[0] = 2 / (r - l); o[5] = 2 / (t - b); o[10] = -2 / (far - near); o[15] = 1;
+      o[12] = -(r + l) / (r - l); o[13] = -(t + b) / (t - b); o[14] = -(far + near) / (far - near);
       return o;
     },
     lookAt(eye, at, up) {
@@ -100,6 +111,10 @@
     }
     return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
   };
+  /* ------- #154 スキンドボディ（LBS・単一連続メッシュ・プロシージャル生成） ------- */
+  // ボーン: [親idx, バインド頭位置x, y, z]（直立・腕は体側に垂下のバインド姿勢）。
+  // 15ボーン=脊椎5+脚3×2+腕2×2。RPDX.quality.flags.playerBoneBudget の予算内で運用する。
+  // バインド回転は恒等（純並進）なので inverseBind = T(-head) となり一般逆行列が不要。
   const quadMesh = () => ({
     pos: new Float32Array([-0.5,0,-0.5, 0.5,0,-0.5, 0.5,0,0.5, -0.5,0,0.5]),
     nor: new Float32Array([0,1,0, 0,1,0, 0,1,0, 0,1,0]),
@@ -133,9 +148,24 @@
   /* ------------------------------ shaders ------------------------------ */
   const VS_BASE = `#version 300 es
   layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor; layout(location=2) in vec2 aUv;
-  uniform mat4 uProj, uView, uModel; out vec3 vNor; out vec2 vUv; out vec3 vWorld;
+  uniform mat4 uProj, uView, uModel, uLightMVP; out vec3 vNor; out vec2 vUv; out vec3 vWorld; out vec4 vLightPos;
   void main(){ vec4 w = uModel * vec4(aPos,1.0); vWorld = w.xyz; gl_Position = uProj*uView*w;
-    vNor = mat3(uModel)*aNor; vUv = aUv; }`;
+    vNor = mat3(uModel)*aNor; vUv = aUv; vLightPos = uLightMVP * w; }`;   // #157 光源空間座標（影受け）
+  // #157 PCF シャドウ係数（0=影/1=非影）: 深度テクスチャを 3×3 で比較・範囲外や無効時は 1。
+  const GLSL_SHADOW = `
+  uniform highp sampler2D uShadow; uniform float uShadowOn; uniform vec2 uShadowTexel;
+  float shadowF(vec4 lp, vec3 n, vec3 ldir){
+    if (uShadowOn < 0.5) return 1.0;
+    vec3 p = lp.xyz / lp.w * 0.5 + 0.5;
+    if (p.x<0.0||p.x>1.0||p.y<0.0||p.y>1.0||p.z>1.0) return 1.0;
+    float bias = max(0.0035 * (1.0 - clamp(dot(n, ldir),0.0,1.0)), 0.0012);
+    float s = 0.0;
+    for (int i=-1;i<=1;i++) for (int j=-1;j<=1;j++){
+      float d = texture(uShadow, p.xy + vec2(float(i),float(j))*uShadowTexel).r;
+      s += (p.z - bias > d) ? 0.0 : 1.0;
+    }
+    return mix(1.0, s/9.0, 0.78);   // 影の濃さ 0.78（完全な黒にしない）
+  }`;
   const FS_LAMBERT = `#version 300 es
   precision highp float; in vec3 vNor; in vec3 vWorld; out vec4 o;
   uniform vec3 uColor, uColor2, uEye; uniform float uSplit, uEmiss, uFogD, uAlpha;
@@ -152,12 +182,59 @@
     float a = clamp(uAlpha + rim * 0.5, 0.0, 1.0);
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), a);
   }`;
+  // #157 深度パス用（影キャスターのプロキシを光源空間へ）: 深度のみ書き込む・非スキンド
+  const VS_DEPTH = `#version 300 es
+  layout(location=0) in vec3 aPos; uniform mat4 uModel, uLightMVP;
+  void main(){ gl_Position = uLightMVP * (uModel * vec4(aPos,1.0)); }`;
+  const FS_DEPTH = `#version 300 es
+  precision highp float; void main(){}`;
+  // #159 ポストプロセス: フルスクリーン三角形（頂点属性なし・gl_VertexID駆動）
+  const VS_POST = `#version 300 es
+  out vec2 vT;
+  void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); vT = p; gl_Position = vec4(p*2.0-1.0, 0.0, 1.0); }`;
+  const FS_BRIGHT = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o; uniform sampler2D uTex; uniform float uThresh;
+  void main(){ vec3 c = texture(uTex, vT).rgb; float l = dot(c, vec3(0.2126,0.7152,0.0722));
+    o = vec4(c * clamp((l - uThresh) / max(l, 1e-4), 0.0, 1.0), 1.0); }`;
+  const FS_BLUR = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o; uniform sampler2D uTex; uniform vec2 uDir;
+  void main(){ vec3 s = texture(uTex,vT).rgb*0.227
+    + texture(uTex, vT+uDir*1.384).rgb*0.316 + texture(uTex, vT-uDir*1.384).rgb*0.316
+    + texture(uTex, vT+uDir*3.231).rgb*0.070 + texture(uTex, vT-uDir*3.231).rgb*0.070;
+    o = vec4(s, 1.0); }`;
+  // トーンマップ（控えめフィルミック）＋グレーディング（コントラスト/彩度/ビネット）＋任意bloom＋軽量FXAA
+  const FS_POST = `#version 300 es
+  precision highp float; in vec2 vT; out vec4 o;
+  uniform sampler2D uTex, uBloom; uniform vec2 uTexel;
+  uniform float uBloomOn, uContrast, uSat, uVig, uExposure, uTonemap;
+  vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+  float lum(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
+  void main(){
+    vec3 c = texture(uTex, vT).rgb;
+    // 軽量FXAA: 強いエッジのみ近傍平均（オフスクリーンでMSAA喪失の補償・過度にぼかさない）
+    vec3 nw=texture(uTex,vT+vec2(-uTexel.x,-uTexel.y)).rgb, ne=texture(uTex,vT+vec2(uTexel.x,-uTexel.y)).rgb;
+    vec3 sw=texture(uTex,vT+vec2(-uTexel.x,uTexel.y)).rgb, se=texture(uTex,vT+vec2(uTexel.x,uTexel.y)).rgb;
+    float lc=lum(c), l0=lum(nw),l1=lum(ne),l2=lum(sw),l3=lum(se);
+    float lmin=min(lc,min(min(l0,l1),min(l2,l3))), lmax=max(lc,max(max(l0,l1),max(l2,l3)));
+    if (lmax-lmin > 0.20) c = (c*2.0 + nw+ne+sw+se) / 6.0;
+    if (uBloomOn > 0.5) c += texture(uBloom, vT).rgb * 0.85;   // Cinematic: bloom 加算
+    c *= uExposure;
+    c = mix(c, aces(c), uTonemap);                             // 控えめトーンマップ（既存の作り込みを濁さない）
+    c = (c - 0.5) * uContrast + 0.5;                           // コントラスト
+    c = mix(vec3(lum(c)), c, uSat);                            // 彩度
+    float vig = smoothstep(1.4, 0.82, length(vT - 0.5));       // ビネット（外周のみ・中央や UI 帯は暗くしない）
+    c *= mix(1.0, vig, uVig);
+    o = vec4(clamp(c, 0.0, 1.0), 1.0);
+  }`;
   const FS_TEX = `#version 300 es
-  precision highp float; in vec2 vUv; in vec3 vWorld; out vec4 o;
-  uniform sampler2D uTex; uniform vec3 uEye, uTint; uniform float uAlpha, uFogD, uEmiss;
+  precision highp float; in vec2 vUv; in vec3 vWorld; in vec4 vLightPos; out vec4 o;
+  uniform sampler2D uTex; uniform vec3 uEye, uTint; uniform float uAlpha, uFogD, uEmiss, uShadowRecv;
+  ${GLSL_SHADOW}
   void main(){
     vec4 t = texture(uTex, vUv);
     vec3 c = t.rgb * uTint * (1.0 + uEmiss);
+    // #157 芝の投影影（受け手のみ・uShadowRecv=1）: 人型のキャストシャドウ
+    if (uShadowRecv > 0.5) c *= mix(1.0, shadowF(vLightPos, vec3(0.0,1.0,0.0), normalize(vec3(0.35,0.8,0.45))), 0.9);
     float fog = clamp(length(uEye - vWorld) / uFogD, 0.0, 1.0); fog = fog*fog*0.55;
     o = vec4(mix(c, vec3(0.043,0.066,0.118), fog), t.a * uAlpha);
     if (o.a < 0.01) discard;
@@ -247,6 +324,10 @@
     buf(0, mesh.pos, 3);
     if (mesh.nor) buf(1, mesh.nor, 3);
     if (mesh.uv) buf(2, mesh.uv, 2);
+    if (mesh.bidx) buf(3, mesh.bidx, 4);   // #154 スキニング: ボーン番号（floatで供給）
+    if (mesh.bw) buf(4, mesh.bw, 4);       //                    ボーン重み
+    if (mesh.cid) buf(5, mesh.cid, 1);     //                    色ID（パレット参照）
+    if (mesh.ao) buf(6, mesh.ao, 1);       // #157 頂点ベイクAO（接触遮蔽）
     const ib = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.idx, gl.STATIC_DRAW);
@@ -288,10 +369,11 @@
       g.fillRect(px(-52.5), py(-34 + j * 3.4), 105 * sx, 3.4 * sy);
     }
     g.restore();
-    // 芝ノイズ（微粒・刈り跡のざらつき）
+    // 芝ノイズ（微粒・刈り跡のざらつき）— #153: 決定論シード（視覚回帰の再現性）
+    const rnd = seqRand(0x51ED01);
     for (let i = 0; i < 11000; i++) {
-      const x = Math.random() * W, y = Math.random() * H;
-      g.fillStyle = `rgba(${20 + Math.random() * 34},${70 + Math.random() * 46},${40 + Math.random() * 28},0.055)`;
+      const x = rnd() * W, y = rnd() * H;
+      g.fillStyle = `rgba(${20 + rnd() * 34},${70 + rnd() * 46},${40 + rnd() * 28},0.055)`;
       g.fillRect(x, y, 2.3, 2.3);
     }
     // ライン
@@ -327,10 +409,11 @@
     const grad = g.createLinearGradient(0, 0, 0, 192);
     grad.addColorStop(0, "#0A0F1C"); grad.addColorStop(1, "#141D33");
     g.fillStyle = grad; g.fillRect(0, 0, 1024, 192);
+    const rnd = seqRand(0x51ED02);   // #153: 決定論シード（視覚回帰の再現性）
     for (let i = 0; i < 5200; i++) {
-      const x = Math.random() * 1024, y = 16 + Math.random() * 168;
-      const t = Math.random();
-      g.fillStyle = t < 0.24 ? "rgba(255,198,26,0.5)" : t < 0.5 ? "rgba(74,125,255,0.5)" : `rgba(${150 + Math.random() * 105},${150 + Math.random() * 90},${140 + Math.random() * 80},0.42)`;
+      const x = rnd() * 1024, y = 16 + rnd() * 168;
+      const t = rnd();
+      g.fillStyle = t < 0.24 ? "rgba(255,198,26,0.5)" : t < 0.5 ? "rgba(74,125,255,0.5)" : `rgba(${150 + rnd() * 105},${150 + rnd() * 90},${140 + rnd() * 80},0.42)`;
       g.fillRect(x, y, 2.6, 2.6);
     }
     return cv;
@@ -426,6 +509,8 @@
 
   /* ============================== renderer ============================== */
   R.render3d = {};
+  // #154 テスト用の純データ/純関数（DOM/GL非依存 — node --test が骨格・メッシュ・ポーズを検証）
+  R.render3d._skin = { SKEL, BONE, LM, buildBodyMesh, poseSkin, bodyVarOf, solveLegIK, legFK, footPlace, PHASE_RATE, BODY_MESH };
   R.render3d.create = (canvas, matchInit) => {
     let match = matchInit;
     const gl = canvas.getContext("webgl2", {
@@ -434,13 +519,103 @@
     });
     if (!gl) throw new Error("WebGL2 not available");
     canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+    // #152: GPU文字列で品質tierを保守側へ補正（SwiftShader等ソフトウェア描画→軽量へ降格のみ）
+    try {
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "";
+      R.quality && R.quality.refineGpu(String(gpu || ""));
+    } catch (_) { /* 拡張が無い/マスクされる環境は初期判定のまま */ }
 
     const prLambert = compile(gl, VS_BASE, FS_LAMBERT);
+    const prSkin = compile(gl, VS_SKIN, FS_SKIN);   // #154 スキンド選手
     const prTex = compile(gl, VS_BASE, FS_TEX);
     const prFlat = compile(gl, VS_BASE, FS_FLAT);
     const prSky = compile(gl, VS_SKY, FS_SKY);
     const prPart = compile(gl, VS_PART, FS_PART);
+    const prDepth = compile(gl, VS_DEPTH, FS_DEPTH);   // #157 影の深度パス（プロキシ）
+    const prBright = compile(gl, VS_POST, FS_BRIGHT);  // #159 bloom 輝度抽出
+    const prBlur = compile(gl, VS_POST, FS_BLUR);      // #159 ガウスブラー
+    const prPost = compile(gl, VS_POST, FS_POST);      // #159 トーンマップ+グレーディング+FXAA
     const U = (pr, n) => gl.getUniformLocation(pr, n);
+
+    // #159 ポストプロセスの資源: シーンを色テクスチャへ描画→フルスクリーンで整える。
+    // 失敗（FBO不完全/非対応）時は post = null → 直接描画フォールバック（従来動作）。
+    const emptyVAO = gl.createVertexArray();   // フルスクリーン三角形用（属性なし）
+    let post = null;   // { w,h, fbo, tex, depth, bloomFBO[2], bloomTex[2] }
+    const makeColorTex = (w, h) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    };
+    const ensurePost = (w, h) => {
+      if (post && post.w === w && post.h === h) return post;
+      if (post) { gl.deleteFramebuffer(post.fbo); gl.deleteTexture(post.tex); gl.deleteRenderbuffer(post.depth); post.bloomFBO.forEach(f => gl.deleteFramebuffer(f)); post.bloomTex.forEach(t => gl.deleteTexture(t)); }
+      try {
+        const tex = makeColorTex(w, h);
+        const depth = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+        const fbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+        const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        const bw = Math.max(1, w >> 1), bh = Math.max(1, h >> 1);   // bloom は半解像度
+        const bloomTex = [makeColorTex(bw, bh), makeColorTex(bw, bh)];
+        const bloomFBO = bloomTex.map((t) => { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0); return f; });
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        post = ok ? { w, h, bw, bh, fbo, tex, depth, bloomFBO, bloomTex } : null;
+      } catch (_) { post = null; }
+      return post;
+    };
+    const drawFS = () => { gl.bindVertexArray(emptyVAO); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.bindVertexArray(null); };
+    let urlPost = true;   // #159 既定ON・?post=0 で無効（比較/デバッグ用）
+    try { urlPost = new URLSearchParams(location.search).get("post") !== "0"; } catch (_) { /* 非ブラウザ */ }
+
+    // #157 シャドウマップの資源（Cinematic tier のみ使用・非対応/失敗時は null → 円盤影へ安全フォールバック）
+    const SHADOW_RES = 1536;
+    let shadowFBO = null, shadowTex = null;
+    try {
+      shadowTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_RES, SHADOW_RES, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      shadowFBO = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowTex, 0);
+      gl.drawBuffers([gl.NONE]); gl.readBuffer(gl.NONE);   // 深度専用（色出力なし）— ドライバ互換
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { shadowFBO = null; shadowTex = null; }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    } catch (_) { shadowFBO = null; shadowTex = null; }   // 深度テクスチャ非対応環境
+    // 光源（ディレクショナル）: FS の L1 と同方向。ピッチ全域を覆う平行投影で選手をキャスト。
+    const SHADOW_DIR = (() => { const v = [0.35, 0.8, 0.45], l = Math.hypot(...v); return [v[0]/l, v[1]/l, v[2]/l]; })();
+    const lightMVP = (() => {
+      const dist = 70, c = [0, 0, 0];
+      const lp = [c[0] + SHADOW_DIR[0]*dist, c[1] + SHADOW_DIR[1]*dist, c[2] + SHADOW_DIR[2]*dist];
+      const lv = M4.lookAt(lp, c, [0, 1, 0]);
+      const lo = M4.ortho(-62, 62, -46, 46, 1, 140);   // ピッチ全域＋余白
+      return M4.mul(lo, lv);
+    })();
+    const IDENT16 = M4.ident();
+    let shadowOn = false;   // 毎フレーム quality.flags.shadowMap から更新
+    // 影ユニフォームを program に設定（uShadowOn=0 のときは lightMVP/tex を触らない＝安全）
+    const setShadow = (pr) => {
+      gl.uniformMatrix4fv(U(pr, "uLightMVP"), false, shadowOn ? lightMVP : IDENT16);
+      gl.uniform1f(U(pr, "uShadowOn"), shadowOn ? 1 : 0);
+      if (shadowOn) {
+        gl.uniform1i(U(pr, "uShadow"), 1);
+        gl.uniform2f(U(pr, "uShadowTexel"), 1 / SHADOW_RES, 1 / SHADOW_RES);
+      }
+    };
 
     /* ---- 粒子インスタンス基盤 ---- */
     const PART_CAP = 9000, PART_STRIDE = 9;   // x,y,z, size,phase, r,g,b,a
@@ -500,6 +675,7 @@
 
     const mCapsule = buildVAO(gl, capsuleMesh());
     const mSphere = buildVAO(gl, sphereMesh());
+    const mSkinBody = buildVAO(gl, BODY_MESH);   // #154 単一スキンドボディ（全人型で共有）
     const mQuad = buildVAO(gl, quadMesh());
     const mVQuad = buildVAO(gl, vquadMesh());
     const mBox = buildVAO(gl, boxMesh());
@@ -606,13 +782,17 @@
       mode: "orbit", theta: Math.PI / 2, phi: 0.62, dist: 78,
       target: [0, 0, 6], fov: 46,
       fly: { pos: [0, 22, 55], yaw: -Math.PI / 2, pitch: -0.32 },
-      anim: null, followBall: false,
+      anim: null, followBall: false, pkAim: false,
     };
+    const PK_HALF_W = 5.0;   // ゴール半幅 3.66m + ネット/ポストの余白（#188 の画角計算）
     const PRESETS = {
       broadcast: { theta: Math.PI / 2, phi: 0.62, dist: 78, target: [0, 0, 6], fov: 46, followBall: false },
       tactical: { theta: Math.PI / 2, phi: 1.42, dist: 136, target: [0, 0, 0], fov: 40, followBall: false },
       goal: { theta: Math.PI + 0.0001, phi: 0.32, dist: 46, target: [-32, 0, 0], fov: 52, followBall: false },
       pitch: { theta: Math.PI / 2, phi: 0.16, dist: 26, target: [0, 0, 0], fov: 58, followBall: true },
+      // #188 PK: キッカーの背後からゴールを見る。キッカー(スポット11m)・GK・ゴールマウス
+      // (7.32×2.44m)・ボールが 1 画面に入る近接画角。ゴールは pkAim がボール側で選ぶ。
+      pk: { theta: 0, phi: 0.13, dist: 23, target: [-52.5, 1.1, 0], fov: 33, followBall: false, pkAim: true },
     };
     const setPreset = (name, immediate) => {
       if (name === "fly") {
@@ -635,6 +815,7 @@
         cam.anim = { from: { theta: cam.theta, phi: cam.phi, dist: cam.dist, target: [...cam.target], fov: cam.fov }, to: p, u: 0 };
       }
       cam.followBall = p.followBall;
+      cam.pkAim = !!p.pkAim;
     };
     const eyePos = () => {
       if (cam.mode === "fly") return cam.fly.pos;
@@ -683,7 +864,7 @@
           const cx = Math.cos(cam.theta), sx = Math.sin(cam.theta);
           cam.target[0] = clamp(cam.target[0] + (-dx * sx + dy * cx) * s, -60, 60);
           cam.target[2] = clamp(cam.target[2] + (dx * cx + dy * sx) * s, -45, 45);
-          cam.followBall = false;
+          cam.followBall = false; cam.pkAim = false;
           pinchDist = d; pinchMx = mx; pinchMy = my;
         }
         return;
@@ -706,7 +887,7 @@
         cam.target[2] += (dx * cx + dy * sx) * s;
         cam.target[0] = clamp(cam.target[0], -60, 60);
         cam.target[2] = clamp(cam.target[2], -45, 45);
-        cam.followBall = false;
+        cam.followBall = false; cam.pkAim = false;
       } else {
         cam.theta += dx * 0.005;
         cam.phi = clamp(cam.phi + dy * 0.004, 0.06, 1.52);
@@ -757,6 +938,20 @@
       gl.uniform1f(U(prLambert, "uFogD"), FOG);
       gl.uniform1f(U(prLambert, "uAlpha"), opts.alpha ?? 1);
     };
+    // #154 スキンド描画: ボーンパレット（15×mat4）と色パレット（5×vec3）を渡して1ドロー
+    const useSkin = (model, bones, pal, opts = {}) => {
+      gl.useProgram(prSkin);
+      gl.uniformMatrix4fv(U(prSkin, "uProj"), false, proj);
+      gl.uniformMatrix4fv(U(prSkin, "uView"), false, view);
+      gl.uniformMatrix4fv(U(prSkin, "uModel"), false, model);
+      gl.uniformMatrix4fv(U(prSkin, "uBones[0]"), false, bones);
+      gl.uniform3fv(U(prSkin, "uPal[0]"), pal);
+      gl.uniform3fv(U(prSkin, "uEye"), eye);
+      gl.uniform1f(U(prSkin, "uEmiss"), opts.emiss ?? 0);
+      gl.uniform1f(U(prSkin, "uFogD"), FOG);
+      gl.uniform1f(U(prSkin, "uAlpha"), opts.alpha ?? 1);
+      setShadow(prSkin);   // #157 セルフ/被キャスト影
+    };
     const drawMesh = (m) => {
       gl.bindVertexArray(m.vao);
       gl.drawElements(gl.TRIANGLES, m.n, gl.UNSIGNED_SHORT, 0);
@@ -775,6 +970,8 @@
       gl.uniform1f(U(prTex, "uAlpha"), opts.alpha ?? 1);
       gl.uniform1f(U(prTex, "uEmiss"), opts.emiss ?? 0);
       gl.uniform1f(U(prTex, "uFogD"), opts.fog ?? FOG);
+      gl.uniform1f(U(prTex, "uShadowRecv"), opts.shadowRecv ? 1 : 0);   // #157 ピッチのみ影を受ける
+      setShadow(prTex);
     };
     const useFlat = (model, color, opts = {}) => {
       gl.useProgram(prFlat);
@@ -807,11 +1004,12 @@
       const i = Math.min(SKIN.length - 1, (u * SKIN.length) | 0);
       return { skin: SKIN[i], hair: HAIR[Math.min(HAIR.length - 1, ((u * 7919) % 1 * HAIR.length) | 0)] };
     };
+    const REF_TONE = { skin: SKIN[1], hair: HAIR[0] };   // #154 審判（決定論・固定）
     // 描画側の歩容状態（向き・位相・速度）— 見た目のみ・データは純関数のまま
     const figState = new Map();
     const figOf = (key) => {
       let f = figState.get(key);
-      if (!f) { f = { yaw: Math.PI / 2, phase: Math.random() * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }
+      if (!f) { f = { yaw: Math.PI / 2, phase: N.hash(N.seedOf(String(key))) * 6.28, v: 0, lx: null, lz: null }; figState.set(key, f); }   // #153: 位相は選手キー由来の決定論シード
       return f;
     };
     const lerpAngle = (a, b, u) => {
@@ -820,11 +1018,12 @@
       while (d < -Math.PI) d += Math.PI * 2;
       return a + d * u;
     };
-    // 1人分を描画: base位置(px,pz) + キット色 + 透明度。extras: {stumble, shieldX, shieldZ}
+    // 1フレームぶんのポーズ計算（歩容状態の更新込み）— #154 でカプセル/スキンドの
+    // 両描画経路が共有する。数式は従来 drawFigure から移設（挙動・文脈ポーズは不変）。
     // 向きの規則: 走行=進行方向 / 低速後退=ボールを向いてバックペダル / 至近プレッサー
     // あり=ボールシールド（体を入れる）/ アイドル=ボール（なければ攻撃方向）。
-    // 歩きと走りの差: ケイデンス・膝屈曲（二節脚）・前傾・上下動を速度で連続変調。
-    const drawFigure = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx) => {
+    // dt: 試合時間の刻み（速度推定・ケイデンス＝世界の量）／ dtView: 壁時計の刻み（向きの追従＝表示の慣性）
+    const figPose = (key, px, pz, dt, defYaw, bx, bz, ex, time, dtView) => {
       const f = figOf(key);
       if (f.lx == null) { f.lx = px; f.lz = pz; f.yaw = defYaw; }
       const dx = px - f.lx, dz = pz - f.lz;
@@ -836,22 +1035,26 @@
       const shield = ex && ex.shield ? ex.shield : null;
       const jump = ex && ex.jump ? ex.jump : 0;          // 0..1 ジャンプ弧の高さ（空中戦）
       const header = !!(ex && ex.header);                // 勝者=ヘディングの前傾
-      if (dist > 6) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; }   // スクラブ・ジャンプ
-      else if (dt > 0) {
-        const vInst = Math.min(dist / dt, 10);
+      const dv = dtView != null ? dtView : dt;   // 向きの追従は停止中も進める（一時停止で首が固まらない）
+      // テレポート判定は「1 フレームで進みうる距離」を基準にする。固定 6m だと ×30/×60 の
+      // 早送りで通常の移動がテレポート扱いになり、毎フレーム状態がリセットされて歩容が止まる。
+      const teleport = Math.max(6, 11 * dt);
+      if (dist > teleport) { f.lx = px; f.lz = pz; f.v = 0; f.yaw = defYaw; f.pv = 0; f.acc = 0; }   // スクラブ・ジャンプ（#156: 加速度状態もリセット＝テレポート後のリーン揺れ回避）
+      else if (dt > 0 || dv > 0) {
+        const vInst = dt > 0 ? Math.min(dist / dt, 10) : f.v;
         f.v += (vInst - f.v) * Math.min(1, dt * 5);
         if (shield && f.v < 3) {
           // シールド: プレッサーへ背を向けボールと相手の間に体を入れる
           const target = Math.atan2(px - shield.x, pz - shield.z);
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 4.5));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * 4.5));
         } else if (f.v > 0.6 && dist > 0.002) {
           const dot = (dx * dbx + dz * dbz) / (dist * (dBall || 1));
           backpedal = dot < -0.35 && f.v < 4.5 && dBall < 45;
           const target = backpedal ? Math.atan2(dbx, dbz) : Math.atan2(dx, dz);
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * (backpedal ? 5 : 7)));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * (backpedal ? 5 : 7)));
         } else if (f.v <= 0.6) {
           const target = dBall < 30 ? Math.atan2(dbx, dbz) : defYaw;
-          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dt * 2.2));
+          f.yaw = lerpAngle(f.yaw, target, Math.min(1, dv * 2.2));
         }
         // ケイデンス: 歩き~0.9Hz → スプリント~1.6Hz（ストライド）
         f.phase += dt * (4.2 + f.v * 0.85) * (f.v > 0.3 ? 1 : 0.25);
@@ -866,60 +1069,148 @@
         : backpedal ? -0.04 : 0.03 + run * run * 0.36;        // 歩き=直立/走り=強い前傾
       const lift = jump * 0.85;                               // 跳躍の垂直変位（描画のみ）
       const bob = Math.abs(Math.cos(f.phase)) * (0.012 + 0.055 * run) - (stumble > 0 ? 0.10 * stumble : 0) + lift;
-      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);
-      const op = { emiss: 0.04, alpha };
-      // 脚 = 腿 + 脛の二節（膝屈曲で歩走が一目で分かる）
-      const legC = [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
-      for (const s of [-1, 1]) {
+      const base = M4.trs(px, bob, pz, 1, 1, 1, f.yaw);      // capsule（従来・bob込み）
+      const baseFlat = M4.trs(px, 0, pz, 1, 1, 1, f.yaw);    // skinned（足接地・bob は骨盤スウェイ swayY へ）
+      // 上半身: 前傾 + 脚と逆位相のひねり（肩の回旋 — 人形っぽさを消す）
+      const twist = Math.sin(f.phase) * (0.05 + 0.16 * run) * gaitAmp;
+      const upper = M4.chain(base, M4.t(0, 0.90, 0), M4.rotX(lean), M4.trs(0, 0, 0, 1, 1, 1, twist));
+      const side = (s) => {
         const phi = f.phase + (s < 0 ? Math.PI : 0);
-        // ジャンプ中は両脚をやや前へ畳む（踏み切り/滞空のシルエット）
+        // ジャンプ中は両脚をやや前へ畳む（踏み切り/滞空のシルエット）・両腕を上げて競り合う
         const hip = jump > 0.05 ? -0.35 * jump + Math.sin(phi) * hipA : Math.sin(phi) * hipA;
         const knee = jump > 0.05 ? 0.5 * jump + kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp
           : kneeB * Math.max(0, Math.sin(phi - 1.85)) * gaitAmp;
-        const hipT = M4.chain(base, M4.t(s * 0.13, 0.94, 0), M4.rotX(hip));
-        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
-        drawMesh(mCapsule);
-        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.rotX(knee), M4.t(0, -0.44, 0), M4.scale(0.088, 0.44, 0.088)), legC, op);
-        drawMesh(mCapsule);
-      }
-      // 上半身ピボット: 前傾 + 脚と逆位相のひねり（肩の回旋 — 人形っぽさを消す）
-      const twist = Math.sin(f.phase) * (0.05 + 0.16 * run) * gaitAmp;
-      const upper = M4.chain(base, M4.t(0, 0.90, 0), M4.rotX(lean), M4.trs(0, 0, 0, 1, 1, 1, twist));
-      // ショーツ → 胴（シャツ） → 頭（髪/肌スプリット・首はひねりを6割打ち消す）
-      useLambert(M4.chain(base, M4.t(0, 0.68, 0), M4.scale(0.21, 0.36, 0.185)), shorts, op);
-      drawMesh(mCapsule);
-      useLambert(M4.chain(upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
-      drawMesh(mCapsule);
-      // #134: キット背番号 — 胴の背面（ローカル −Z）に大きめに貼る（実ユニフォーム風）。
-      // ジャンプ/透明度に追随・深度で前面から遮蔽・胴の湾曲に対し平面近似（v1・可読性優先）。
-      if (numTx && jump < 0.5) {
-        gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-        useTex(
-          M4.chain(upper, M4.t(0, 0.16, -0.212), M4.roty(Math.PI), M4.scale(0.44, 0.5, 1)),
-          numTx, { alpha: alpha * 0.98, fog: 1e9, emiss: 0.06 });
-        drawMesh(mVQuad);
-        gl.disable(gl.BLEND);
-      }
-      const headY = bob + 0.90 + 0.80 * Math.cos(lean);
-      useLambert(
-        M4.chain(upper, M4.trs(0, 0, 0, 1, 1, 1, -twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
-        tone.hair, { color2: tone.skin, split: headY - 0.02, emiss: 0.03, alpha });
-      drawMesh(mSphere);
-      // 腕 = 上腕 + 前腕（肘 — 走るほど深く曲げてポンピング・スタンブルでバランス）
-      for (const s of [-1, 1]) {
-        // ジャンプ中は両腕を上げて競り合う（-π/2 付近で頭上）
         const armSw = jump > 0.05 ? -1.9 * jump - s * 0.25 * jump
           : -s * Math.sin(f.phase) * (0.10 + 0.78 * run) * gaitAmp - (stumble > 0 ? 0.9 * stumble : 0);
         const elbow = jump > 0.05 ? 0.3 : 0.45 + run * 1.05 + (stumble > 0 ? 0.4 * stumble : 0);
-        const shoulder = M4.chain(upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(armSw));
-        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
+        return { hip, knee, armSw, elbow };
+      };
+      const L = side(-1), R = side(1);
+
+      // ================= #156 リッチアニメ（スキンド経路用・決定論） =================
+      const tSec = time || 0;
+      const kick = ex && ex.kick ? clamp(ex.kick, 0, 1) : 0;      // 0..1 キック包絡
+      const kickLeg = ex && ex.kickLeg ? ex.kickLeg : 1;          // 蹴り足（±1）
+      const normalMode = jump < 0.05 && stumble < 0.05;          // 通常接地（IK対象）
+      // 加速度（ローパス）→ アンティシペーション前傾
+      const accNow = (dt > 0 && dist <= 6) ? clamp((f.v - (f.pv ?? f.v)) / Math.max(dt, 1e-3), -12, 12) : 0;
+      f.pv = f.v;
+      f.acc = (f.acc ?? 0) + (accNow - (f.acc ?? 0)) * (dt > 0 ? Math.min(1, dt * 2.5) : 1);
+      // 重心スウェイ＋呼吸（アイドルでも静止しない）: 横=歩容 / 縦=bob+呼吸 / 前後=加速リーン
+      const koff = N.hash(N.seedOf(String(key) + "|br")) * 6.28;
+      const idleAmt = clamp(1 - f.v / 0.7, 0, 1);
+      const breath = Math.sin(tSec * 1.55 + koff) * 0.009 * idleAmt;
+      const idleSway = Math.sin(tSec * 0.8 + koff) * 0.012 * idleAmt;
+      const swayX = Math.sin(f.phase) * 0.018 * run * gaitAmp + idleSway;
+      const swayY = bob + breath;
+      const swayZ = clamp(-f.acc * 0.010, -0.045, 0.045);
+      // フットIK: ストライドを速度から算出（支持脚を世界固定＝スケーティング解消・footPlace が核）
+      const REST_ANKLE = 0.085;
+      const ikOf = (s) => {
+        const ft = footPlace(f.phase, f.v, s);
+        const r = solveLegIK(0.94 + swayY, swayZ, REST_ANKLE + ft.fy, swayZ + ft.fz);
+        // キック足: フライト開始で前方へ振り抜く。IK姿勢から swing で補間（swing=0 の開始/終端は
+        // IK姿勢に一致＝入りも抜けも連続・#156 の1フレーム飛びを解消）。
+        if (kick > 0.02 && s === kickLeg) {
+          const swing = Math.sin(clamp(kick, 0, 1) * Math.PI);          // 0→1→0 の振り
+          return { hip: lerp(r.hip, -1.25, swing), knee: lerp(r.knee, 0.15, swing) };
+        }
+        return { hip: r.hip, knee: r.knee };
+      };
+      const ikL = normalMode ? ikOf(-1) : { hip: L.hip, knee: L.knee };
+      const ikR = normalMode ? ikOf(1) : { hip: R.hip, knee: R.knee };
+      // 注視（look-at）: 頭・首・胸でボール/進行方向へ（角度クランプ・首肩に分配）
+      let lookYaw = 0, lookPitch = 0;
+      if (jump < 0.05) {
+        const tgtYaw = dBall < 42 ? Math.atan2(dbx, dbz) : f.yaw;
+        let dyaw = tgtYaw - f.yaw;
+        while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+        lookYaw = clamp(dyaw, -1.0, 1.0);                              // 頭+首の合計ヨー（±57°）
+        lookPitch = clamp((dBall < 14 ? 0.14 : 0.02) - kick * 0.15, -0.32, 0.32);
+      } else if (header) { lookPitch = -0.2 * jump; }                   // 空中戦の勝者は上を見る
+      // キック時の前傾（蹴り足の振りに同調）
+      const kickLean = kick > 0.02 ? 0.22 * Math.sin(clamp(kick, 0, 1) * Math.PI) : 0;
+
+      return {
+        f, base, baseFlat, upper, run, gaitAmp, lean: lean + kickLean, bob, twist, jump, header, stumble, backpedal,
+        L, R, ikL, ikR, swayX, swayY, swayZ, lookYaw, lookPitch, normalMode,
+      };
+    };
+    // #134/#154: キット背番号 — 胴の背面クワッド。model は各描画経路が胴の背面に合わせて構築する。
+    const drawKitNum = (model, numTx, jump, alpha) => {
+      if (!numTx || jump >= 0.5) return;
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      useTex(model, numTx, { alpha: alpha * 0.98, fog: 1e9, emiss: 0.06 });
+      drawMesh(mVQuad);
+      gl.disable(gl.BLEND);
+    };
+    // カプセル胴（upper 基準・従来位置）とスキンド胴（胸ボーン基準・絶対座標）で背面アンカーが異なる
+    const kitNumCapsule = (upper) => M4.chain(upper, M4.t(0, 0.16, -0.212), M4.roty(Math.PI), M4.scale(0.44, 0.5, 1));
+    const kitNumSkinned = (base, chestMat) => M4.chain(base, chestMat, M4.t(0, 1.38, -0.20), M4.roty(Math.PI), M4.scale(0.40, 0.46, 1));
+    const legMix = (tone, shorts) =>
+      [tone.skin[0] * 0.45 + shorts[0] * 0.55, tone.skin[1] * 0.45 + shorts[1] * 0.55, tone.skin[2] * 0.45 + shorts[2] * 0.55];
+    // 旧経路（カプセル寄せ集め）— #154 移行期の切り戻し用に温存（?fig=capsule）。VIS-02 完了後に撤去予定。
+    const drawFigureCapsule = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time, dtView) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time, dtView);
+      const op = { emiss: 0.04, alpha };
+      const legC = legMix(tone, shorts);
+      for (const s of [-1, 1]) {
+        const g = s < 0 ? P.L : P.R;
+        const hipT = M4.chain(P.base, M4.t(s * 0.13, 0.94, 0), M4.rotX(g.hip));
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.scale(0.105, 0.48, 0.105)), legC, op);
         drawMesh(mCapsule);
-        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.rotX(-elbow), M4.t(0, -0.27, 0), M4.scale(0.060, 0.27, 0.060)), tone.skin, op);
+        useLambert(M4.chain(hipT, M4.t(0, -0.48, 0), M4.rotX(g.knee), M4.t(0, -0.44, 0), M4.scale(0.088, 0.44, 0.088)), legC, op);
         drawMesh(mCapsule);
       }
-      return f.v;
+      useLambert(M4.chain(P.base, M4.t(0, 0.68, 0), M4.scale(0.21, 0.36, 0.185)), shorts, op);
+      drawMesh(mCapsule);
+      useLambert(M4.chain(P.upper, M4.scale(0.265, 0.72, 0.205)), shirt, op);
+      drawMesh(mCapsule);
+      drawKitNum(kitNumCapsule(P.upper), numTx, P.jump, alpha);
+      const headY = P.bob + 0.90 + 0.80 * Math.cos(P.lean);
+      useLambert(
+        M4.chain(P.upper, M4.trs(0, 0, 0, 1, 1, 1, -P.twist * 0.6), M4.t(0, 0.80, 0.04), M4.scale(0.16, 0.175, 0.16)),
+        tone.hair, { color2: tone.skin, split: headY - 0.02, emiss: 0.03, alpha });
+      drawMesh(mSphere);
+      for (const s of [-1, 1]) {
+        const g = s < 0 ? P.L : P.R;
+        const shoulder = M4.chain(P.upper, M4.t(s * 0.30, 0.60, 0), M4.rotX(g.armSw));
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.scale(0.070, 0.30, 0.070)), tone.skin, op);
+        drawMesh(mCapsule);
+        useLambert(M4.chain(shoulder, M4.t(0, -0.30, 0), M4.rotX(-g.elbow), M4.t(0, -0.27, 0), M4.scale(0.060, 0.27, 0.060)), tone.skin, op);
+        drawMesh(mCapsule);
+      }
+      return P.f.v;
     };
+    // #154 新経路: 単一スキンドメッシュ1回描画（関節球なし・膝/肘/股/脊椎で表面が連続）
+    const skinPal = new Float32Array(18);       // 6色 × vec3
+    const BOOT_COL = [0.09, 0.09, 0.105];
+    const drawFigureSkinned = (key, px, pz, dt, shirt, shorts, tone, alpha, defYaw, bx, bz, ex, numTx, time, dtView) => {
+      const P = figPose(key, px, pz, dt, defYaw, bx, bz, ex, time, dtView);
+      // cid4 は膝下のソックス（腿は素肌）。旧カプセル経路の脚色（肌×ショーツの混色）を
+      // そのまま使うと素肌の腿まで濁って「肌の色が場所で違う」に見えるため、布の色にする。
+      const sockC = [shorts[0] * 1.15 + 0.02, shorts[1] * 1.15 + 0.02, shorts[2] * 1.15 + 0.02];
+      skinPal.set(shirt, 0); skinPal.set(shorts, 3); skinPal.set(tone.skin, 6);
+      skinPal.set(tone.hair, 9); skinPal.set(sockC, 12); skinPal.set(BOOT_COL, 15);
+      const bones = poseSkin({
+        lean: P.lean, twist: P.twist,
+        swayX: P.swayX, swayY: P.swayY, swayZ: P.swayZ,      // #156 重心スウェイ（bob込み・呼吸）
+        lookYaw: P.lookYaw, lookPitch: P.lookPitch,           // #156 注視
+        hipL: P.ikL.hip, kneeL: P.ikL.knee, hipR: P.ikR.hip, kneeR: P.ikR.knee,   // #156 フットIK
+        swL: P.L.armSw, elL: P.L.elbow, swR: P.R.armSw, elR: P.R.elbow,
+      });
+      // 体格スケールを baseFlat（足接地・bob抜き）に折り込む（接地は保存・番号も同スケール）
+      const bv = bodyVarOf(key);
+      const sbase = M4.chain(P.baseFlat, M4.scale(bv.w, bv.h, bv.w));
+      useSkin(sbase, bones, skinPal, { emiss: 0.04, alpha });
+      drawMesh(mSkinBody);
+      // 背番号は胸ボーンに追従（bones の chest=index2 スキン行列で胴の傾き/ひねり/スウェイに乗る）
+      drawKitNum(kitNumSkinned(sbase, bones.slice(2 * 16, 2 * 16 + 16)), numTx, P.jump, alpha);
+      return P.f.v;
+    };
+    let figCapsuleMode = false;   // frame() で scene.options.figCapsule から更新（切り戻しフラグ）
+    const drawFigure = (...a) => (figCapsuleMode ? drawFigureCapsule : drawFigureSkinned)(...a);
 
     /* ---------------------------- static world ---------------------------- */
     const heatColorPos = hex2rgb("#FF9D2E");   // plus側（可視ランプの起点）
@@ -967,8 +1258,8 @@
       gl.bindVertexArray(null);
       gl.enable(gl.DEPTH_TEST);
 
-      // ピッチ
-      useTex(M4.trs(0, 0, 0, 118, 1, 80), txPitch);
+      // ピッチ（#157: 影を受ける = 選手の人型キャストシャドウ）
+      useTex(M4.trs(0, 0, 0, 118, 1, 80), txPitch, { shadowRecv: 1 });
       drawMesh(mQuad);
 
       // スタンド（4面 + 角度）
@@ -1039,7 +1330,7 @@
         theta: side >= 0 ? 0.0001 : Math.PI + 0.0001,
         phi: 0.30, dist: 44, target: [side >= 0 ? 33 : -33, 0, 0], fov: 52, followBall: false,
       };
-      cam.mode = "orbit"; cam.followBall = false;
+      cam.mode = "orbit"; cam.followBall = false; cam.pkAim = false;
       if (immediate) {
         cam.anim = null;
         cam.theta = to.theta; cam.phi = to.phi; cam.dist = to.dist; cam.fov = to.fov; cam.target = [...to.target];
@@ -1058,6 +1349,9 @@
     let lastHeat = -1;
     api.frame = (time, dt, scene) => {
       const { state, field, options, selected, hover } = scene;
+      // 人型の運動（速度推定・ケイデンス・向き）は試合時間で進める。カメラの慣性は壁時計のまま。
+      const dtFig = scene.dtMatch != null ? scene.dtMatch : dt;
+      figCapsuleMode = !!(options && options.figCapsule);   // #154 切り戻しフラグ（?fig=capsule）
       // カメラ更新
       if (cam.anim) {
         cam.anim.u = Math.min(1, cam.anim.u + dt / 1.15);
@@ -1074,6 +1368,25 @@
         const k = Math.min(1, dt * 2.2);
         cam.target[0] += (state.ball.x - cam.target[0]) * k;
         cam.target[2] += (-state.ball.y - cam.target[2]) * k;   // 幅軸は worldZ=-fieldY
+      }
+      // #188: PK はボールに近い側のゴールを見る。ボールを追わずゴールへ吸い付く
+      //（PK は固定カメラのほうが見やすい）。θ は最短回りで寄せる。
+      if (cam.pkAim && cam.mode === "orbit" && !cam.anim) {
+        const k = Math.min(1, dt * 2.2);
+        const gx = state.ball.x < 0 ? -52.5 : 52.5;
+        cam.target[0] += (gx - cam.target[0]) * k;
+        cam.target[2] += (0 - cam.target[2]) * k;
+        let d = (gx < 0 ? 0 : Math.PI) - cam.theta;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        cam.theta += d * k;
+        // 縦画角は固定なので、縦長の画面では横が切れる（実測: 390×844 でゴールポストが
+        // 画面外 x=±1.15）。ゴール幅 7.32m + 余白が横に収まる距離まで引く。
+        // 横に余裕がある画面ではプリセットの距離のままにする。
+        const asp = canvas.width / Math.max(1, canvas.height);
+        const hHalf = Math.atan(Math.tan((cam.fov * Math.PI) / 360) * asp);
+        const need = PK_HALF_W / Math.max(0.02, Math.tan(hHalf));
+        cam.dist += (Math.max(PRESETS.pk.dist, need) - cam.dist) * k;
       }
       if (cam.mode === "fly") {
         const sp = api.flySpeed * (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2.6 : 1) * dt;
@@ -1102,6 +1415,36 @@
       } else {
         view = M4.lookAt(eye, cam.target, [0, 1, 0]);
       }
+
+      // #157 影の深度パス（Cinematic tier のみ・FBO あり）: 選手プロキシ（胴＋頭）を光源空間で深度描画。
+      // これで芝が人型のキャストシャドウを受ける。セルフ遮蔽は頂点AOが担う（プロキシ自己影の破綻回避）。
+      shadowOn = !!(shadowFBO && R.quality && R.quality.flags && R.quality.flags.shadowMap);
+      if (shadowOn) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+        gl.viewport(0, 0, SHADOW_RES, SHADOW_RES);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+        gl.useProgram(prDepth);
+        gl.uniformMatrix4fv(U(prDepth, "uLightMVP"), false, lightMVP);
+        for (const p of state.players) {
+          if (!p.onPitch || (p.leaving && p.leaving > 0.9)) continue;
+          const px = p.x, pz = -p.y;
+          // 胴＋脚のプロキシ（立ち姿ベース）＋頭。ポーズ追従はしないが体型の人型影になる。
+          gl.uniformMatrix4fv(U(prDepth, "uModel"), false, M4.trs(px, 0.95, pz, 0.28, 0.95, 0.24));
+          drawMesh(mCapsule);
+          gl.uniformMatrix4fv(U(prDepth, "uModel"), false, M4.trs(px, 1.72, pz, 0.14, 0.16, 0.14));
+          drawMesh(mSphere);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.activeTexture(gl.TEXTURE1);              // ユニット1に影テクスチャを常設
+        gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+        gl.activeTexture(gl.TEXTURE0);
+      }
+
+      // #159 ポスト有効時はシーンをオフスクリーンへ（?post=0・shotframes無関係で常時可）
+      const postOn = urlPost && ensurePost(canvas.width, canvas.height);
+      if (postOn) { gl.bindFramebuffer(gl.FRAMEBUFFER, post.fbo); gl.viewport(0, 0, post.w, post.h); }
 
       gl.clearColor(0.043, 0.066, 0.118, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -1177,6 +1520,29 @@
             const a = (0.03 + Math.pow(mag, 1.3) * 0.3) * w * lumaOf[ownTeam] * (isSel ? 2.6 : 1);
             partPush(cx, 0.34 + mag * 0.5, cy, 1.1 + mag * 1.0 + (isSel ? 0.55 : 0), phase,
               c[0], c[1], c[2], a);
+          }
+        }
+      }
+      // #190 PK コースの記録本数: ゴールマウス上に、記録された本数ぶんの粒を流す。
+      // 危険度（距離×人数×時間）とは無関係の量なので、色をはっきり分ける（青緑）。
+      // 粒の位置は決定論のハッシュで散らす（毎フレーム動くと本数が読めない）。
+      if (scene.pkField) {
+        const F = scene.pkField;
+        const cw = F.gw / F.cols, ch = F.gh / F.rows;
+        const sgn = F.gx < 0 ? 1 : -1;                 // ゴール面のわずか内側へ浮かせる向き
+        for (let cell = 0; cell < F.cells.length; cell++) {
+          const n = F.cells[cell];
+          if (!n) continue;
+          const c = cell % F.cols, r = Math.floor(cell / F.cols);
+          const w0 = (c - (F.cols - 1) / 2) * cw, h0 = (r + 0.5) * ch;
+          // 1 本につき 6 粒。多いセルほど濃く見える（明るさではなく数で示す）
+          const q = Math.min(n * 6, 96);
+          for (let k = 0; k < q; k++) {
+            const u = ((cell * 131 + k * 7919) % 997) / 997;
+            const v = ((cell * 197 + k * 6131) % 991) / 991;
+            const ph = ((cell * 29 + k * 13) % 97) / 97;
+            partPush(F.gx + sgn * 0.35, h0 + (v - 0.5) * ch * 0.82, -(w0 + (u - 0.5) * cw * 0.82),
+              0.42, ph, 0.30, 0.92, 0.86, 0.30);
           }
         }
       }
@@ -1277,6 +1643,12 @@
 
       // 選手（奥→手前ソートで半透明カプセル — 透明感）
       const contribMap = scene.contribMap || new Map();
+      // #156 キック検出: フライト中の出し手（from）に振り抜き包絡を与える（u=進行度＝時刻の関数・決定論）
+      let kicker = null, kickEnv = 0;
+      if (state.carrier && state.carrier.mode === "flight" && state.carrier.from) {
+        const u = state.carrier.u || 0;
+        if (u < 0.34) { kicker = state.carrier.from.team + ":" + state.carrier.from.no; kickEnv = 1 - u / 0.34; }
+      }
       const sorted = state.players.slice().sort((a, b) => {
         const da = (eye[0] - a.x) ** 2 + (eye[2] + a.y) ** 2;   // 幅軸 worldZ=-fieldY
         const db = (eye[0] - b.x) ** 2 + (eye[2] + b.y) ** 2;
@@ -1323,8 +1695,8 @@
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 });
-        drawMesh(mQuad);
+        // #157 円盤影はシャドウマップ無効時のみ（有効時はキャストシャドウと二重にしない）
+        if (!shadowOn) { useFlat(M4.trs(px, 0.02, pz, shScale, 1, shScale), [0, 0, 0], { alpha: shAlpha, soft: 0.62 }); drawMesh(mQuad); }
         // 危険度リング（攻撃寄与）
         const cv = contribMap.get(p.team + p.no) || 0;
         if (cv > 0.12) {
@@ -1371,12 +1743,15 @@
           if (figKey === scene.aerial.winnerKey) { ex.jump = scene.aerial.jumpH; ex.header = true; }
           else if (figKey === scene.aerial.loserKey) { ex.jump = scene.aerial.jumpH * 0.6; }
         }
+        if (kicker && figKey === kicker) {   // #156 蹴り足＝選手ごとの利き足（決定論）
+          ex.kick = kickEnv; ex.kickLeg = N.hash2(N.seedOf(figKey), 3) < 0.5 ? -1 : 1;
+        }
         const numTx = (options.kitNumbers !== false) ? kitNumTex(p.team, p.no, isGK) : null;
         drawFigure(
-          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dt,
+          figKey, px + (sep ? sep.x : 0), pz - (sep ? sep.y : 0), dtFig,
           shirt, shorts, toneOf(p.team, p.no),
           bodyAlpha * alpha, Math.atan2(dir, 0),
-          state.ball.x, -state.ball.y, ex, numTx
+          state.ball.x, -state.ball.y, ex, numTx, time, dt
         );
         gl.disable(gl.BLEND);
       }
@@ -1403,12 +1778,20 @@
       gl.disable(gl.BLEND);
       useLambert(M4.trs(b.x, 0.3 + b.z, bz, 0.3, 0.3, 0.3), [0.98, 0.99, 1], { emiss: 0.5 });
       drawMesh(mSphere);
-      // #82: 審判マーカー（編集用シーン要素・解析には非算入）
-      if (state.referees) for (const rf of state.referees) {
-        useLambert(M4.trs(rf.x, 0.55, -rf.y, 0.42, 1.1, 0.42), [0.15, 0.15, 0.16], { emiss: 0.05 });
-        drawMesh(mCapsule);
-        useLambert(M4.trs(rf.x, 1.35, -rf.y, 0.18, 0.18, 0.18), [0.9, 0.75, 0.15], { emiss: 0.2 });
-        drawMesh(mSphere);
+      // #82/#154: 審判 — 選手と同じスキンド人型経路（黒キット・解析には非算入）
+      if (state.referees) for (let ri = 0; ri < state.referees.length; ri++) {
+        const rf = state.referees[ri];
+        const rz = -rf.y;
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        useFlat(M4.trs(rf.x, 0.02, rz, 1.4, 1, 1.4), [0, 0, 0], { alpha: 0.4, soft: 0.62 });
+        drawMesh(mQuad);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+        drawFigure("REF:" + ri, rf.x, rz, dtFig,
+          [0.13, 0.13, 0.15], [0.10, 0.10, 0.12], REF_TONE, 1,
+          Math.atan2(b.x - rf.x, bz - rz), b.x, bz, null, null, time, dt);
       }
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
@@ -1462,9 +1845,57 @@
         gl.depthMask(true);
         gl.disable(gl.BLEND);
       }
+
+      // #159 ポストプロセス: オフスクリーン → （Cinematic: bloom）→ トーンマップ/グレーディング/FXAA → 画面
+      if (postOn) {
+        gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+        const bloomOn = !!(R.quality && R.quality.flags && R.quality.flags.bloom);
+        if (bloomOn) {
+          gl.viewport(0, 0, post.bw, post.bh);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[0]);   // 輝度抽出
+          gl.useProgram(prBright);
+          gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, post.tex);
+          gl.uniform1i(U(prBright, "uTex"), 0); gl.uniform1f(U(prBright, "uThresh"), 0.72);
+          drawFS();
+          gl.useProgram(prBlur);                                 // 分離ガウス（横→縦）
+          gl.uniform1i(U(prBlur, "uTex"), 0);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[1]);
+          gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[0]); gl.uniform2f(U(prBlur, "uDir"), 1 / post.bw, 0); drawFS();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, post.bloomFBO[0]);
+          gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[1]); gl.uniform2f(U(prBlur, "uDir"), 0, 1 / post.bh); drawFS();
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(prPost);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, post.tex); gl.uniform1i(U(prPost, "uTex"), 0);
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, post.bloomTex[0]); gl.uniform1i(U(prPost, "uBloom"), 2);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(U(prPost, "uTexel"), 1 / post.w, 1 / post.h);
+        gl.uniform1f(U(prPost, "uBloomOn"), bloomOn ? 1 : 0);
+        gl.uniform1f(U(prPost, "uExposure"), 1.06);
+        gl.uniform1f(U(prPost, "uTonemap"), 0.45);   // 控えめ（既存の作り込みを濁さない）
+        gl.uniform1f(U(prPost, "uContrast"), 1.05);
+        gl.uniform1f(U(prPost, "uSat"), 1.08);
+        gl.uniform1f(U(prPost, "uVig"), 0.24);
+        drawFS();
+      }
     };
 
     // ピッキング（クリック → 選手）
+    // ワールド座標 → 正規化デバイス座標（-1..1）。画面内に入っているかを画素ではなく
+    // 座標で確かめるための計測フック（#188 の受け入れ条件）。z<=0 は背後。
+    // 粒子の使用量（#193 リリース前検査）。上限に達すると**後から積む粒子が黙って落ちる**ので、
+    // 新しい粒子の用途を足したときに危険度場が痩せていないかを数で確かめられるようにする。
+    api.partStats = () => ({ used: partCount, cap: PART_CAP });
+
+    api.project = (wx, wy, wz) => {
+      const mv = M4.mul(proj, view);
+      const cx = mv[0] * wx + mv[4] * wy + mv[8] * wz + mv[12];
+      const cy = mv[1] * wx + mv[5] * wy + mv[9] * wz + mv[13];
+      const cw = mv[3] * wx + mv[7] * wy + mv[11] * wz + mv[15];
+      return { x: cx / cw, y: cy / cw, w: cw };
+    };
+
     api.pick = (mx, my, state) => {
       const rect = canvas.getBoundingClientRect();
       const x = ((mx - rect.left) / rect.width) * 2 - 1;

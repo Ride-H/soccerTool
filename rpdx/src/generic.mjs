@@ -100,6 +100,16 @@
       h1: { start: 0, end: 2700 + h1Added * 60, clock0: 0, added: h1Added },
       h2: { start: 2700 + h1Added * 60, end: 2700 + h1Added * 60 + 2700 + h2Added * 60, clock0: 2700, added: h2Added },
     };
+    // #202 延長（15 分ハーフ）。エンジン側は #141 で h3/h4 に一般対応済みなので、
+    // ここで作れば clockAt（105+X / 120+X）・playedRange・タイムラインがそのまま動く。
+    // 未指定なら従来と完全に同じ（キーごと生えない）。
+    if (cfg.extra) {
+      const a3 = cfg.added3 ?? 1, a4 = cfg.added4 ?? 2;
+      const h3s = time.h2.end;
+      const h3e = h3s + 900 + a3 * 60;
+      time.h3 = { start: h3s, end: h3e, clock0: 5400, added: a3 };
+      time.h4 = { start: h3e, end: h3e + 900 + a4 * 60, clock0: 6300, added: a4 };
+    }
     const H2 = time.h2.start;
 
     const sA = teamStrength(A), sB = teamStrength(B);

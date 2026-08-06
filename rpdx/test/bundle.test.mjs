@@ -147,3 +147,135 @@ test("#92b残: editEntry はアトミック（重複番号拒否時に名前も�
     assert.ok(m.events.filter(e => e.type === "goal" && e.team === team).some(e => e.no === 77));
   }
 });
+
+// #201: アディショナルタイムがバンドルの往復で失われないこと。
+// customMatch は「読み込み側が試合データを持っていなくても再構築できる」ことが約束なので、
+// 試合の長さを決める AT が欠けていると、別の端末で開いた瞬間に終端が既定値へ戻る
+// （実測: 終端 6180 → 5820 秒）。
+test("#201 バンドル: アディショナルタイムが往復する", () => {
+  const G = RPDX.generic;
+  const m = G.createMatch({ ...G.template(), added1: 4, added2: 9 });
+  assert.equal(m.time.h1.added, 4);
+  assert.equal(m.time.h2.added, 9);
+  const end = E.playedRange(m).t1;
+
+  const b = JSON.parse(SCN.serializeBundle(m, E.actualScenario(m), null));
+  assert.ok(b.customMatch, "未較正の試合はロスターを同梱する");
+  assert.equal(b.customMatch.added1, 4, "前半 AT がバンドルに入る");
+  assert.equal(b.customMatch.added2, 9, "後半 AT がバンドルに入る");
+
+  const back = G.createMatch(b.customMatch);
+  assert.equal(back.time.h1.added, 4);
+  assert.equal(back.time.h2.added, 9);
+  assert.equal(E.playedRange(back).t1, end, "終端が一致する");
+
+  // 既定値のままなら従来と同じ（+2 / +5）
+  const plain = G.createMatch(G.template());
+  const pb = JSON.parse(SCN.serializeBundle(plain, E.actualScenario(plain), null));
+  assert.equal(G.createMatch(pb.customMatch).time.h2.added, 5);
+});
+
+// #202: 延長の有無と延長の AT がバンドルの往復で失われないこと。
+// 欠けると別の端末で開いた瞬間に延長が消え、120 分の試合が 90 分に化ける。
+test("#202 バンドル: 延長の有無と延長の AT が往復する", () => {
+  const G = RPDX.generic;
+  const m = G.createMatch({ ...G.template(), extra: true, added3: 2, added4: 3 });
+  const b = JSON.parse(SCN.serializeBundle(m, E.actualScenario(m), null));
+  assert.equal(b.customMatch.extra, true);
+  assert.equal(b.customMatch.added3, 2);
+  assert.equal(b.customMatch.added4, 3);
+  const back = G.createMatch(b.customMatch);
+  assert.equal(E.playedRange(back).t1, E.playedRange(m).t1, "終端が一致する");
+  assert.match(E.clockAt(back, E.playedRange(back).t1).disp, /^120\+3/);
+
+  // 延長なしの試合には extra が生えない（従来のバンドルと同じ形）
+  const plain = G.createMatch(G.template());
+  const pb = JSON.parse(SCN.serializeBundle(plain, E.actualScenario(plain), null));
+  assert.ok(!("extra" in pb.customMatch), "延長なしなら extra を書かない");
+});
+
+/* ---------------------------------------------------------------------------
+   #198 PK 戦を単独の文書として書き出す／読み込む。
+   書き出しの**機構**は既存と同じ（Blob で落とす）。増やすのは文書の種類だけ
+   （#181「保存の仕組みは既にある。新しい保存機構を足してはいけない」）。
+   --------------------------------------------------------------------------- */
+test("#198 PK 戦: 単独 JSON で往復し、チーム名と選手名を同梱する", () => {
+  const L = RPDX.live, G = RPDX.generic;
+  let s = L.create(G.template());
+  s = L.withPk(s, { team: "TMA", kicker: 9, gk: 1, approach: "L", gkMove: "R", cell: 0, scored: true,
+    approachAt: 1000, gkMoveAt: 1800, kickAt: 2000 });
+  s = L.withPk(s, { team: "TMB", kicker: 10, gk: 12, cell: 8, scored: false });
+  s = L.withPkOrder(s, "TMA", [9, 10, 7]);
+  const m = L.matchOf(s);
+
+  const o = JSON.parse(SCN.serializeShootout(s, m));
+  assert.equal(o.kind, "rpdx-shootout", "試合のバンドルとは別の種類");
+  assert.equal(o.kicks.length, 2);
+  assert.deepEqual(o.order.TMA, [9, 10, 7], "順番も入る");
+  // 試合データを持っていない相手にも渡せるよう自己完結させる
+  for (const k of Object.keys(o.teams)) {
+    assert.ok(o.teams[k].name, `${k} のチーム名が入る`);
+    assert.ok(o.teams[k].squad.length > 0, `${k} の選手名が入る`);
+  }
+  // 蹴る前の観測も落とさない
+  assert.equal(o.kicks[0].gkMove, "R");
+  assert.equal(o.kicks[0].kickAt - o.kicks[0].gkMoveAt, 200);
+
+  const r = SCN.parseShootout(JSON.stringify(o));
+  assert.ok(!r.error, r.error);
+  assert.deepEqual(r.shootout.kicks, o.kicks, "そのまま戻る");
+});
+
+test("#198 PK 戦: 別の文書や壊れた記録を受け付けない", () => {
+  assert.match(SCN.parseShootout('{"kind":"rpdx-bundle"}').error, /kind が違う/);
+  assert.match(SCN.parseShootout("これは JSON ではない").error, /JSON 解析に失敗/);
+  assert.match(SCN.parseShootout('{"kind":"rpdx-shootout"}').error, /kicks がありません/);
+  const bad = (k) => SCN.parseShootout(JSON.stringify({ kind: "rpdx-shootout", kicks: [k] })).error;
+  assert.match(bad({ cell: 0, scored: true }), /team がありません/);
+  assert.match(bad({ team: "A", cell: 99, scored: true }), /cell が範囲外/);
+  assert.match(bad({ team: "A", cell: 0 }), /scored がありません/);
+});
+
+test("#198 PK 戦: 試合のバンドルは従来どおり読める（kind の追加で壊さない）", () => {
+  const G = RPDX.generic;
+  const m = G.createMatch(G.template());
+  const b = SCN.serializeBundle(m, E.actualScenario(m), null);
+  assert.ok(!SCN.parseBundle(m, b).error, "試合のバンドルはこれまでどおり");
+  // PK 戦の文書を試合のバンドルとして読ませない（取り違え防止）
+  const L = RPDX.live;
+  let s = L.withPk(L.create(G.template()), { team: "TMA", cell: 0, scored: true });
+  const sh = SCN.serializeShootout(s, L.matchOf(s));
+  assert.ok(SCN.parseShootout(sh).shootout, "PK 戦は PK 戦として読める");
+});
+
+// #198: 書き出し・読み込みの分岐を全て通す（省略時の既定・順番なし・チーム欠けなど）。
+test("#198 PK 戦: 省略できる項目と境界を全て通す", () => {
+  const L = RPDX.live, G = RPDX.generic;
+  // セッションが無い／live が無い場合は null
+  assert.equal(SCN.serializeShootout(null, null), null);
+
+  // 記録も順番も無い状態（order を書かない）
+  const empty = L.create(G.template());
+  const eo = JSON.parse(SCN.serializeShootout(empty, L.matchOf(empty)));
+  assert.deepEqual(eo.kicks, []);
+  assert.ok(!("order" in eo), "順番が無ければ書かない");
+  assert.ok(eo.label.includes("vs"), "既定のラベルが作られる");
+
+  // ラベルを明示できる
+  const named = JSON.parse(SCN.serializeShootout(empty, L.matchOf(empty), "県大会 決勝"));
+  assert.equal(named.label, "県大会 決勝");
+
+  // 読み込み: teams / order が無くても既定で埋まる
+  const r = SCN.parseShootout(JSON.stringify({ kind: "rpdx-shootout", kicks: [] }));
+  assert.deepEqual(r.shootout.teams, {});
+  assert.deepEqual(r.shootout.order, {});
+
+  // 読み込み: オブジェクトをそのまま渡せる（文字列だけではない）
+  const asObj = SCN.parseShootout({ kind: "rpdx-shootout", kicks: [{ team: "A", cell: 0, scored: true }] });
+  assert.equal(asObj.shootout.kicks.length, 1);
+
+  // 読み込み: null / 配列でない kicks
+  assert.match(SCN.parseShootout("null").error, /オブジェクトではありません/);
+  assert.match(SCN.parseShootout('{"kind":"rpdx-shootout","kicks":"x"}').error, /kicks がありません/);
+  assert.match(SCN.parseShootout(JSON.stringify({ kind: "rpdx-shootout", kicks: [null] })).error, /team がありません/);
+});

@@ -50,6 +50,7 @@
   <button class="btn cam on" data-cam="broadcast" data-i18n="放送" aria-label="放送カメラ（broadcast camera）">放送</button>
   <button class="btn cam" data-cam="tactical" data-i18n="俯瞰" aria-label="俯瞰カメラ（tactical camera）">俯瞰</button>
   <button class="btn cam" data-cam="goal" data-i18n="ゴール裏" aria-label="ゴール裏カメラ（goal-line camera）">ゴール裏</button>
+  <button class="btn cam" data-cam="pk" data-i18n="PK" aria-label="PKカメラ（penalty kick camera）">PK</button>
   <button class="btn cam" data-cam="pitch" data-i18n="追従" aria-label="選手追従カメラ（follow camera）">追従</button>
   <button class="btn cam" data-cam="fly" data-i18n="自由飛行" aria-label="自由飛行カメラ（free-fly camera）">自由飛行</button>
   <span class="vsep"></span>
@@ -61,6 +62,7 @@
   <button class="btn tog on" id="togPsy" aria-label="PSY 心理生理レイヤー切替（toggle PSY layer）">PSY</button>
   <button class="btn tog on" id="togNum" data-i18n="背番号" aria-label="キット背番号の表示切替（toggle kit numbers）">背番号</button>
   <button class="btn tog on" id="togReplay" data-i18n="リプレイ" aria-label="ゴール・スロー・リプレイ切替（toggle goal replay）">リプレイ</button>
+  <button class="btn tog" id="togTier" aria-label="品質ティア切替（quality tier: 自動/シネマ/軽量）"><span data-i18n="品質">品質</span> <b id="tierLbl">–</b></button>
   <span class="vsep"></span>
   <select id="matchSel" class="sel" title="試合を切替" aria-label="試合を選択（select match）"></select>
   <button class="btn" id="btnInfo" data-i18n="試合情報" aria-label="試合情報を開く（open match info）">試合情報</button>
@@ -214,10 +216,110 @@
   <div id="inspEditForm" style="display:none;margin-top:6px"></div>
 </div>
 
+<!-- ライブ実況（中継を見ながら数タップ・#180） -->
+<div id="liveBar" class="panel" style="display:none" role="region" aria-label="ライブ実況（live commentary）">
+  <div id="liveHead">
+    <span id="liveDot" aria-hidden="true"></span>
+    <b id="liveClock" class="num">0:00</b>
+    <span class="eyebrow" id="liveState">停止中</span>
+    <button class="btn live-btn" id="liveStart" aria-label="試合開始 / 一時停止（start or pause）">▶ 開始</button>
+    <button class="btn live-btn" id="liveSync" aria-label="中継の時計に合わせる（sync clock）">⟲ 時計合わせ</button>
+    <button class="btn live-btn primary" id="liveHalf" style="display:none" aria-label="次のピリオドを開始する（start next period）">▶ 後半開始</button>
+    <button class="btn live-btn" id="liveExtra" style="display:none" aria-label="延長戦を行うかを決める（extra time）">＋ 延長を行う</button>
+    <button class="btn live-btn" id="liveResume" style="display:none" aria-label="前回の続きから復帰（resume saved live）">⏱ 続きから</button>
+    <button class="btn live-btn" id="liveAt" aria-label="アディショナルタイムを設定（additional time）">⏱ AT</button>
+    <button class="btn live-btn" id="livePk" aria-label="PK コース記録（penalty kick log）">⚽ PK</button>
+    <button class="btn live-btn" id="liveUndo" aria-label="直前の入力を取り消す（undo）">↩ 取消</button>
+    <button class="btn live-btn" id="liveExit" aria-label="ライブ実況を終了（exit live）">✕ 終了</button>
+  </div>
+  <div id="liveSetup">
+    <div class="hint">チーム名を入れてください（選手名は後からロスターの ✎ で直せます）</div>
+    <div class="live-names">
+      <input id="liveHomeName" class="live-in" type="text" maxlength="20" aria-label="自チームの名前（home team name）" placeholder="自チーム">
+      <input id="liveAwayName" class="live-in" type="text" maxlength="20" aria-label="相手チームの名前（away team name）" placeholder="相手チーム">
+    </div>
+    <div class="live-names">
+      <button class="btn" id="liveNameApply">この名簿ではじめる</button>
+      <button class="btn" id="liveEditRoster">名簿をくわしく編集</button>
+    </div>
+  </div>
+  <div id="liveTeams" role="group" aria-label="入力するチーム（team to record）"></div>
+  <div id="liveEvents" role="group" aria-label="いま起きたこと（what just happened）"></div>
+  <div id="liveSubPick" style="display:none"></div>
+
+  <!-- PK コース記録（#189）。表示は「これまでに記録された本数」— 確率は出さない（#187 §6） -->
+  <div id="pkPanel" style="display:none" role="region" aria-label="PK コース記録（penalty kick log）">
+    <div class="pk-row" id="pkKind" role="group" aria-label="どちらを記録するか（which kind）">
+      <span class="eyebrow">記録する</span>
+      <button class="btn pk-b on" data-pkkind="shootout" aria-label="PK戦を記録する">PK戦</button>
+      <button class="btn pk-b" data-pkkind="match" aria-label="試合中のPKを記録する">試合中のPK</button>
+    </div>
+    <div class="pk-head">
+      <b id="pkOrder" aria-live="polite">1 本目</b>
+      <span class="eyebrow" id="pkScore" aria-live="polite"></span>
+      <span class="spacer"></span>
+      <button class="btn live-btn" id="pkUndo" aria-label="直前の PK 記録を取り消す（undo penalty）">↩ PK取消</button>
+    </div>
+    <div class="pk-row" id="pkOrderRow" role="group" aria-label="蹴る順番（kicking order）">
+      <span class="eyebrow">蹴る順番</span>
+      <button class="btn pk-b" id="pkOrderAdd" aria-label="いま選んでいる選手を順番の最後に足す">＋ この選手</button>
+      <button class="btn pk-b" id="pkOrderClear" aria-label="蹴る順番をクリアする">クリア</button>
+    </div>
+    <div id="pkOrderList" class="hint"></div>
+    <div id="pkWho" class="pk-row">
+      <select id="pkKicker" class="sel" aria-label="キッカー（kicker）"></select>
+      <select id="pkGk" class="sel" aria-label="GK（goalkeeper）"></select>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: 助走側（run-up side before the kick）">
+      <span class="eyebrow">蹴る前 助走</span>
+      <button class="btn pk-b" data-pkapp="L" aria-label="助走は左から">左</button>
+      <button class="btn pk-b" data-pkapp="C" aria-label="助走は正面から">正面</button>
+      <button class="btn pk-b" data-pkapp="R" aria-label="助走は右から">右</button>
+    </div>
+    <div class="pk-row" role="group" aria-label="蹴る前の観測: GK の早い動き（keeper's early movement）">
+      <span class="eyebrow">蹴る前 GK</span>
+      <button class="btn pk-b" data-pkgk="L" aria-label="GKは左へ動いた">左</button>
+      <button class="btn pk-b" data-pkgk="C" aria-label="GKは中央">中央</button>
+      <button class="btn pk-b" data-pkgk="R" aria-label="GKは右へ動いた">右</button>
+      <button class="btn pk-b" data-pkgk="S" aria-label="GKは動かなかった">静止</button>
+    </div>
+    <div id="pkGrid" role="group" aria-label="コース（ゴールマウスの 3×3・course）"></div>
+    <div class="pk-row" role="group" aria-label="結果（result）">
+      <button class="btn pk-res" id="pkOk" aria-label="決まった（scored）">○ 決まった</button>
+      <button class="btn pk-res" id="pkNg" aria-label="止められた・外れた（no goal）">✕ 止/外</button>
+    </div>
+    <div class="pk-row" id="pkScope" role="group" aria-label="集計の範囲（tally scope）">
+      <span class="eyebrow">見る範囲</span>
+      <button class="btn pk-b on" data-pkscope="kicker" aria-label="このキッカーの記録">この選手</button>
+      <button class="btn pk-b" data-pkscope="team" aria-label="このチームの記録">チーム</button>
+      <button class="btn pk-b" data-pkscope="all" aria-label="記録ぜんぶ">ぜんぶ</button>
+    </div>
+    <div class="pk-row" id="pkIo" role="group" aria-label="PK 戦の書き出し・取り込み">
+      <span class="eyebrow">記録の受け渡し</span>
+      <button class="btn pk-b" id="pkExport" aria-label="この PK 戦を JSON で書き出す">書き出す</button>
+      <button class="btn pk-b" id="pkImport" aria-label="PK 戦の JSON を読み込む">読み込む</button>
+      <button class="btn pk-b" id="pkKeep" aria-label="この PK 戦を記録に残す">記録に残す</button>
+      <button class="btn pk-b" id="pkHistory" aria-label="選手ごとの記録を見る">選手ごと</button>
+      <input type="file" id="pkFile" accept="application/json,.json" style="display:none">
+    </div>
+    <div id="pkResult" class="hint" aria-live="polite"></div>
+    <div id="pkHist" class="hint" style="display:none"></div>
+    <div id="pkTally" class="hint"></div>
+    <div id="pkLegend" class="hint"></div>
+  </div>
+
+  <!-- #203 試合終了の分岐（延長するか → PK 戦へ）。prompt/confirm は使わない -->
+  <div id="liveEnd" class="pk-row" style="display:none" role="group" aria-live="polite"
+       aria-label="試合終了の選択（end of match）"></div>
+
+  <div id="liveLog" class="hint"></div>
+</div>
+
 <!-- タイムライン -->
 <div id="timelineWrap" class="panel">
   <div id="tlHead">
     <button class="btn" id="btnPlay" aria-label="再生 / 停止（play or pause）">▶ 再生</button>
+    <button class="btn" id="btnLive" aria-label="ライブ実況をはじめる（start live commentary）">🔴 <span data-i18n="ライブ">ライブ</span></button>
     <div class="speedgrp" id="speedGrp" role="group" aria-label="再生速度（playback speed）"></div>
     <button class="btn" id="btnPrevEv" aria-label="前のイベントへ（previous event）">|◀ <span data-i18n="前">前</span></button>
     <button class="btn" id="btnNextEv" aria-label="次のイベントへ（next event）">▶| <span data-i18n="次">次</span></button>

@@ -189,7 +189,7 @@
          frame?: <serializeFrame の中身> }                                        // 任意の編集フレーム座標 */
   const ATTR_RANGE = { pac: [40, 99], sta: [40, 99], def: [20, 99], att: [20, 99], tec: [40, 99], aer: [30, 99] };
 
-  SCN.serializeBundle = (match, scenario, editFrame) => {
+  SCN.serializeBundle = (match, scenario, editFrame, opts) => {
     const ov = {};
     if (scenario.subs) {
       const subs = {};
@@ -228,11 +228,62 @@
       bundle.customMatch = {
         seed: match.meta.id.replace(/^custom-/, ""),
         competition: match.meta.competition, stage: match.meta.stage, venue: match.meta.venue,
+        // #201: アディショナルタイムを含める。入れないと往復で既定値（+2/+5）へ戻り、
+        // 設定したロスタイムが黙って消える（実測: 終端 6180 → 5820 秒）。
+        added1: match.time.h1.added, added2: match.time.h2.added,
+        // #202: 延長の有無と延長の AT。これが欠けると別の端末で開いた瞬間に延長が消える。
+        ...(match.time.h3 ? { extra: true, added3: match.time.h3.added, added4: match.time.h4.added } : {}),
         home: teamCfg(ha), away: teamCfg(aw),
       };
     }
     if (editFrame) bundle.frame = JSON.parse(SCN.serializeFrame(editFrame));
+    // #181 ライブセッション: 専用の保存機構は作らず、このバンドルに同梱する。
+    // 時計の区間列は壁時計の絶対値を持つので、保存時刻も一緒に残して復帰時に解決する。
+    if (opts && opts.live && R.live) { bundle.live = R.live.toObj(opts.live); bundle.live.savedAt = Date.now(); }
     return JSON.stringify(bundle, null, 2);
+  };
+
+  /* ---------------- PK 戦を単独の文書として出す（#198） ----------------
+     書き出しの**機構**は既存と同じ（呼び出し側が Blob で落とす）。増やすのは文書の種類だけ。
+     #181 の決まり「保存の仕組みは既にある。新しい保存機構を足してはいけない」に従う。
+
+     PK 戦は試合とは別の記録なので、試合データを持っていない相手にも渡せるよう
+     **チーム名と選手名を同梱**して自己完結させる（customMatch と同じ考え方）。 */
+  SCN.serializeShootout = (session, match, label) => {
+    const L = R.live;
+    if (!L || !session) return null;
+    const keys = R.engine.teamKeys(match);
+    const teams = {};
+    for (const k of keys) {
+      const t = match.teams[k];
+      teams[k] = { name: t?.name ?? k,
+        squad: (t?.squad ?? []).map((p) => ({ no: p.no, ja: p.ja ?? p.name ?? String(p.no) })) };
+    }
+    return JSON.stringify({
+      v: 1, kind: "rpdx-shootout",
+      label: label || `${teams[keys[0]]?.name ?? keys[0]} vs ${teams[keys[1]]?.name ?? keys[1]}`,
+      savedAt: Date.now(), teams,
+      kicks: (session.pk || []).map((r) => ({ ...r })),
+      ...(session.pkOrder ? { order: JSON.parse(JSON.stringify(session.pkOrder)) } : {}),
+    }, null, 2);
+  };
+
+  // 読み込み。形が違えば error を返す（呼び出し側が kind で振り分ける）。
+  SCN.parseShootout = (input) => {
+    let o;
+    try { o = typeof input === "string" ? JSON.parse(input) : input; }
+    catch (e) { return { error: "JSON 解析に失敗: " + (e && e.message || e) }; }
+    if (!o || typeof o !== "object") return { error: "不正な形式（オブジェクトではありません）" };
+    if (o.kind !== "rpdx-shootout") return { error: "PK 戦の記録ではありません（kind が違う）" };
+    if (!Array.isArray(o.kicks)) return { error: "kicks がありません" };
+    const cells = (R.live?.PK_COLS ?? 3) * (R.live?.PK_ROWS ?? 3);
+    for (const [i, k] of o.kicks.entries()) {
+      if (!k || !k.team) return { error: `${i + 1} 本目に team がありません` };
+      if (!Number.isInteger(k.cell) || k.cell < 0 || k.cell >= cells)
+        return { error: `${i + 1} 本目の cell が範囲外` };
+      if (typeof k.scored !== "boolean") return { error: `${i + 1} 本目に scored がありません` };
+    }
+    return { shootout: { ...o, teams: o.teams || {}, order: o.order || {} } };
   };
 
   SCN.parseBundle = (match, input) => {
@@ -316,7 +367,10 @@
 
     const validation = S.validateScenario(match, sc);
     const frame = o.frame ? SCN.parseFrame(match, o.frame, sc) : null;
-    return { scenario: sc, validation, frame, match: o.match || null };
+    // #181 ライブセッションが同梱されていれば復元して返す（時計は必ず停止状態）。
+    // 世界の作り直しは呼び出し側（UI）の仕事なので、ここは値を戻すだけ。
+    const live = (o.live && R.live) ? R.live.fromObj(o.live) : null;
+    return { scenario: sc, validation, frame, match: o.match || null, ...(live ? { live } : {}) };
   };
 
   /* ---- #80(B): 巻き返しシナリオ・ビルダー ----

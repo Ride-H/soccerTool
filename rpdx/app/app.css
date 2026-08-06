@@ -42,6 +42,8 @@ button, select, input, textarea { font-family: inherit; color: inherit; }
 :focus:not(:focus-visible) { outline: none; }
 ::selection { background: rgba(200,169,110,.3); }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+/* 脅威寄与 TOP の行（#105: 指の端末では 11px へ上げる。下の coarse ブロックを参照） */
+.contrib-row .pnum, .contrib-row .num { font-size: 10px; }
 .mono { font-family: var(--mono); }
 
 #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -461,14 +463,11 @@ body.showkeys #keyhelp { display: block; }
 @media (hover: none) {
   .prow .redit { opacity: 1; }              /* hover で出る編集ボタン（✎）を常時表示 */
 }
-@media (pointer: coarse) {
-  .btn { min-height: 34px; }
-  .sel, .numin { min-height: 32px; }
-  .prow { padding: 8px 6px; }
-  .prow .redit { width: 32px; height: 28px; opacity: 1; }
-  .dock-toggle { width: 44px; height: 44px; font-size: 16px; }
-  input[type="range"] { height: 30px; }
-}
+
+
+/* #105: 再生速度の文字が地色に対し 3.68:1（基準 4.5:1）だった。--faint は
+   小さい文字に使うと AA を割る。指の端末に限らない不備なので全体で直す。 */
+.speedgrp button { color: var(--muted); }
 /* ---------- PSY 心理生理レイヤー ---------- */
 .momo-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
 .momo-row .tag { width: 34px; font-family: var(--mono); font-size: 10px; font-weight: 700; }
@@ -513,3 +512,133 @@ input[type="text"], input[type="search"], textarea {
 }
 input[type="text"]::placeholder, textarea::placeholder { color: #8a96ad; }
 input[type="text"]:focus, input[type="search"]:focus, textarea:focus { border-color: #7fb2ff; outline: none; }
+
+/* ---- ライブ実況（#180）: 試合を見ながら片手で押すので、標的は 44px 以上 ---- */
+/* ライブ中は「見ながら押す」ので、画面下端に固定して親指の届く位置へ置く。
+   上部の HUD（時計・スコア）に重なると押せなくなるため、重なりは ui-probe で常時検査する。 */
+#liveBar {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+  border-color: var(--gold-line); background: rgba(11,15,22,.96);
+  position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 60;
+  max-height: 62vh; overflow-y: auto;
+  box-shadow: 0 -8px 28px rgba(0,0,0,.45);
+}
+@media (min-width: 900px) { #liveBar { left: auto; right: 12px; width: 420px; } }
+#liveHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#liveClock { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ink); }
+#liveDot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; flex: none; }
+#liveBar.running #liveDot { background: #e5533d; box-shadow: 0 0 0 4px rgba(229,83,61,.18); }
+#liveBar.half #liveDot { background: var(--gold-bright); box-shadow: 0 0 0 4px rgba(212,175,55,.18); }
+#liveTeams, #liveEvents { display: flex; gap: 8px; flex-wrap: wrap; }
+.live-btn, #liveTeams .btn, #liveEvents .btn {
+  min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 13px; border-radius: 10px;
+}
+#liveEvents .btn { flex: 1 1 auto; justify-content: center; }
+#liveTeams .btn.on { border-width: 2px; }
+/* スタンドで読む前提なので、ライブバー内の補助文字は小さくしない（実測で 9〜10px だった） */
+#liveBar .eyebrow { font-size: 12px; letter-spacing: .04em; }
+#liveLog { min-height: 18px; font-size: 12px; line-height: 1.5; }
+#liveSubPick { display: flex; flex-direction: column; gap: 6px; }
+#liveSubPick .hint { font-size: 12px; }
+.live-nums { display: flex; gap: 6px; flex-wrap: wrap; }
+.live-nums .btn { min-width: 44px; min-height: 44px; justify-content: center; font-size: 14px; padding: 8px; }
+#liveSetup { display: flex; flex-direction: column; gap: 6px; }
+#liveSetup .hint { font-size: 12px; line-height: 1.5; }
+.live-names { display: flex; gap: 8px; flex-wrap: wrap; }
+.live-names .btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
+/* 入力欄も「触る標的」。小さいとスタンドで打てない（ui-probe が実測する） */
+.live-in {
+  flex: 1 1 40%; min-height: 44px; font-size: 15px; padding: 8px 10px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 10px; color: var(--ink);
+}
+.live-in::placeholder { color: var(--muted); }
+@media (max-width: 560px) { #liveEvents .btn { flex: 1 1 44%; } }
+
+/* ---------- PK コース記録（#189） ---------- */
+#pkPanel { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.pk-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pk-head .spacer { flex: 1; }
+.pk-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.pk-row .eyebrow { width: 74px; flex: 0 0 auto; }
+.pk-b.on, .pk-res.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+/* ゴールマウス 3×3。上段が画面の上に来るように、行を上から並べる */
+#pkGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px;
+  border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px;
+  background: linear-gradient(180deg, rgba(196,212,240,.05), rgba(5,9,17,.5)); }
+#pkGrid .cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 44px; border: 1px solid var(--line); border-radius: 6px;
+  background: rgba(5,9,17,.5); color: var(--muted); cursor: pointer;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+}
+#pkGrid .cell.on { color: var(--gold-bright); border-color: var(--gold-line); background: var(--gold-wash); }
+#pkGrid .cell .cnt { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+/* ---------- PK 戦モード（#197・全画面） ----------
+   PK 戦では危険度・D²-Field・PSY・支配率・タイムライン・走行距離が意味を持たない。
+   それらを消してライブバーを全画面の操作盤にする。
+   **品質ティア（#152）には触らない** — 消すのはモードの判断で、描画予算の判断ではない。
+   各機能が独自にON/OFF基準を持つと基準がブレる、というのが #152 の趣旨。 */
+body.pk-mode #dockL, body.pk-mode #dockR,
+body.pk-mode #timelineWrap, body.pk-mode #tlToggle,
+body.pk-mode #viewbar, body.pk-mode #viewToggle,
+body.pk-mode #toggleL, body.pk-mode #toggleR,
+body.pk-mode #statusband, body.pk-mode #inspector,
+body.pk-mode #editBar, body.pk-mode #keyhelp { display: none !important; }
+
+body.pk-mode #liveBar {
+  position: fixed; left: 8px; right: 8px; top: 96px; bottom: 8px;
+  width: auto; max-width: none; z-index: 34;
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+body.pk-mode #pkPanel { flex: 1; margin-top: 6px; }
+/* 格子を余った高さいっぱいに使う（スクロールせずに押せるように） */
+body.pk-mode #pkGrid { flex: 1; min-height: 132px; }
+body.pk-mode #pkGrid .cell { min-height: 52px; }
+body.pk-mode #liveSetup, body.pk-mode #liveEvents, body.pk-mode #liveSubPick { display: none; }
+@media (min-width: 900px) {
+  body.pk-mode #liveBar { left: 50%; right: auto; transform: translateX(-50%); width: min(560px, 92vw); }
+}
+
+/* =========================================================================
+   #105 タッチ端末（指で操作する端末）向けの上書き。
+   **ファイル末尾に置くこと**: 同じ詳細度の指定が後ろにあると後勝ちで無効化される
+   （実測: .momo-row .mv の 10.5px がここより後ろにあり、11px 指定が効いていなかった）。
+   ========================================================================= */
+@media (pointer: coarse) {
+  /* #105: タップ標的は 44px（Apple HIG / WCAG 2.5.5）。34px では指が外す。
+     ここは「指で操作する端末」だけに当たる指定なので、デスクトップの見た目は変えない。 */
+  .btn { min-height: 44px; }
+  .sel, .numin { min-height: 44px; }
+  .prow { padding: 8px 6px; }
+  .prow .redit { width: 44px; height: 44px; opacity: 1; }
+  .dock-toggle { width: 44px; height: 44px; font-size: 16px; }
+  input[type="range"] { height: 44px; }
+  #viewbar .btn { min-width: 44px; }                       /* 2文字ラベルで 33px まで痩せる */
+  .speedgrp button { min-width: 44px; min-height: 44px; }
+  .gk-toggle .btn, .zone-toggle .btn { min-width: 44px; }
+  .pk-b, .pk-res { min-width: 44px; }   /* 1 文字ラベル（左/右）が 36px まで痩せる */
+  #inspector .close { width: 44px; height: 44px; top: 2px; right: 2px; font-size: 18px; }
+
+  /* #105: 文字はスタンドで読む前提。11px を下回らせない（実測で 8.5px まであった）。 */
+  .eyebrow, .chip, .hint, .legend-line, .statsrc, .suggestion .why,
+  #scoreboard .team, #scoreboard .clock .t, #scoreboard .clock .half, #scoreboard .possnum .num,
+  #statusband .carrier, .prow .ppos, .prow .pstat,
+  #outcomePanel .delta .d .k, .kiken-tile .lbl, .modbar .k, .modbar .v,
+  .speedgrp button, #inspector .sub, #inspector .stat .k, #inspector .attr,
+  .momo-row .tag, .momo-row .mv, .psy-mini .k,
+  .gk-toggle .btn, .zone-toggle .btn,
+  .contrib-row .pnum, .contrib-row .num { font-size: 11px; }
+
+  /* 標的が痩せないように（横スクロールする帯の中で潰れる） */
+  #tlHead .btn, #viewbar .btn, .speedgrp button { flex: 0 0 auto; }
+  /* ✎ を 44px にすると行からはみ出すので、行側に居場所を作る */
+  .prow { gap: 6px; }
+
+  /* #105: 下部シート（ライブバー・インスペクタ）が開いている間、右下/左下の
+     ⚙ 📈 トグルがシートに覆われて押せなくなる。高さを当てにせず上へ逃がす。 */
+  body.live-on #viewToggle, body.live-on #tlToggle,
+  body:has(#inspector.open) #viewToggle, body:has(#inspector.open) #tlToggle {
+    bottom: auto; top: 96px;
+  }
+}

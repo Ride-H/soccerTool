@@ -223,11 +223,11 @@ self.onmessage = (e) => {
      動的な解析文言（フェーズ名・リスタート種別・危険度説明等）は日本語のまま=部分対応。 */
   const I18N = {
     en: {
-      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "追従": "Follow", "自由飛行": "Free-fly",
+      "放送": "Broadcast", "俯瞰": "Tactical", "ゴール裏": "Goal line", "PK": "Penalty", "追従": "Follow", "自由飛行": "Free-fly",
       "危険場": "Danger", "ゾーン": "Zones", "軌跡": "Trails", "番号": "Numbers", "速度": "Speed",
-      "背番号": "Kit №", "リプレイ": "Replay",
+      "背番号": "Kit №", "リプレイ": "Replay", "品質": "Quality",
       "試合情報": "Match Info", "モデル": "Model", "カスタム": "Custom",
-      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next",
+      "再生": "Play", "停止": "Pause", "前": "Prev", "次": "Next", "ライブ": "Live",
       "選手": "Players", "配置": "Formation", "交代": "Subs", "シナリオ結果": "Scenario Result",
       "陣形を適用": "Apply", "分": "min", "現在": "Now", "交代を追加": "Add sub", "クリア": "Clear",
       "微調整を解除": "Reset tweaks", "実試合に戻す": "Reset to actual",
@@ -245,6 +245,10 @@ self.onmessage = (e) => {
   let renderer, tlCtx;
   const boot = () => {
     $("#appVer") && ($("#appVer").textContent = "v" + (R.VERSION || "?"));   // バージョン表示
+    // #152: 品質ティア確定（?tier= > 端末保存 > 自動判定・迷ったら軽量）— レンダラ生成前
+    R.quality && R.quality.init();
+    // #154: 旧カプセル描画への切り戻しフラグ（移行期のデバッグ用・VIS-02 完了後に撤去）
+    App.options.figCapsule = urlq.get("fig") === "capsule";
     // 試合レジストリ切替（?match=<id>）— レンダラ生成前に確定させる。
     // #92b: 既定起動は「未較正テンプレ（自チーム起点）」。収録実試合は ?match=<id>／スイッチャで選択。
     const mq = urlq.get("match");
@@ -260,6 +264,7 @@ self.onmessage = (e) => {
     }
     try {
       renderer = R.render3d.create($("#gl"), App.match);
+      App.renderer = renderer;   // #188: 画角の受け入れ確認（api.project）から触れるようにする
     } catch (err) {
       // WebGL2 未対応環境（iOS の Files/Quick Look プレビュー等）: 固まらせず原因と導線を表示
       const l = $("#loading");
@@ -1192,10 +1197,10 @@ self.onmessage = (e) => {
       const T = App.match.teams[c.team];
       const p = T.squad.find(q => q.no === c.no);
       return `<div class="contrib-row">
-        <span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:22px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:800">${c.no}</span>
+        <span class="pnum" style="background:${T.kit.shirt};color:${T.kit.number};width:22px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800">${c.no}</span>
         <span style="width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p?.ja ?? c.no}</span>
         <div class="track"><div style="height:100%;width:${clamp(c.val, 0, 1) * 100}%;background:${seriesColor(c.team)}"></div></div>
-        <span class="num" style="font-family:var(--mono);font-size:10px;color:var(--muted);width:26px;text-align:right">${(c.val * 100).toFixed(0)}</span>
+        <span class="num" style="font-family:var(--mono);color:var(--muted);width:26px;text-align:right">${(c.val * 100).toFixed(0)}</span>
       </div>`;
     }).join("");
   };
@@ -1477,6 +1482,9 @@ self.onmessage = (e) => {
       else if (ev.type === "yellow") pins.push({ t: ev.t, kind: "yellow" });
       else if (ev.type === "red") pins.push({ t: ev.t, kind: "red" });
       else if (ev.type === "save") pins.push({ t: ev.t, kind: "save" });
+      // #196: 試合中の PK。決まればゴールと同じ印、外れ/セーブは save と同じ印で出す
+      else if (ev.type === "penalty")
+        pins.push({ t: ev.t, kind: ev.scored ? "goal" : "save", c: seriesColor(ev.team, true) });
     }
     if (sc.outcome) for (const r of sc.outcome.removed) pins.push({ t: r.t, kind: "ghost" });
     for (const k of teamOrder()) for (const s of (sc.subs[k] || []))
@@ -1598,6 +1606,9 @@ self.onmessage = (e) => {
         else if (ev.type === "yellow") toast(`警告 ${ev.min || ""} ${ev.label.replace("警告 ", "")}`, "#FFC61A");
         else if (ev.type === "red") toast(`退場 ${ev.min || ""} ${ev.label.replace(/^退場 /, "")}`, "#E5484D");
         else if (ev.type === "save") toast(ev.label, "#7FA6FF");
+        else if (ev.type === "penalty")
+          toast(`PK ${ev.min || ""} ${ev.scored ? "成功" : "失敗"}${ev.label ? " " + ev.label : ""}`,
+            ev.scored ? seriesColor(ev.team, true) : "#7FA6FF");
         else if (ev.type === "halftime" || ev.type === "fulltime") toast(ev.label, "#94A2BD");
       }
     }
@@ -1832,7 +1843,12 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     try {
       const cfg = JSON.parse($("#customJson").value);
       const m = G.createMatch(cfg);
-      setMatch(m);
+      // ライブ中なら、入力済みの記録を保ったまま名簿だけ差し替える（#182）
+      if (liveState.session) {
+        liveState.session = R.live.withCfg(liveState.session, cfg);
+        liveState.team = null;
+        liveRebuild(); liveSave(); liveRenderBar();
+      } else setMatch(m);
       $("#customErr").textContent = "";
       $("#modalCustom").classList.remove("open");
       toast("カスタム試合を読み込みました（モデル生成）", "#7FA6FF");
@@ -1878,7 +1894,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   };
   $("#bundleExport") && ($("#bundleExport").onclick = () => {
     const sc = activeScenario();
-    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null);
+    const json = R.scenlib.serializeBundle(App.match, sc, App.editFrame || null, { live: liveState.session });
     try {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -1901,7 +1917,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   const LS_KEY = "rpdx.scenario.v1";
   $("#bundleStore") && ($("#bundleStore").onclick = () => {
     try {
-      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null));
+      localStorage.setItem(LS_KEY, R.scenlib.serializeBundle(App.match, activeScenario(), App.editFrame || null, { live: liveState.session }));
       bMsg("この端末に保存しました（localStorage・送信なし）");
     } catch (e) { bMsg("⚠ 端末保存に失敗: " + (e && e.message), true); }
   });
@@ -1911,6 +1927,750 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
     if (!text) { bMsg("⚠ 端末に保存されたシナリオがありません", true); return; }
     applyBundle(text, "端末");
   });
+
+  /* --------------------------- ライブ実況（#180） ---------------------------
+     中継や自チームの試合を見ながら、数タップで危険度と戦術助言を出すモード。
+     世界の生成は RPDX.live（純関数のセッション）に任せ、ここは画面と入力だけを持つ。
+     再構築は「入力があったとき」だけ（毎フレーム作り直すと重いうえ、キャッシュも効かない）。 */
+  const LIVE_EVENTS = [
+    { k: "goal", label: "⚽ 得点", type: "goal" },
+    { k: "shot", label: "🎯 シュート", type: "shot" },
+    { k: "corner", label: "🚩 CK", type: "corner" },
+    { k: "yellow", label: "🟨 警告", type: "yellow" },
+    { k: "red", label: "🟥 退場", type: "red" },
+    { k: "sub", label: "🔁 交代", type: "sub" },
+  ];
+  const liveState = { session: null, team: null, lastBuilt: null };
+
+  const liveTimeNow = () => (liveState.session ? R.live.tAt(liveState.session, Date.now()) : 0);
+
+  // 自動保存: 形式は既存のバンドルそのまま。手動保存（#bundleStore）を上書きしないよう
+  // スロットだけ分ける。ライブは試合中に画面を閉じられるので、入力のたびに書く。
+  const LIVE_LS = "rpdx.live.autosave.v1";
+  const liveSave = () => {
+    if (!liveState.session) return;
+    try {
+      localStorage.setItem(LIVE_LS, R.scenlib.serializeBundle(App.match, E.actualScenario(App.match), null, { live: liveState.session }));
+    } catch { /* 保存不可の端末でも動作は続ける */ }
+  };
+  const liveHasSaved = () => { try { return !!localStorage.getItem(LIVE_LS); } catch { return false; } };
+  const liveRestore = () => {
+    let text = null;
+    try { text = localStorage.getItem(LIVE_LS); } catch { /* ignore */ }
+    if (!text) { liveLog("この端末に保存されたライブはありません"); return false; }
+    let obj = null;
+    try { obj = JSON.parse(text); } catch { liveLog("保存の読み取りに失敗しました"); return false; }
+    if (obj.customMatch) { try { setMatch(G.createMatch(obj.customMatch)); } catch { /* 既定のまま */ } }
+    const r = R.scenlib.parseBundle(App.match, obj);
+    if (!r || !r.live) { liveLog("保存にライブの記録が入っていません"); return false; }
+    liveState.session = r.live;
+    liveState.team = null;
+    liveRebuild(); liveRenderBar();
+    liveLog(`前回の続きから復帰しました（${E.clockAt(App.match, R.live.tAt(liveState.session, Date.now())).disp}・停止中）`);
+    return true;
+  };
+
+  const liveRebuild = () => {
+    const m = R.live.matchOf(liveState.session);
+    liveState.lastBuilt = m;
+    setMatch(m);
+    App.playing = false;              // 時刻は壁時計が決めるので、通常の再生は使わない
+  };
+
+  const liveLog = (msg) => { const el = $("#liveLog"); if (el) el.textContent = msg; };
+
+  // 現在の試合から cfg を復元する（カスタム試合はバンドルと同じ形で書き出せる）。
+  // 収録試合（較正済み）はライブの土台にしない — 公式記録を上書きしたように見えるため。
+  const liveCfgFromMatch = (m) => {
+    if (!m || m.meta.calibrated !== false) return null;
+    try {
+      const b = JSON.parse(R.scenlib.serializeBundle(m, E.actualScenario(m), null));
+      return b.customMatch || null;
+    } catch { return null; }
+  };
+
+  // チーム名だけを差し替えた cfg を作る（既存の createMatch 経路をそのまま通す）
+  const liveRenameCfg = (cfg, home, away) => {
+    const out = JSON.parse(JSON.stringify(cfg));
+    const put = (side, name) => {
+      if (!name) return;
+      out[side].name = name;
+      out[side].nameEn = name;
+      out[side].code = (name.replace(/[^A-Za-z0-9ぁ-んァ-ヶ一-龠]/g, "").slice(0, 3) || out[side].code).toUpperCase();
+    };
+    put("home", home); put("away", away);
+    if (out.home.code === out.away.code) out.away.code = out.away.code + "2";
+    return out;
+  };
+
+  // #203: 試合終了の分岐。判断材料は live.matchEnd（事実）だけを見て、決めるのはここ。
+  const liveRenderEnd = () => {
+    const box = $("#liveEnd");
+    if (!box || !liveState.session) return;
+    const end = R.live.matchEnd(liveState.session, App.match, Date.now());
+    const m = App.match;
+    const hasExtra = !!(m.time && m.time.h3);
+    // 出す条件: 最後のピリオドの終端に達していて、同点で、まだ断られていない
+    const show = end.atEnd && end.tied && liveState.endChoice !== "no" && !pkState.mode;
+    box.style.display = show ? "" : "none";
+    if (!show) { box.innerHTML = ""; return; }
+    if (box.dataset.k === (hasExtra ? "pk" : "ex")) return;   // 同じ状態なら描き直さない
+    box.dataset.k = hasExtra ? "pk" : "ex";
+    box.innerHTML = "";
+    const label = document.createElement("span");
+    label.className = "eyebrow";
+    const nm = Object.keys(end.score).map((k) => `${m.teams[k]?.name ?? k} ${end.score[k]}`).join(" - ");
+    label.textContent = `${hasExtra ? "延長終了" : "試合終了"} ${nm} — 同点です`;
+    box.appendChild(label);
+    const add = (text, aria, fn) => {
+      const b = document.createElement("button");
+      b.className = "btn pk-b"; b.textContent = text; b.setAttribute("aria-label", aria);
+      b.onclick = fn; box.appendChild(b); return b;
+    };
+    let first;
+    if (!hasExtra) {
+      // 90 分終了で同点 → まず延長をやるか
+      first = add("延長を行う", "延長戦を行う", () => {
+        liveState.session = R.live.withCfg(liveState.session, { ...liveState.session.cfg, extra: true });
+        liveState.endChoice = null;
+        liveRebuild(); liveSave(); liveRenderBar();
+        liveLog("延長を行います。「▶ 延長前半開始」で再開してください");
+      });
+      add("PK 戦へ", "延長を行わず PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    } else {
+      // 延長も終わって同点 → PK 戦へ
+      first = add("PK 戦へ", "PK 戦へ進む", () => { liveState.endChoice = "pk"; pkGoShootout(); });
+    }
+    add("このまま終了", "選択せずに終了する", () => { liveState.endChoice = "no"; liveRenderEnd(); });
+    if (first) first.focus();   // #42: キーボードで選べるようにフォーカスを移す
+  };
+
+  // PK 戦モードへ入る（記録の種類も PK 戦へ揃える）
+  const pkGoShootout = () => {
+    pkState.kind = "shootout";
+    $("#liveEnd").style.display = "none";
+    if (!pkState.open) pkOpen(true); else pkEnterMode();
+    liveRenderTallySafe();
+  };
+  const liveRenderTallySafe = () => { try { pkRenderTally(); } catch { /* パネル未構築 */ } };
+
+  const liveRenderBar = () => {
+    const bar = $("#liveBar");
+    if (!bar) return;
+    bar.style.display = liveState.session ? "" : "none";
+    // #105: 下部シートが出ている間は ⚙📈 トグルを上へ逃がす（CSS 側が body.live-on を見る）
+    document.body.classList.toggle("live-on", !!liveState.session);
+    if (!liveState.session) return;
+    const running = R.live.isRunning(liveState.session);
+    bar.classList.toggle("running", running);
+    $("#liveStart").textContent = running ? "❚❚ 一時停止" : "▶ 開始";
+    $("#liveState").textContent = running ? "進行中" : "停止中";
+    $("#liveResume").style.display = (!running && liveHasSaved()) ? "" : "none";
+      // #203: 試合が終わって同点なら、延長するか／PK 戦へ進むかをその場で選ばせる。
+    // 一度断られたら聞き直さない（liveState.endChoice に覚える）。
+    liveRenderEnd();
+  // #202: 区切りは前半終了だけではない。次に始めるピリオドで文言を変える。
+    const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
+    const PLAB = { h2: "▶ 後半開始", h3: "▶ 延長前半開始", h4: "▶ 延長後半開始" };
+    $("#liveHalf").style.display = nextP ? "" : "none";
+    if (nextP) $("#liveHalf").textContent = PLAB[nextP] || "▶ 次へ";
+    // 後半終了で止まっていて、まだ延長を決めていないときだけ「延長」を出す
+    const m0 = App.match, atFT = !nextP && !R.live.isRunning(liveState.session)
+      && m0.time && Math.abs(R.live.tAt(liveState.session, Date.now()) - m0.time.h2.end) < 0.5;
+    const ex = $("#liveExtra");
+    if (ex) {
+      ex.style.display = (atFT || nextP === "h3") ? "" : "none";
+      ex.textContent = liveState.session.cfg.extra ? "延長をやめる" : "＋ 延長を行う";
+    }
+    bar.classList.toggle("half", !!nextP);
+    // 名簿の設定は試合開始前だけ出す（始まったら入力に集中させる）
+    const started = liveState.session.clock.length > 0;
+    $("#liveSetup").style.display = started ? "none" : "";
+    // チーム選択（どちらの出来事かを先に選ぶ＝入力は 2 タップで完了）
+    const tg = $("#liveTeams");
+    const teamsKey = teamOrder().join("|") + "|" + App.match.meta.id;
+    if (tg.dataset.built !== teamsKey) {
+      tg.innerHTML = "";
+      for (const k of teamOrder()) {
+        const b = document.createElement("button");
+        b.className = "btn" + (liveState.team === k ? " on" : "");
+        b.textContent = App.match.teams[k].name || k;
+        b.onclick = () => { liveState.team = k; liveRenderBar(); };
+        tg.appendChild(b);
+      }
+      tg.dataset.built = teamsKey;
+    } else {
+      [...tg.children].forEach((b, i) => b.classList.toggle("on", teamOrder()[i] === liveState.team));
+    }
+    const eg = $("#liveEvents");
+    if (!eg.dataset.built) {
+      for (const ev of LIVE_EVENTS) {
+        const b = document.createElement("button");
+        b.className = "btn"; b.textContent = ev.label;
+        b.onclick = () => liveAdd(ev);
+        eg.appendChild(b);
+      }
+      eg.dataset.built = "1";
+    }
+  };
+
+  // 交代は「誰と誰か」が要るので、番号を押して選ぶ 2 段の入力にする。
+  // 数字入力（prompt）はスタンドで使えないので、押せる大きさのボタンで並べる。
+  const livePickSub = () => {
+    const wrap = $("#liveSubPick");
+    const t = liveTimeNow();
+    const team = liveState.team;
+    const on = E.stateAt(App.match, E.actualScenario(App.match), t).players
+      .filter((p) => p.team === team && p.onPitch).map((p) => p.no).sort((a, b) => a - b);
+    const bench = App.match.teams[team].squad.map((p) => p.no).filter((n) => !on.includes(n)).sort((a, b) => a - b);
+    let out = null;
+    const draw = () => {
+      wrap.innerHTML = "";
+      const row = (title, nums, fn, sel) => {
+        const h = document.createElement("div"); h.className = "hint"; h.textContent = title; wrap.appendChild(h);
+        const g = document.createElement("div"); g.className = "live-nums";
+        for (const n of nums) {
+          const b = document.createElement("button");
+          b.className = "btn" + (sel === n ? " on" : ""); b.textContent = n;
+          b.onclick = () => fn(n);
+          g.appendChild(b);
+        }
+        wrap.appendChild(g);
+      };
+      row("退く選手（out）", on, (n) => { out = n; draw(); }, out);
+      if (out != null) row("入る選手（in）", bench, (n) => {
+        liveState.session = R.live.withSub(liveState.session, { t, team, out, in: n });
+        wrap.style.display = "none"; wrap.innerHTML = "";
+        liveRebuild(); liveSave(); liveRenderBar();
+        liveLog(`${App.match.teams[team].name} #${out} → #${n} の交代（${E.clockAt(App.match, t).disp}）を記録`);
+      }, null);
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "やめる";
+      cancel.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+      wrap.appendChild(cancel);
+    };
+    wrap.style.display = "";
+    draw();
+  };
+
+  const liveAdd = (ev) => {
+    if (!liveState.session) return;
+    if (liveState.team && !App.match.teams[liveState.team]) liveState.team = null;   // 名簿差し替えで消えた
+    if (!liveState.team) { liveLog("どちらのチームの出来事か、先に選んでください"); return; }
+    if (ev.type === "sub") { livePickSub(); return; }
+    const t = liveTimeNow();
+    liveState.session = R.live.withEvent(liveState.session, { t, type: ev.type, team: liveState.team, label: ev.label });
+    liveRebuild();
+    liveSave();
+    liveLog(`${App.match.teams[liveState.team].name} の ${ev.label}（${E.clockAt(App.match, t).disp}）を記録`);
+    liveRenderBar();
+  };
+
+  const liveEnter = () => {
+    // 既にカスタム試合（未較正）を開いているなら、その名簿をそのまま土台にする。
+    // ライブ用に別の名簿を作らせない（#182: 既存のカスタム試合の経路を使う）。
+    const cfg = liveCfgFromMatch(App.match) || G.template();
+    liveState.session = R.live.create(cfg);
+    liveState.team = null;
+    liveRebuild();
+    liveRenderBar();
+    liveLog(liveHasSaved()
+      ? "チームを選んで開始してください（前回の続きは「続きから」で戻せます）"
+      : "チームを選び、開始を押してから、起きたことをタップしてください");
+  };
+
+  const liveExit = () => {
+    liveState.session = null;
+    $("#liveBar").style.display = "none";
+    $("#liveTeams").dataset.built = "";
+    setMatch(getTemplateMatch());
+  };
+
+  /* ---------------- PK コース記録（#189） ----------------
+     規律は docs/RESPONSIBLE_ANALYSIS.md §6。表示は「これまでに記録された本数」だけで、
+     確率も次の 1 本の予想も出さない。保存はライブセッションに載せる（保存経路を増やさない）。 */
+  const pkState = { open: false, approach: null, gkMove: null, cell: null,
+    approachAt: 0, gkMoveAt: 0, kickAt: 0, scope: "kicker",
+    kind: "shootout", mode: false };   // scope: kicker|team|all ／ kind: shootout|match ／ mode: 全画面か
+
+  const pkTeamKeys = () => Object.keys(liveState.session ? R.live.matchOf(liveState.session).teams : {});
+
+  const pkReset = () => {
+    pkState.approach = null; pkState.gkMove = null; pkState.cell = null;
+    pkState.approachAt = 0; pkState.gkMoveAt = 0; pkState.kickAt = 0;
+  };
+
+  const pkFillWho = () => {
+    if (!liveState.session) return;
+    const m = R.live.matchOf(liveState.session);
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const kick = m.teams[st.team], gkTeam = m.teams[keys.find((k) => k !== st.team)];
+    const opt = (sq) => sq.map((p) => `<option value="${p.no}">${p.no} ${p.ja ?? ""}</option>`).join("");
+    $("#pkKicker").innerHTML = opt(kick.squad);
+    $("#pkGk").innerHTML = opt(gkTeam.squad);
+    // GK は既定で背番号 1（居なければ先頭）
+    const gk1 = gkTeam.squad.find((p) => p.no === 1);
+    if (gk1) $("#pkGk").value = String(gk1.no);
+    // 順番の計画があれば、その本目の予定選手を選んでおく（#191）
+    const planned = R.live.pkPlanned(liveState.session, st.team, st.taken[st.team] + 1);
+    if (planned != null && kick.squad.some((p) => p.no === planned)) $("#pkKicker").value = String(planned);
+  };
+
+  // 蹴る順番は記録とは別に持つ。順番を変えても記録済みの本は 1 本も動かない（#191）。
+  const pkRenderOrder = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    const list = (liveState.session.pkOrder || {})[st.team] || [];
+    const name = (no) => { const q = m.teams[st.team]?.squad.find((x) => x.no === no); return q ? `${no} ${q.ja ?? ""}`.trim() : String(no); };
+    $("#pkOrderList").textContent = list.length
+      ? `${m.teams[st.team]?.name ?? st.team} の順番: ${list.map((n, i) => `${i + 1}) ${name(n)}`).join(" / ")}`
+      : "順番は未設定（キッカーはその都度選べます）";
+  };
+
+  const pkRenderResult = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const r = R.live.pkResult(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    const nm = (k) => m.teams[k]?.name ?? k;
+    $("#pkResult").textContent = r.decided
+      ? `決着: ${nm(r.winner)} の勝ち（${r.reason}・${keys.map((k) => `${nm(k)} ${r.score[k]}`).join(" - ")}）`
+      : r.phase === "sudden"
+        ? `サドンデス（${keys.map((k) => `${nm(k)} ${r.score[k]}`).join(" - ")}）`
+        : `${R.live.PK_REGULAR} 本ずつ（${keys.map((k) => `${nm(k)} ${r.score[k]} / ${r.taken[k]}本`).join(" · ")}）`;
+  };
+
+  // 絞り込みは 1 か所で決める。格子とゴールの粒子が別々の集計を見ていると読み違える。
+  const pkFilter = () => {
+    const st = R.live.pkStanding(liveState.session, pkTeamKeys());
+    if (pkState.scope === "all") return {};
+    if (pkState.scope === "team") return { team: st.team };
+    return { team: pkState.kind === "match" ? (liveState.team || st.team) : st.team,
+      kicker: +$("#pkKicker").value || null };
+  };
+
+  const pkRenderTally = () => {
+    if (!liveState.session) return;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const m = R.live.matchOf(liveState.session);
+    $("#pkOrder").textContent = pkState.kind === "match"
+      ? `試合中の PK · ${E.clockAt(m, R.live.tAt(liveState.session, Date.now())).disp} · ${m.teams[liveState.team || st.team]?.name ?? ""}`
+      : `${st.n} 本目 · ${m.teams[st.team]?.name ?? st.team}`;
+    for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
+      el.classList.toggle("on", el.dataset.pkkind === pkState.kind);
+    $("#pkOrderRow").style.display = pkState.kind === "match" ? "none" : "";
+    $("#pkResult").style.display = pkState.kind === "match" ? "none" : "";
+    $("#pkScore").textContent = keys.map((k) => `${m.teams[k]?.name ?? k} ${st.score[k] ?? 0}`).join(" - ");
+    const t = R.live.pkTally(liveState.session, { ...pkFilter(), source: pkState.kind });
+    // 各セルに「本数」を出す。割合は出さない（§6: 確率を表示しない）
+    for (const el of document.querySelectorAll("#pkGrid .cell")) {
+      const c = +el.dataset.cell;
+      el.querySelector(".cnt").textContent = t.cells[c] ? `${t.cells[c]}本` : "—";
+      el.classList.toggle("on", pkState.cell === c);
+    }
+    // 母数を必ず併記する（§6）。割合には直さない。
+    const all = R.live.pkTally(liveState.session, { source: "both" });
+    const label = pkState.scope === "all" ? "記録ぜんぶ" : pkState.scope === "team" ? "このチーム" : "このキッカー";
+    const mine = t.total ? `${label} 全 ${t.total} 本（決まった ${t.scored} 本）` : `${label}の記録はまだありません`;
+    $("#pkTally").textContent = `${mine} ／ 記録ぜんぶで 全 ${all.total} 本（決まった ${all.scored} 本）`;
+    for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
+      el.classList.toggle("on", el.dataset.pkscope === pkState.scope);
+    pkRenderOrder(); pkRenderResult();
+    const f = pkFieldOf();
+    // 凡例は危険度と別物であることを明示する（同じ見た目で別の意味の色が混ざると誤読する）
+    $("#pkLegend").textContent = f
+      ? `ゴールの青緑の粒＝これまでに記録された本数（母数 ${f.total} 本）。危険度の色とは別物です。`
+      : "記録が入ると、ゴールに本数ぶんの粒が出ます。";
+  };
+
+  const pkBuildGrid = () => {
+    const g = $("#pkGrid");
+    if (g.dataset.built) return;
+    const label = ["左下", "中下", "右下", "左中", "中央", "右中", "左上", "中上", "右上"];
+    // 上段が画面の上に来るように、行を上から並べる（セル番号は 0=低左）
+    let html = "";
+    for (let r = R.live.PK_ROWS - 1; r >= 0; r--)
+      for (let c = 0; c < R.live.PK_COLS; c++) {
+        const i = r * R.live.PK_COLS + c;
+        html += `<button class="cell" data-cell="${i}" aria-label="コース ${label[i]}">${label[i]}<span class="cnt">—</span></button>`;
+      }
+    g.innerHTML = html;
+    g.dataset.built = "1";
+    for (const el of document.querySelectorAll("#pkGrid .cell")) el.onclick = () => {
+      pkState.cell = +el.dataset.cell;
+      pkState.kickAt = Date.now();          // コースを押した時刻＝蹴った瞬間として扱う
+      pkRenderTally();
+    };
+  };
+
+  const pkCommit = (scored) => {
+    if (!liveState.session) return;
+    if (pkState.cell == null) { liveLog("コースをタップしてから ○ / ✕ を押してください"); return; }
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const common = {
+      kicker: +$("#pkKicker").value || null, gk: +$("#pkGk").value || null,
+      approach: pkState.approach, gkMove: pkState.gkMove, cell: pkState.cell, scored,
+      approachAt: pkState.approachAt, gkMoveAt: pkState.gkMoveAt, kickAt: pkState.kickAt,
+    };
+    if (pkState.kind === "match") {
+      // 試合中の PK は試合時間を持ち、得点・シュートと同列に試合の記録へ入る。
+      // チームは順番ではなく「いま選んでいるチーム」（同じチームに連続で与えられ得る）。
+      const team = liveState.team || st.team;
+      // 試合時刻はライブの時計を正とする（App.t は分析側のスクラブでも動くため）
+      const t = R.live.tAt(liveState.session, Date.now());
+      liveState.session = R.live.withPenalty(liveState.session, { ...common, t, team });
+    } else {
+      liveState.session = R.live.withPk(liveState.session, { ...common, team: st.team });
+    }
+    // 「蹴る何秒前に GK が動いたか」は記録から後で出せる（結果だけでは残らない情報）
+    const lead = pkState.gkMoveAt && pkState.kickAt ? ((pkState.kickAt - pkState.gkMoveAt) / 1000).toFixed(1) : null;
+    pkReset();
+    liveSave();
+    pkFillWho(); pkRenderTally();
+    liveLog(`記録しました（${scored ? "○" : "✕"}）${lead ? ` — GK は蹴る ${lead} 秒前に動いた` : ""}`);
+  };
+
+  // #199: 蓄積の読み書き。端末内のみ・外部送信なし（§6）。
+  const PK_LS = "rpdx.shootouts.v1";
+  const pkStoreRead = () => {
+    try { const v = JSON.parse(localStorage.getItem(PK_LS) || "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  };
+  const pkStoreWrite = (arr) => {
+    try { localStorage.setItem(PK_LS, JSON.stringify(arr)); } catch { liveLog("⚠ 端末に保存できませんでした"); }
+  };
+
+  // 選手ごとの記録。**本数と母数だけ**を出し、順位は付けない（§6）。
+  const pkRenderHistory = () => {
+    const box = $("#pkHist");
+    const docs = pkStoreRead();
+    const rows = R.live.pkAccumulate(docs);
+    if (!rows.length) {
+      box.textContent = "まだ記録がありません。PK 戦のあと「記録に残す」を押すと、ここに溜まります。";
+      return;
+    }
+    const label = ["左下", "中下", "右下", "左中", "中央", "右中", "左上", "中上", "右上"];
+    const line = (e) => {
+      const top = e.cells.map((n, i) => ({ n, i })).filter((x) => x.n > 0)
+        .map((x) => `${label[x.i]} ${x.n}本`).join("・");
+      return `${e.name}（${e.team}${e.no != null ? " #" + e.no : ""}）— 全 ${e.total} 本 / 決まった ${e.scored} 本 / PK戦 ${e.shootouts} 回${top ? " ／ " + top : ""}`;
+    };
+    box.innerHTML = `<div>この端末の記録 ${docs.length} 件から（並びはチーム名→選手名。良し悪しの順ではありません）</div>`
+      + rows.map((e) => `<div>${line(e)}</div>`).join("")
+      + `<div style="margin-top:4px">同じ名前を同じ選手として数えます。名前を変えると別人になります。</div>`;
+  };
+
+  // #190: ゴールマウスへ流す「記録された本数」。割合・確率は作らない（§6）。
+  // 見ているゴールは、記録している側が攻める方向で決める。
+  const pkFieldOf = () => {
+    if (!pkState.open || !liveState.session) return null;
+    const keys = pkTeamKeys();
+    const st = R.live.pkStanding(liveState.session, keys);
+    const t = R.live.pkTally(liveState.session, { ...pkFilter(), source: pkState.kind });
+    if (!t.total) return null;
+    const m = R.live.matchOf(liveState.session);
+    const half = E.halfOf(m, App.t);
+    const dir = m.dir[st.team][half === 1 ? "h1" : "h2"];
+    return { gx: dir * 52.5, cells: t.cells, total: t.total, scored: t.scored,
+      cols: R.live.PK_COLS, rows: R.live.PK_ROWS, gw: R.live.PK_GOAL_W, gh: R.live.PK_GOAL_H };
+  };
+
+  // #197: PK 戦は分析画面と目的が違うので全画面モードにする。
+  // 入るときに預かるもの（抜けたら戻す）: 試合時刻・カメラ・フォーカス。
+  const pkSaved = { t: null, cam: null, focus: null, playing: false };
+
+  // モード中は隠したパネルをタブ順から外す（#42: キーボード操作・フォーカス可視化）。
+  // display:none だけだとフォーカスが body へ飛び、キーボード利用者が迷子になる。
+  const PK_HIDDEN = ["#dockL", "#dockR", "#timelineWrap", "#viewbar", "#inspector", "#editBar"];
+  const pkInert = (on) => {
+    for (const sel of PK_HIDDEN) { const el = $(sel); if (el) el.inert = on; }
+  };
+
+  const pkEnterMode = () => {
+    if (pkState.mode) return;
+    pkState.mode = true;
+    pkSaved.t = App.t; pkSaved.cam = App.camPreset || "broadcast";
+    pkSaved.focus = document.activeElement; pkSaved.playing = App.playing;
+    setPlaying(false);
+    // PK 戦は試合が終わったあとの出来事。時刻を終端へ置く（前半 00:00 のままにしない）
+    App.t = E.playedRange(App.match).t1;
+    document.body.classList.add("pk-mode");
+    pkInert(true);
+    if (renderer) renderer.setPreset("pk");
+    App.camPreset = "pk";
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === "pk"));
+    const first = $("#pkGrid") && $("#pkGrid").querySelector(".cell");
+    if (first) first.focus();
+    liveLog("PK 戦モード（Esc で戻る）");
+  };
+
+  const pkExitMode = () => {
+    if (!pkState.mode) return;
+    pkState.mode = false;
+    document.body.classList.remove("pk-mode");
+    pkInert(false);
+    if (pkSaved.t != null) App.t = pkSaved.t;
+    if (renderer && pkSaved.cam) renderer.setPreset(pkSaved.cam);
+    App.camPreset = pkSaved.cam;
+    document.querySelectorAll("#viewbar .cam").forEach((x) => x.classList.toggle("on", x.dataset.cam === pkSaved.cam));
+    if (pkSaved.focus && pkSaved.focus.focus) pkSaved.focus.focus();
+    if (pkSaved.playing) setPlaying(true);
+  };
+
+  const pkOpen = (on) => {
+    pkState.open = on;
+    $("#pkPanel").style.display = on ? "block" : "none";
+    $("#liveEvents").style.display = on ? "none" : "";
+    if (!on) { pkExitMode(); return; }
+    pkBuildGrid(); pkReset(); pkFillWho(); pkRenderTally();
+    for (const el of document.querySelectorAll("#pkPanel .pk-b, #pkPanel .pk-res")) el.classList.remove("on");
+    // PK 戦のときだけ全画面。試合中の PK は試合を見ながら記録するので分析画面のまま。
+    if (pkState.kind === "shootout") pkEnterMode();
+    else if (renderer) renderer.setPreset("pk");
+  };
+
+  const bindPk = () => {
+    $("#livePk").onclick = () => pkOpen(!pkState.open);
+    $("#pkUndo").onclick = () => {
+      liveState.session = pkState.kind === "match"
+        ? R.live.undo(liveState.session) : R.live.undoPk(liveState.session);
+      liveSave(); pkFillWho(); pkRenderTally();
+      liveLog("直前の PK 記録を取り消しました");
+    };
+    $("#pkKicker").onchange = () => pkRenderTally();
+    $("#pkOrderAdd").onclick = () => {
+      const keys = pkTeamKeys();
+      const st = R.live.pkStanding(liveState.session, keys);
+      const no = +$("#pkKicker").value;
+      if (!no) return;
+      const cur = (liveState.session.pkOrder || {})[st.team] || [];
+      liveState.session = R.live.withPkOrder(liveState.session, st.team, [...cur, no]);
+      liveSave(); pkRenderTally();
+      liveLog(`${st.team} の順番に ${no} を足しました`);
+    };
+    $("#pkOrderClear").onclick = () => {
+      const st = R.live.pkStanding(liveState.session, pkTeamKeys());
+      liveState.session = R.live.withPkOrder(liveState.session, st.team, []);
+      liveSave(); pkRenderTally();
+      liveLog("蹴る順番をクリアしました");
+    };
+    for (const el of document.querySelectorAll("#pkPanel [data-pkapp]")) el.onclick = () => {
+      pkState.approach = el.dataset.pkapp; pkState.approachAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkapp]")) o.classList.toggle("on", o === el);
+    };
+    for (const el of document.querySelectorAll("#pkPanel [data-pkgk]")) el.onclick = () => {
+      pkState.gkMove = el.dataset.pkgk; pkState.gkMoveAt = Date.now();
+      for (const o of document.querySelectorAll("#pkPanel [data-pkgk]")) o.classList.toggle("on", o === el);
+    };
+    for (const el of document.querySelectorAll("#pkScope [data-pkscope]"))
+      el.onclick = () => { pkState.scope = el.dataset.pkscope; pkRenderTally(); };
+    for (const el of document.querySelectorAll("#pkKind [data-pkkind]"))
+      el.onclick = () => {
+        pkState.kind = el.dataset.pkkind;
+        if (pkState.kind === "shootout") pkEnterMode(); else pkExitMode();
+        pkReset(); pkFillWho(); pkRenderTally();
+      };
+    // #198: 書き出しの機構は既存と同じ（Blob で落とす）。増やすのは文書の種類だけ。
+    // #181「保存の仕組みは既にある。新しい保存機構を足してはいけない」に従う。
+    $("#pkExport").onclick = () => {
+      if (!liveState.session) return;
+      const n = (liveState.session.pk || []).length;
+      if (!n) { liveLog("書き出す PK 戦の記録がありません"); return; }
+      const json = R.scenlib.serializeShootout(liveState.session, R.live.matchOf(liveState.session));
+      try {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+        a.download = "rpdx-shootout.json"; a.click();
+        liveLog(`PK 戦を書き出しました（${n} 本・端末内のみ）`);
+      } catch (e) { liveLog("⚠ 書き出し失敗: " + (e && e.message)); }
+    };
+    $("#pkImport").onclick = () => $("#pkFile").click();
+    $("#pkFile").onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const r = R.scenlib.parseShootout(rd.result);
+        if (r.error) { liveLog("⚠ 読み込み失敗: " + r.error); return; }
+        // 記録だけを差し替える（試合・イベント・交代には触らない）
+        liveState.session = { ...liveState.session, pk: r.shootout.kicks.map((k) => ({ ...k })),
+          ...(Object.keys(r.shootout.order).length ? { pkOrder: r.shootout.order } : {}) };
+        liveSave(); pkFillWho(); pkRenderTally();
+        const names = Object.values(r.shootout.teams).map((t) => t.name).join(" vs ");
+        liveLog(`PK 戦を読み込みました（${r.shootout.kicks.length} 本・${names}）`);
+      };
+      rd.onerror = () => liveLog("⚠ ファイル読込に失敗");
+      rd.readAsText(f);
+    };
+    // #199: 蓄積の箱は 1 つ。中身は #198 の PK 戦の文書そのもの（新しい形式は作らない）。
+    $("#pkKeep").onclick = () => {
+      if (!liveState.session) return;
+      const n = (liveState.session.pk || []).length;
+      if (!n) { liveLog("残す PK 戦の記録がありません"); return; }
+      const doc = JSON.parse(R.scenlib.serializeShootout(liveState.session, R.live.matchOf(liveState.session)));
+      const all = pkStoreRead();
+      all.push(doc);
+      pkStoreWrite(all);
+      liveLog(`記録に残しました（この端末に ${all.length} 件・送信なし）`);
+    };
+    $("#pkHistory").onclick = () => {
+      const box = $("#pkHist");
+      const on = box.style.display === "none";
+      box.style.display = on ? "block" : "none";
+      if (on) pkRenderHistory();
+    };
+    $("#pkOk").onclick = () => pkCommit(true);
+    $("#pkNg").onclick = () => pkCommit(false);
+  };
+
+  const bindLive = () => {
+    bindPk();
+    const btn = $("#btnLive");
+    if (btn) btn.onclick = () => (liveState.session ? liveExit() : liveEnter());
+    $("#liveStart").onclick = () => {
+      const running = R.live.isRunning(liveState.session);
+      liveState.session = R.live.withClock(liveState.session, running ? "pause" : (liveState.session.clock.length ? "resume" : "start"), Date.now());
+      liveSave(); liveRenderBar();
+    };
+    // 時計合わせは画面内で完結させる（スマホで prompt は押しにくく、
+    // 自動検証でも画面が止まるため使わない）
+    // #201: アディショナルタイム。実際のロスタイムは試合終盤に発表されるので、
+    // 試合中に変えられる必要がある。既存の #liveSubPick へ小パネルを出す流儀に合わせる。
+    $("#liveAt").onclick = () => {
+      const wrap = $("#liveSubPick");
+      const draw = () => {
+        const m = R.live.matchOf(liveState.session);
+        const cur = { a1: m.time.h1.added, a2: m.time.h2.added };
+        wrap.innerHTML = "";
+        const h = document.createElement("div"); h.className = "hint";
+        h.textContent = `アディショナルタイム（いま 前半+${cur.a1} / 後半+${cur.a2} 分・終端 ${E.clockAt(m, E.playedRange(m).t1).disp}）`;
+        wrap.appendChild(h);
+        for (const [key, label, now] of [["added1", "前半", cur.a1], ["added2", "後半", cur.a2]]) {
+          const g = document.createElement("div"); g.className = "live-nums";
+          const lab = document.createElement("span"); lab.className = "eyebrow";
+          lab.textContent = `${label} +${now} 分`; g.appendChild(lab);
+          for (const d of [-1, +1]) {
+            const b = document.createElement("button");
+            b.className = "btn"; b.textContent = d > 0 ? "＋1分" : "−1分";
+            b.setAttribute("aria-label", `${label}のアディショナルタイムを${d > 0 ? "増やす" : "減らす"}`);
+            b.onclick = () => {
+              const v = clamp((liveState.session.cfg[key] ?? (key === "added1" ? 2 : 5)) + d, 0, 30);
+              // cfg の差し替えで終端が動く。入力済みの記録は live.withCfg が保持する。
+              liveState.session = R.live.withCfg(liveState.session, { ...liveState.session.cfg, [key]: v });
+              liveRebuild(); liveSave(); liveRenderBar(); draw();
+            };
+            g.appendChild(b);
+          }
+          wrap.appendChild(g);
+        }
+        const close = document.createElement("button");
+        close.className = "btn"; close.textContent = "閉じる";
+        close.setAttribute("aria-label", "アディショナルタイムの設定を閉じる");
+        close.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+        wrap.appendChild(close);
+      };
+      wrap.style.display = wrap.style.display === "none" || !wrap.innerHTML ? "block" : "none";
+      if (wrap.style.display === "block") draw();
+    };
+
+    $("#liveSync").onclick = () => {
+      const wrap = $("#liveSubPick");
+      const draw = () => {
+        const cur = Math.round(liveTimeNow() / 60);
+        wrap.innerHTML = "";
+        const h = document.createElement("div"); h.className = "hint";
+        h.textContent = `中継の経過時間に合わせる（いま ${cur} 分）`;
+        wrap.appendChild(h);
+        const g = document.createElement("div"); g.className = "live-nums";
+        const step = (d, label) => {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = label;
+          b.onclick = () => {
+            const v = Math.max(0, Math.min(130, cur + d));
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), v * 60);
+            liveSave(); liveLog(`時計を ${v} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        };
+        step(-5, "−5分"); step(-1, "−1分"); step(1, "+1分"); step(5, "+5分");
+        for (const m2 of [0, 45, 90]) {
+          const b = document.createElement("button");
+          b.className = "btn"; b.textContent = m2 + "分";
+          b.onclick = () => {
+            liveState.session = R.live.withClock(liveState.session, "sync", Date.now(), m2 * 60);
+            liveSave(); liveLog(`時計を ${m2} 分に合わせました`); draw(); liveRenderBar();
+          };
+          g.appendChild(b);
+        }
+        wrap.appendChild(g);
+        const done = document.createElement("button");
+        done.className = "btn"; done.textContent = "閉じる";
+        done.onclick = () => { wrap.style.display = "none"; wrap.innerHTML = ""; };
+        wrap.appendChild(done);
+      };
+      wrap.style.display = ""; draw();
+    };
+    $("#liveResume").onclick = () => liveRestore();
+    $("#liveNameApply").onclick = () => {
+      if (!liveState.session) return;
+      const home = $("#liveHomeName").value.trim(), away = $("#liveAwayName").value.trim();
+      if (!home && !away) { liveLog("チーム名を入れてください（片方だけでも大丈夫です）"); return; }
+      liveState.session = R.live.withCfg(liveState.session, liveRenameCfg(liveState.session.cfg, home, away));
+      liveState.team = null;
+      liveRebuild(); liveSave(); liveRenderBar();
+      liveLog(`${teamOrder().map((k) => App.match.teams[k].name).join(" × ")} で記録します`);
+    };
+    // 選手名・背番号・ポジションは既存のロスター編集（✎）とカスタム試合の経路を使う
+    $("#liveEditRoster").onclick = () => {
+      $("#customJson").value = JSON.stringify(liveState.session ? liveState.session.cfg : G.template(), null, 2);
+      $("#modalCustom").classList.add("open");
+      liveLog("編集して「この試合を読み込む」を押すと、その名簿でライブを続けます");
+    };
+    $("#liveUndo").onclick = () => {
+      liveState.session = R.live.undo(liveState.session);
+      liveRebuild(); liveSave(); liveRenderBar(); liveLog("直前の入力を取り消しました");
+    };
+    $("#liveHalf").onclick = () => {
+      const nextP = R.live.breakAt(liveState.session, App.match, Date.now());
+      liveState.session = R.live.startSecondHalf(liveState.session, App.match, Date.now());
+      liveSave(); liveRenderBar();
+      liveLog({ h2: "後半開始です", h3: "延長前半開始です", h4: "延長後半開始です" }[nextP] || "再開しました");
+    };
+    // #202: 後半終了の時点で延長へ入るかを選ぶ。延長を作るのは cfg の差し替えで、
+    // 入力済みの記録は live.withCfg が保持する。
+    $("#liveExtra") && ($("#liveExtra").onclick = () => {
+      const cfg = liveState.session.cfg;
+      const on = !cfg.extra;
+      liveState.session = R.live.withCfg(liveState.session, { ...cfg, extra: on });
+      liveRebuild(); liveSave(); liveRenderBar();
+      liveLog(on ? "延長を行います（120分まで）" : "延長を行いません");
+    });
+    $("#liveExit").onclick = liveExit;
+  };
+
+  // 毎フレーム: 壁時計から試合時刻を進める（世界の作り直しはしない）
+  const liveTick = () => {
+    if (!liveState.session) return;
+    // #183 前半終了に達したら自動で止める（人が時計合わせで入れ直さなくてよい）
+    const brk = R.live.atHalfBreak(liveState.session, App.match, Date.now());
+    if (brk) {
+      liveState.session = brk;
+      liveSave(); liveRenderBar();
+      liveLog("前半終了です。ハーフタイムの入力もできます。「後半開始」で再開してください");
+    }
+    const range = E.playedRange(App.match);
+    // #197: PK 戦は試合が終わったあとの出来事なので、試合時刻は終端で止める。
+    // ここで上書きすると、モードに入って終端へ置いた時刻が毎フレーム巻き戻る。
+    App.t = pkState.mode ? range.t1 : clamp(liveTimeNow(), 0, range.t1);
+    const el = $("#liveClock");
+    if (el) el.textContent = E.clockAt(App.match, App.t).disp;
+  };
 
   const setMatch = (m) => {
     App.match = m;
@@ -2167,6 +2927,28 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
   bindTog("#togPsy", "psy");
   bindTog("#togNum", "kitNumbers");
   bindTog("#togReplay", "goalReplay");
+  // #152: 品質ティア表示＋手動オーバーライド（自動→シネマ→軽量→自動・端末内保存のみ）
+  if (R.quality && $("#togTier")) {
+    const TIER_JA = { cinematic: "シネマ", lightweight: "軽量" };
+    const updTier = () => {
+      const st = R.quality.state();
+      $("#tierLbl").textContent = (st.source === "override" ? "" : "自動·") + (TIER_JA[st.tier] || st.tier) +
+        (st.level > 0 ? "↓" + st.level : "");
+      $("#togTier").classList.toggle("on", st.source === "override");
+    };
+    $("#togTier").onclick = () => {
+      const st = R.quality.state();
+      const next = st.source !== "override" ? "cinematic" : (st.tier === "cinematic" ? "lightweight" : "auto");
+      R.quality.setOverride(next);
+      try {
+        if (next === "auto") localStorage.removeItem("rpdx_tier_v1");
+        else localStorage.setItem("rpdx_tier_v1", next);
+      } catch (_) { /* localStorage 不可でも動作 */ }
+      updTier();
+    };
+    R.quality.onChange(updTier);
+    updTier();
+  }
   const setGK = (inc) => {
     App.options.includeGK = inc;
     $("#gk20").classList.toggle("on", !inc);
@@ -2236,21 +3018,30 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       const i = +e.code.slice(5) - 1;
       const cams = document.querySelectorAll("#viewbar .cam");
       if (cams[i]) cams[i].click();
-    } else if (e.key === "?") document.body.classList.toggle("showkeys");
+    } else if (e.key === "Escape" && pkState.mode) { pkOpen(false); e.preventDefault(); }
+    else if (e.key === "?") document.body.classList.toggle("showkeys");
   });
 
   /* ------------------------------ メインループ ------------------------------ */
   let lastNow = performance.now(), lastHUD = 0, lastRosterMin = -1;
   const maxFrames = +(urlq.get("shotframes") || 0) || Infinity; // ヘッドレス検証用
+  const govOn = !!R.quality && maxFrames === Infinity && urlq.get("gov") !== "0";  // #152
   let frameCount = 0, curveReadyAt = -1;
-  const loop = (now) => {
-    const dt = Math.min((now - lastNow) / 1000, 0.1);
+  const loop = (nowReal) => {
+    // #153: ショットモード（shotframes指定時）は合成クロック＝フレーム番号×16.6ms。
+    // ドライバや実行環境のタイミングに依らずフレーム列が決定論になる
+    // （ゲイト位相・カメラ慣性・パルス位相・HUD更新タイミングまで同一）。
+    const now = maxFrames !== Infinity ? frameCount * (1000 / 60) : nowReal;
+    if (maxFrames !== Infinity && frameCount === 0) lastNow = now - 1000 / 60;
+    const rawMs = now - lastNow;                       // #152: 未クランプのフレーム所要（守衛の標本）
+    const dt = Math.min(rawMs / 1000, 0.1);
     lastNow = now;
     // 正準曲線の準備完了を検知したら即HUD更新（ヘッドレスでPSY/曲線が確実に載る）
     if (curveReadyAt < 0 && curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }))) {
       curveReadyAt = frameCount;
       lastHUD = 0;
     }
+    liveTick();                                        // #180 ライブ中は壁時計が時刻を決める
     const range = E.playedRange(App.match);
     const t0 = App.t;
     if (App.playing) {
@@ -2480,6 +3271,10 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       };
     }
     renderer.frame(now / 1000, dt, {
+      // #179: 人型の歩容は「試合時間で何 m 進んだか」で決まる。壁時計の dt を渡すと
+      // 再生倍率のぶんだけ速度入力が水増しされ、×12 では常に全力疾走のまま脚だけ追いつかない
+      // （＝滑る）。カメラの慣性は壁時計のままでよいので、別の値として渡す。
+      dtMatch: App.t - t0,
       state,
       field: App.options.fieldMode !== "off" ? App.lastField : null,
       zone: App.options.zones ? App.lastZone : null,
@@ -2487,6 +3282,7 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       options: App.options,
       selected: App.selected,
       hover: App.hover,
+      pkField: pkFieldOf(),                                // #190: PK コースの記録本数
       editMode: !!App.editFrame, editSel: editSelDesc(),   // #133: 掴み対象のハイライト・ボールアフォーダンス
       contribMap, ballTrail, playerTrail,
       speedLabels, psyAura,
@@ -2494,11 +3290,21 @@ KIKEN = 100 × clamp((.18·SDI+.15·CPR+.13·PLV+.22·OVL+.20·TPA+.12·TRV)^0.6
       tackle: tackleFx, shield: shieldFx, passLine, aerial: aerialFx,
     });
     drawTimeline();
+    // #152: 滑らかさ守衛 — ヘッドレス検証（shotframes）と ?gov=0 では凍結（決定論スクショ保護）
+    if (govOn) R.quality.tick(rawMs, now / 1000);
     if (++frameCount < maxFrames) requestAnimationFrame(loop);
+    else if (maxFrames !== Infinity) globalThis.__RPDX_SHOT_DONE = frameCount;   // #153: 視覚回帰の描画完了シグナル
   };
   // ヘッドレス（shotframes指定時）: 正準曲線の完了を待ってから描画開始
   // — 仮想時間を計算に集中させ、全フレームにPSY/曲線が確実に載る
-  const startLoop = () => requestAnimationFrame(loop);
+  // #153: 開始直前にカメラをプリセットへ即時スナップ（起動中の実時間で進んだ追従イージングを
+  // 破棄し、以後の仮想時間フレーム列を決定論化する）
+  const startLoop = () => {
+    if (maxFrames !== Infinity && renderer) renderer.setPreset(App.camPreset || "broadcast", true);
+    bindLive();                                        // #180 ライブ実況の操作を繋ぐ
+    if (urlq.get("live") === "1") liveEnter();         // ?live=1 で直接ライブへ（検証・ブックマーク用）
+    requestAnimationFrame(loop);
+  };
   const startWhenReady = () => {
     if (maxFrames === Infinity) { startLoop(); return; }
     const ready = () => curveStore.has(curveKeyOf(E.actualScenario(App.match), { includeGK: false }));

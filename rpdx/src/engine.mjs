@@ -226,11 +226,13 @@
   // #81: 退場後の10人リシェイプ（役割適合の貪欲再割当・決定論・メモ化）
   //   subs.withFormation と同じ採点式（共有 F.tagsOfPos）。GKは常にGKスロットへ。
   const outageReshapeCache = new WeakMap();   // scenario → Map(key → {assign, shape})
-  const reshapeToTen = (match, scenario, team, assign11, fromShape, outage, subsApplied) => {
+  const reshapeToTen = (match, scenario, team, assign11, fromShape, outage) => {
     let m = outageReshapeCache.get(scenario);
     if (!m) { m = new Map(); outageReshapeCache.set(scenario, m); }
     const shapeId = outage.reshape || F.tenManShapeFor(fromShape);
-    const key = `${team}|${outage.t}|${outage.no}|${shapeId}|${fromShape}|${subsApplied}`;
+    // #173: 鍵は「退場の瞬間の割当そのもの」。以前は適用済み交代の**件数**を鍵にしていたため、
+    // 退場より後の交代が起きるたびに再割当が引き直され、ピッチに残っている選手が飛んだ。
+    const key = `${team}|${outage.t}|${outage.no}|${shapeId}|${fromShape}|${Object.entries(assign11).sort().map(([k, v]) => k + v).join(",")}`;
     const hit = m.get(key);
     if (hit) return hit;
     const T = match.teams[team];
@@ -269,30 +271,32 @@
     let phase = phases[0];
     for (const ph of phases) if (ph.from <= t) phase = ph;
     let assign = { ...phase.assign };
-    // フェーズ開始前の交代を反映（新フェーズの assign はスタメン番号基準のため
-    // 既に OUT した選手を IN 選手へ差し替える）
-    const allSubs = (scenario.subs[team] || []).slice().sort((a, b) => a.t - b.t);
     const entered = {};
-    let subsApplied = 0;
-    for (const s of allSubs) {
-      if (s.t > t) break;
-      subsApplied++;
-      for (const slot in assign) if (assign[slot] === s.out) {
-        assign[slot] = s.in;
-        if (s.t > phase.from) entered[s.in] = s.t;
-        break;
-      }
-    }
     let shape = phase.shape, phaseFrom = phase.from, outage = null;
-    // #81: 発生済み退場を適用（v1: チーム毎1件）— 10人シェイプへ決定論リシェイプ
-    for (const o of E.outagesOf(match, scenario, team)) {
-      if (o.t > t) break;
-      if (!Object.values(assign).includes(o.no)) continue;   // 既に不在（検証で防止済み）
-      const r = reshapeToTen(match, scenario, team, assign, shape, o, subsApplied);
-      assign = { ...r.assign };
-      shape = r.shape;
-      phaseFrom = Math.max(phaseFrom, o.t);                  // 切替ブレンドの起点
-      outage = o;
+    // #173: 交代と退場を**時刻順に**適用する。以前は「全部の交代 → その後まとめて退場リシェイプ」
+    // の順で処理していたため、退場より後の交代が退場時の再割当の入力を変え、
+    // 交代のたびにピッチ上の 10 人が総入れ替わりして瞬間移動していた。
+    // 時刻順に畳み込めば、退場後の交代は「退いた選手のスロットへ入る」ただのスワップになる。
+    const timeline = [
+      ...(scenario.subs[team] || []).map((s) => ({ t: s.t, kind: "sub", s })),
+      ...E.outagesOf(match, scenario, team).map((o) => ({ t: o.t, kind: "outage", o })),
+    ].sort((a, b) => a.t - b.t || (a.kind === "sub" ? -1 : 1));   // 同時刻は交代を先に畳む
+    for (const ev of timeline) {
+      if (ev.t > t) break;
+      if (ev.kind === "sub") {
+        for (const slot in assign) if (assign[slot] === ev.s.out) {
+          assign[slot] = ev.s.in;
+          if (ev.s.t > phase.from) entered[ev.s.in] = ev.s.t;
+          break;
+        }
+      } else {
+        if (!Object.values(assign).includes(ev.o.no)) continue;   // 既に不在（検証で防止済み）
+        const r = reshapeToTen(match, scenario, team, assign, shape, ev.o);
+        assign = { ...r.assign };
+        shape = r.shape;
+        phaseFrom = Math.max(phaseFrom, ev.o.t);                  // 切替ブレンドの起点
+        outage = ev.o;
+      }
     }
     return { assign, shape, phaseFrom, entered, outage };
   };
@@ -317,9 +321,13 @@
 
   /* --------------------- ポゼッション波形 P(t) ∈ [-1,1] --------------------- */
   // P>0: possessionPlus チームの攻勢。KPスプライン + 小ノイズ（帯域制限）
+  // #177 世界生成のシードに使う試合 ID。ライブは入力のたびに meta.id を変える（キャッシュ無効化のため）
+  // ので、そのまま種にすると入力ごとに試合全体が別物になる。seedId があればそちらを使う。
+  const seedIdOf = (match) => match.meta.seedId || match.meta.id;
+
   E.possessionAt = (match, t, scenario) => {
     const base = N.spline(match.possessionKP, t)[0];
-    const n = 0.10 * N.vnoise1(N.seedOf(match.meta.id + "poss"), t, 37);
+    const n = 0.10 * N.vnoise1(N.seedOf(seedIdOf(match) + "poss"), t, 37);
     let p = base + n;
     // #81: 数的不利の保持シフト — 退場チームから相手側へ（2分ランプで浸透・決定論）。
     //   scenario 未指定/outages 無しは従来値と完全一致（golden安全）。
@@ -394,7 +402,7 @@
 
   // ブロック移動用の平滑ボール（帯域制限 — 速度寄与を抑える・シナリオ非依存）
   E.ballSlowAt = (match, t) => {
-    const seed = N.seedOf(match.meta.id + "ball");
+    const seed = N.seedOf(seedIdOf(match) + "ball");
     const P = E.possessionAt(match, t);
     const half = E.halfOf(match, t);
     const plus = match.possessionPlus || E.teamKeys(match)[0];
@@ -469,6 +477,13 @@
   const LINE_CACHE_MAX = 60000;
   const LINE_ROLES = { CB: 1, FB: 1, WB: 1 };
   const LINE_SYNC = 0.34;                  // 最終ラインを合意 x へ引き寄せる重み（同期昇降）
+
+  // #136 守備ブロックへの復帰: 中盤のみ（前線は出口として残す・最終ラインは 2.6 と二重になる）
+  const BLOCK_RECOVER = { DM: 1, CM: 1, AM: 0.85 };
+  const RECOVER_D0 = 48;      // 自ゴールから何 m 以内にボールが入ったら点灯しはじめるか
+  const RECOVER_SPAN = 22;    // 点灯の立ち上がり幅（連続ゲート＝速度上限を破らない）
+  const RECOVER_GOALSIDE = 3; // ボールより何 m 自ゴール側を目標にするか
+  const RECOVER_K = 0.9;      // 目標までの差をどれだけ詰めるか
 
   // 自チーム最終ラインの合意 x（同期前の生 base x の平均）
   E.defensiveLineAt = (match, scenario, team, t) => {
@@ -555,7 +570,32 @@
     chainBuilding = true;   // 生成中はチェーン由来アンカーを参照しない（循環回避・決定論）
     try {
     const range = E.playedRange(match);
-    const seed = N.seedOf(match.meta.id + "chain") ^ E.scenarioHash(scenario);
+    // #177 因果シード: 抽選のシードは「その時刻までに起きたこと」だけから作る。
+    // シナリオ全体のハッシュを使うと、後から足したイベント（ライブ入力の得点など）で
+    // 試合開始直後まで系列が引き直され、既に見た過去の軌道が変わってしまう。
+    // 収録パックは較正済みの成果物なので、従来どおりシナリオ全体のハッシュで種を作る
+    // （世界は bit 不変・golden 安全）。ライブ session だけ因果シードに切り替える。
+    const causal = !!match.meta.live;
+    const seed0 = causal ? N.seedOf(seedIdOf(match) + "chain")
+      : (N.seedOf(match.meta.id + "chain") ^ E.scenarioHash(scenario));
+    const causalEvents = [];
+    for (const ev of E.eventsOf(match, scenario))
+      causalEvents.push({ t: ev.t, k: `e${ev.type}${ev.team || ""}${ev.no ?? ""}` });
+    for (const k of E.teamKeys(match)) {
+      for (const sb of scenario.subs[k] || []) causalEvents.push({ t: sb.t, k: `s${k}${sb.out}${sb.in}` });
+      for (const o of E.outagesOf(match, scenario, k)) causalEvents.push({ t: o.t, k: `o${k}${o.no}` });
+      for (const ph of E.phasesOf(match, scenario, k)) if (ph.from > 0) causalEvents.push({ t: ph.from, k: `p${k}${ph.shape}` });
+    }
+    causalEvents.sort((a, b) => a.t - b.t || (a.k < b.k ? -1 : 1));
+    let causalIdx = 0, seed = seed0;
+    const seedUpTo = (tt) => {   // tt までに起きたことを畳み込む（過去は不変・単調）
+      if (!causal) return seed;
+      while (causalIdx < causalEvents.length && causalEvents[causalIdx].t <= tt) {
+        seed = N.seedOf(`${seed}|${causalEvents[causalIdx].k}`);
+        causalIdx++;
+      }
+      return seed;
+    };
     const keys = E.teamKeys(match);
     const plus = match.possessionPlus || keys[0];
     const minus = keys.find(k => k !== plus);
@@ -624,6 +664,7 @@
     let forceRef = null;    // コーナー後の受け手参照点（ゴール前 = クロスの落下点）
     const shareGain = match.possessionShareGain ?? 0.385;  // パック毎の較正ノブ
     while (t < range.t1 - 1) {
+      seedUpTo(t);   // #177: この時刻までのイベントだけがこれ以降の抽選に影響する
       const P = E.possessionAt(match, t, scenario);
       const share = clamp(0.5 + P * shareGain, 0.07, 0.93); // 実測支配率へ較正（定常分布）
       const u = N.hash2(seed, idx * 17 + 3);
@@ -962,7 +1003,7 @@
       const bs = E.ballSlowAt(match, t);
       return { x: bs.x, y: bs.y, z: 0.11 };
     }
-    const seed = N.seedOf(match.meta.id + "dribble");
+    const seed = N.seedOf(seedIdOf(match) + "dribble");
     const holderPos = (seg, tt) => {
       const p = basePosOf(match, scenario, seg.team, seg.no, seg.slot, tt);
       return {
@@ -1091,7 +1132,7 @@
       z = bounceHeight(u, h, BALL_PHYS.REST, hops);
       // マグヌス: 飛行方向直交の弓なり（回転符号はセグメント決定・端点は不変）
       const dx = (b2.x - a2.x) / segLen, dy = (b2.y - a2.y) / segLen;
-      const spin = N.hash2(N.seedOf(match.meta.id + "spin"), lo) < 0.5 ? -1 : 1;
+      const spin = N.hash2(N.seedOf(seedIdOf(match) + "spin"), lo) < 0.5 ? -1 : 1;
       const bow = spin * Math.min(BALL_PHYS.MAX_BOW, segLen * BALL_PHYS.BOW_K) * Math.sin(Math.PI * u);
       ox = -dy * bow; oy = dx * bow;
     } else {
@@ -1189,6 +1230,30 @@
     // 交代のフレッシュな脚は fatigueOf が presence 起点なので自然に回復する。
     const fat = E.fatigueOf(match, scenario, team, no, t);
 
+    // 1.5) 守備ブロックへの復帰（#136）
+    // 攻守モーフ g は保持基調（遅い信号）で決まるため、支配しているチームの中盤は
+    // 相手に一時的に押し込まれている間も攻撃時の高さに留まる。実測では守備局面の
+    // MF の 51% がボールより平均 9.1m 前に居た（実サッカーは非GK 8〜9 人が後方）。
+    // ボールが自陣深くにある間だけ、中盤を守備側モーフへ寄せる。
+    // ・ゲートは平滑ボールの深さのみ＝連続。保持の切り替わりのような不連続を持たない
+    //   ので、速度上限（9.9m/s）に新しい違反を作らない。
+    // ・前線（ST/W）は触らない。実サッカーでも 1〜2 人は出口として前線に残る（#135）。
+    // ・最終ライン（CB/FB/WB）も触らない。2.6 の協調ライン制御と二重に効いてしまう。
+    // chainBuilding 中は無効（#30 のランと同じ扱い）。ここを効かせると守備ブロックの
+    // 位置が保持列の選定に混ざり、公式記録どおりに較正した再現（キックオフの保持・
+    // 得点の検知）が変わってしまう。較正済みの世界は動かさない。
+    if (!chainBuilding && BLOCK_RECOVER[role]) {
+      const bd = dir * ballS.x + HALF_W;                        // 自ゴールからのボール深さ
+      const wRec = N.smooth(clamp((RECOVER_D0 - bd) / RECOVER_SPAN)) * BLOCK_RECOVER[role];
+      if (wRec > 0.02) {
+        // 守備スロット自体がボールより前にある（実測: スロット 32.2m / ボール 26.8m）。
+        // モーフを深くしても届かないので、ブロックの高さをボールの深さから決める。
+        const myD = dir * x + HALF_W;
+        const target = bd - RECOVER_GOALSIDE;                   // ボールより自ゴール側へ
+        if (myD > target) x -= dir * (myD - target) * RECOVER_K * wRec;
+      }
+    }
+
     // 2) ブロック連動（平滑ボールへスライド — 守備ブロックの本質・疲労で緩む=ライン間延び）
     const cw = (F.chaseWeight[role] ?? 0.3) * (1 - 0.22 * fat);
     x += (ballS.x - x * 0.2) * cw * 0.55;
@@ -1251,7 +1316,7 @@
 
     // 3) 個体ノイズ（帯域制限・疲労で減衰）
     const amp = (F.noiseAmp[role] ?? 7) * (1 - 0.35 * fat);
-    const ps = N.seedOf(match.meta.id + team + no);
+    const ps = N.seedOf(seedIdOf(match) + team + no);
     x += N.fbm1(ps, t, [
       { amp: amp * 0.5, period: 42 }, { amp: amp * 0.42, period: 14 },
       { amp: amp * 0.5, period: 5.6 }, { amp: amp * 0.28, period: 3.1 }]);
@@ -1275,9 +1340,24 @@
       const ux = (bx - gx) / dGoal, uy = by / dGoal;         // ゴール→ボールの単位ベクトル
       x = gx + ux * depth;                                   // 二等分線上（角を狭める）
       y = uy * depth;
+      // #184 GK の歩き回り。実際の GK は 4〜5.5km 歩くが、二等分線へ貼り付けるとほとんど
+      // 動かない（実測 838m）。**ボールが遠いときほど大きく**歩かせ、近いときは角度圧縮を優先。
+      // 揺れ（正弦的）より**一定速度の往復**の方が、同じ速度で稼げる距離が 1.5 倍多い
+      // （往復: 距離 4A/T・速度 4A/T ／ 正弦: 距離 4A/T・速度 2πA/T）。GK は速度に余裕がある
+      // （#174 で最大 5.46m/s・上限 9.9）ので、ここは往復で距離を作る。
+      // 歩き回るのは「ボールがゴールから遠いとき」だけ。近いときは角度圧縮が最優先で、
+      // 二等分線から離れてはいけない（既存の #31 テストが守っている性質）。
+      // 歩き回るのは「ボールが自陣に無いとき」だけ。ボールが近い/自陣サイドにあるときは
+      // 角度圧縮が最優先で、二等分線とボール側から離れてはいけない（#31 の性質を壊さない）。
+      const wa = GK_PATROL * N.smooth(clamp((dGoal - 45) / 20));
+      const tri = (T, ph) => (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * (t / T + ph)));  // 一定速度の往復
+      // 歩き回るのは**左右だけ**。前後（飛び出し量）は角度圧縮が決めるので触らない
+      // （触ると「至近ほど前へ出る」単調性が薄まる — 実測で相関 0.55 → 0.39）。
+      y += wa * tri(GK_PAT_T, N.hash2(ps, 5));
+      // 細かい揺れは従来どおり（歩幅の不揃い）
       x += dir * 0.8 * Math.abs(N.fbm1(ps + 301, t, [{ amp: 1.3, period: 15 }, { amp: 0.6, period: 5.0 }]));
       y += N.fbm1(ps, t, [{ amp: 0.5, period: 11 }, { amp: 0.4, period: 4.5 }]);
-      y = clamp(y, -8, 8);
+      y = clamp(y, -8.5, 8.5);
     }
 
     // 5) イベント・アンカー（得点再現など — ガウス窓・シナリオ実効）
@@ -1285,7 +1365,13 @@
     // 対称ガウスだと「シュート後の受け」が時間を遡って走路を先食いしてしまう。
     for (const a of playerAnchorsOf(match, scenario)) {
       if (a.team !== team || a.no !== no) continue;
-      const sg = t < a.t ? (a.sigmaL ?? a.sigma ?? 6) : (a.sigmaR ?? a.sigma ?? 6);
+      const sgRaw = t < a.t ? (a.sigmaL ?? a.sigma ?? 6) : (a.sigmaR ?? a.sigma ?? 6);
+      // #174: 収束窓は「距離から決める」。ガウス窓の傾きは最大 1/(σ√e) なので、
+      // 遠いアンカーへ小さい σ で寄せると必要な速度が上限を超える（実測 10〜13m/s）。
+      // σ に下限を入れて、寄せに使う速度を ANCHOR_V 以内へ収める。窓の中心は動かさないので
+      // w(a.t)=1 のまま＝アンカー時刻の位置一致（記録イベントの再現）は保たれる。
+      const dA = Math.hypot(a.x - x, a.y - y);
+      const sg = Math.max(sgRaw, (dA * GAUSS_SLOPE) / ANCHOR_V);
       const w = N.gauss(t, a.t, sg);
       if (w > 0.004) { x = lerp(x, a.x, w); y = lerp(y, a.y, w); }
     }
@@ -1396,6 +1482,16 @@
     return best && best.w > 0.01 ? best : null;
   };
 
+  // #174 速度上限を守るための取り分。基礎運動（帯域制限ノイズ）と合わせて 9.9m/s を超えないようにする。
+  const GAUSS_SLOPE = 1 / Math.sqrt(Math.E);   // ガウス窓の最大傾き（×1/σ）
+  const GK_PATROL = 6;                         // #184 GK の左右の歩き回り[m]（これ以上は角度圧縮の性質を壊す）
+  const GK_PAT_T = 20;                         // #184 その周期[s]（距離 ≒ 4A/T・速度も同じ）
+  const PRESS_V = 3.5;                         // 寄せの立ち上がり/解放に割ける速度 [m/s]
+  const ANCHOR_V = 6.0;                        // アンカーへの寄せに割ける速度 [m/s]
+  //   小さくするほど上限は守られるが、記録のスプリント再現（佐野29'の独走 ≥20km/h）が壊れる。
+  //   6.0 は「再現テストが全て通る中で最も小さい値」として実測で決めた。
+  const GK_SHARP = 0.35;                       // GK が実ボールへ研ぐ割合（残りは平滑ボール）
+
   const playerPos = (match, scenario, team, no, slot, t, ctx) => {
     const bctx = { half: ctx.half, dir: ctx.dir, P: ctx.P, ballS: ctx.ballS };
     let { x, y } = basePlayerPos(match, scenario, team, no, slot, t, bctx);
@@ -1407,9 +1503,15 @@
     //   実ボールへの深度クランプはしない（速度上限を破らないための設計）。
     if (slot.role === "GK" && ball) {
       const gx = -ctx.dir * HALF_W;
-      const dG = Math.hypot(gx - ball.x, ball.y) || 1;
       const depth = Math.hypot(gx - x, y);                  // 現在の飛び出し量
-      const ty = clamp((ball.y / dG) * depth, -8, 8);       // 実ボール二等分線の横位置
+      // #174: 二等分線の横位置は**平滑ボール**を主に取る。実ボールは 20m/s で横へ流れるので、
+      // それに 45% 追従させると GK 自身が上限を超えて滑った（実測 15.7m/s）。
+      // 実ボールへの「研ぎ」は GK_SHARP の割合だけ残す — 角度圧縮の意図（#31）は保ちつつ、
+      // 速い横移動には付いていかない。速さで重みを絞る案は、重みの変化自体が速くなって悪化した。
+      const bs = ctx.ballS;
+      const dGs = Math.hypot(gx - bs.x, bs.y) || 1;
+      const dGr = Math.hypot(gx - ball.x, ball.y) || 1;
+      const ty = clamp(lerp((bs.y / dGs) * depth, (ball.y / dGr) * depth, GK_SHARP), -8, 8);
       y = lerp(y, ty, 0.45);
     }
 
@@ -1419,18 +1521,35 @@
     if (c && c.mode === "hold" && c.team !== team && slot.role !== "GK" && ctx.carrierPos) {
       const cp = ctx.carrierPos;
       const d = Math.hypot(cp.x - x, cp.y - y);
-      const rank = ctx.pressRank ? ctx.pressRank.ranks.get(no) : undefined;
+      // #178: 順位は連続量（0=最も近い / 1=2番手 / 2=3番手 / それ以降）。
+      // 整数の分岐だと入れ替わりで寄せ方が跳ぶ。段階値の間を線形に補間する
+      // （整数の位置では従来の較正値と一致する）。
+      const rc = ctx.pressRank && ctx.pressRank.soft ? ctx.pressRank.soft.get(no) : undefined;
       // トリガ（#29）: 相手のビルドアップで自チームのプレスが点灯（連続 level）
       const trig = ctx.trigger && ctx.trigger.team === team ? ctx.trigger.level : 0;
-      let wBase = 0.22, sig = 10;
-      if (rank === 0) { wBase = 0.52 + 0.14 * trig; sig = 7.5 + 3 * trig; }    // 1st: 密着（トリガで増圧）
-      else if (rank === 1) { wBase = 0.32 + 0.12 * trig; sig = 9 + 6 * trig; }  // 2nd: カバー（トリガで遠くから連動）
-      else if (rank === 2) { wBase = 0.22 + 0.16 * trig; sig = 10 + 5 * trig; } // 3rd: トリガで連動
+      const LV = [
+        { w: 0.52 + 0.14 * trig, sig: 7.5 + 3 * trig, near: 0.9 },   // 1st: 密着（トリガで増圧）
+        { w: 0.32 + 0.12 * trig, sig: 9 + 6 * trig, near: 1.6 },     // 2nd: カバー（トリガで遠くから連動）
+        { w: 0.22 + 0.16 * trig, sig: 10 + 5 * trig, near: 1.6 },    // 3rd: トリガで連動
+        { w: 0.22, sig: 10, near: 1.6 },                             // それ以降
+      ];
+      let wBase = LV[3].w, sig = LV[3].sig, nearD = LV[3].near;
+      if (rc != null) {
+        const i = Math.min(2, Math.floor(rc)), u = clamp(rc - i, 0, 1);
+        const a = LV[i], b = LV[Math.min(3, i + 1)];
+        wBase = lerp(a.w, b.w, u); sig = lerp(a.sig, b.sig, u); nearD = lerp(a.near, b.near, u);
+      }
       const gate = Math.exp(-(d * d) / (2 * sig * sig));
       // 疲労でプレス強度が落ちる（#44・終盤は寄せ切れない）
       const fatP = E.fatigueOf(match, scenario, team, no, ctx.t);
       wBase *= (1 - 0.35 * fatP);
-      let uPress = Math.min(c.u, N.smooth(clamp((ctx.t - c.seg.tf) / 1.4)));
+      // #178 解放の速度も距離で決める。保持が終わると寄せの重みが 0 へ落ちるが、
+      // 固定 0.6s で落とすと「寄せていた変位 ÷ 0.6s」の速度で戻ってしまう（実測 22m/s）。
+      // 変位が大きいほど長い時間をかけて解放し、戻り速度を PRESS_V 以内に収める。
+      const relDur = Math.max(0.6, (d * wBase) / PRESS_V);
+      const uOutL = N.smooth(clamp((c.seg.t1 - ctx.t) / relDur, 0, 1));
+      const uInL = N.smooth(clamp((ctx.t - c.seg.tf) / Math.max(1.4, relDur), 0, 1));
+      let uPress = Math.min(uInL, uOutL);
       // キックオフ（#51）: ピン中は相手に寄せない（競技規則: 相手はセンターサークル外）。
       // 蹴り出し後に通常ランプで再開 → 窓境界の目標ジャンプによる速度スパイクも消える
       if (c.seg && c.seg.restart === "kickoff") {
@@ -1438,17 +1557,20 @@
       }
       const w = wBase * gate * uPress;
       if (w > 0.003) {
-        // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m）
-        const near = rank === 0 ? 0.9 : 1.6;
+        // 寄せ位置: 保持者の自ゴール側（1st=0.9m密着 / 他=1.6m・順位の間は補間）
+        const near = nearD;
         const gx = -ctx.dir * HALF_W;
         const gl = Math.hypot(gx - cp.x, 0 - cp.y) || 1;
         let px = cp.x + ((gx - cp.x) / gl) * near;
         let py = cp.y + ((0 - cp.y) / gl) * near;
         // カバーシャドウ（#29）: トリガ中の2ndは保持者→支援重心のレーン上へ
         //（パスコースを消す）。trig 連続 → 目標も連続
-        if (rank === 1 && ctx.pressRank.shadow) {
+        // カバーシャドウは 2 番手の役目。順位の入れ替わりで効き方が跳ばないよう、
+        // rc=1 を頂点とする三角の重みで効かせる。
+        const u2nd = rc == null ? 0 : clamp(1 - Math.abs(rc - 1), 0, 1);
+        if (u2nd > 0 && ctx.pressRank.shadow) {
           const sh = ctx.pressRank.shadow;
-          const uSh = Math.min(1, trig * 1.5);
+          const uSh = Math.min(1, trig * 1.5) * u2nd;
           px = lerp(px, lerp(cp.x, sh.x, 0.4), uSh);
           py = lerp(py, lerp(cp.y, sh.y, 0.4), uSh);
         }
@@ -1494,6 +1616,17 @@
     ds.sort((a, b) => a.d - b.d || a.no - b.no);
     const m = new Map();
     ds.forEach((e, i) => m.set(e.no, i));
+    // #178 連続順位: 整数の順位は入れ替わりで寄せ方（距離 0.9/1.6m・重み 0.52/0.32/0.22）が
+    // 段階的に切り替わり、目標が跳んで 1 フレームで数メートル飛ぶ。
+    // 「自分より近い味方の人数」を滑らかに数えることで、入れ替わりの瞬間に両者の重みが
+    // 等しくなり、目標が連続に入れ替わる（シャドウの重心を連続化したのと同じ手口）。
+    const RANK_H = 1.2;   // 入れ替わりを滑らかにする距離スケール[m]
+    const soft = new Map();
+    for (const a of ds) {
+      let closer = 0;
+      for (const b of ds) if (b.no !== a.no) closer += N.smooth(clamp((a.d - b.d) / (2 * RANK_H) + 0.5, 0, 1));
+      soft.set(a.no, closer);
+    }
     // カバーシャドウの遮断対象（#29）: 保持者の支援味方の「連続な重心」
     // （最寄り1人だと支援者の入替で目標が跳ぶ → exp(-d/6) 重み付き重心で連続化）
     let shadow = null;
@@ -1511,7 +1644,7 @@
       }
       if (sw > 1e-9) shadow = { x: sx / sw, y: sy / sw };
     }
-    const out = { ranks: m, shadow };
+    const out = { ranks: m, soft, shadow };
     if (rankCache.size > 8000) rankCache.clear();
     rankCache.set(key, out);
     return out;
@@ -1604,6 +1737,31 @@
   };
 
   /* ------------------------------ 状態合成 ------------------------------ */
+  // フェーズ切替（宣言フェーズ・退場リシェイプ）の平滑化。旧スロット→新スロットを補間する。
+  // #178: 位置を返す経路が 2 つ（stateAt の描画ループと stateFrozenPos）あり、この補間が
+  // 描画側にしか入っていなかった。速度・走行距離は stateFrozenPos を使うため、
+  // 「画面の選手は滑らかに動いているのに、報告される速度が 161m/s」という食い違いが出ていた。
+  // 位置の一意性（速度・軌跡・走行距離の整合）を保つため、両方からこの 1 か所を呼ぶ。
+  const phaseBlendedPos = (match, scenario, team, no, slot, t, ctx, roster) => {
+    const pos = playerPos(match, scenario, team, no, slot, t, ctx);
+    const dtPhase = t - roster.phaseFrom;
+    const htMod = E.htCorrectionOf(match, scenario, team);
+    const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
+    const phDelay = htNear ? htMod.delaySec : 0;
+    const phDur = htNear ? htMod.blendSec : 45;
+    if (!(roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur)) return pos;
+    const rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
+    const prevSlotId = Object.keys(rosterPrev.assign).find((k) => rosterPrev.assign[k] === no);
+    // #173: スロット ID が同じでも、シェイプが変われば座標は別物（4132 の RCM と 10_441 の
+    // RCM は別の位置）。ID の一致だけで判定するとシェイプ切替で 1 フレームだけ瞬間移動する。
+    if (!prevSlotId || (prevSlotId === slot.id && rosterPrev.shape === roster.shape)) return pos;
+    const prevSlot = F.SHAPES[rosterPrev.shape].find((s) => s.id === prevSlotId);
+    if (!prevSlot) return pos;
+    const posPrev = playerPos(match, scenario, team, no, prevSlot, t, ctx);
+    const u = N.smooth(clamp((dtPhase - phDelay) / phDur));
+    return { x: lerp(posPrev.x, pos.x, u), y: lerp(posPrev.y, pos.y, u) };
+  };
+
   // 単一スロットmemo: 同一フレーム内の重複呼び出し（描画・PSY・ピック等）を1回に
   let stateMemo = null;
   E.stateAt = (match, scenario, t) => {
@@ -1632,36 +1790,13 @@
       const roster = E.rosterAt(match, scenario, team, t);
       const shape = F.SHAPES[roster.shape];
       const ctx = { half, dir, P, ballS, ball, carrier, carrierPos, pressRank, sep, trigger, t };
-      // フェーズ切替の平滑化（ハーフ開始時を除く）: 旧スロット→新スロットを45sブレンド。
-      // #61: opponentHt 指定チームのHT近傍切替は delay 秒ホールド後、blendSec かけて浸透
-      let rosterPrev = null, prevShape = null, blendU = 1;
-      const dtPhase = t - roster.phaseFrom;
-      const htMod = E.htCorrectionOf(match, scenario, team);
-      const htNear = htMod && roster.phaseFrom > 0 && Math.abs(roster.phaseFrom - match.time.h2.start) < 121;
-      const phDelay = htNear ? htMod.delaySec : 0;
-      const phDur = htNear ? htMod.blendSec : 45;
-      if (roster.phaseFrom > 0 && roster.phaseFrom !== match.time.h2.start && dtPhase < phDelay + phDur) {
-        rosterPrev = E.rosterAt(match, scenario, team, roster.phaseFrom - 0.01);
-        prevShape = F.SHAPES[rosterPrev.shape];
-        blendU = N.smooth(clamp((dtPhase - phDelay) / phDur));
-      }
       // 現在ピッチ上の11人
       for (const slot of shape) {
         const no = roster.assign[slot.id];
         if (no == null) continue;
         const p = match.teams[team].squad.find(q => q.no === no);
         if (!p) continue;
-        let pos = playerPos(match, scenario, team, no, slot, t, ctx);
-        if (rosterPrev) {
-          const prevSlotId = Object.keys(rosterPrev.assign).find(k => rosterPrev.assign[k] === no);
-          if (prevSlotId && prevSlotId !== slot.id) {
-            const prevSlot = prevShape.find(s => s.id === prevSlotId);
-            if (prevSlot) {
-              const posPrev = playerPos(match, scenario, team, no, prevSlot, t, ctx);
-              pos = { x: lerp(posPrev.x, pos.x, blendU), y: lerp(posPrev.y, pos.y, blendU) };
-            }
-          }
-        }
+        let pos = phaseBlendedPos(match, scenario, team, no, slot, t, ctx, roster);
         // 入場アニメ: 交代直後はタッチラインから走り込む
         let entering = 0;
         const entT = roster.entered[no];
@@ -1746,7 +1881,7 @@
         const ehc = editHoldOf(scenario, carrier.team, carrier.no, t);
         if (ehc) w = Math.max(w, ehc.w * N.smooth(clamp(carrier.u * 1.6)));
         if (w > 0.02) {
-          const dseed = N.seedOf(match.meta.id + "dribble");
+          const dseed = N.seedOf(seedIdOf(match) + "dribble");
           const ax = cp.x + 0.7 * N.vnoise1(dseed + carrier.no * 7, t, 2.9);
           const ay = cp.y + 0.7 * N.vnoise1(dseed + 31 + carrier.no * 7, t, 3.1);
           ball.x = lerp(ball.x, ax, w);
@@ -1816,7 +1951,7 @@
       sep: separationAt(match, scenario, tt),
       trigger: E.pressTriggerAt(match, scenario, tt), t: tt,
     };
-    return playerPos(match, scenario, team, no, slot, tt, ctx);
+    return phaseBlendedPos(match, scenario, team, no, slot, tt, ctx, roster);
   };
 
   /* --------------------------- 走行距離・速度 --------------------------- */

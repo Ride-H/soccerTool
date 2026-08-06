@@ -24,3 +24,6 @@ agents/
 運用ガイド/guide-src/
 運用ガイド/旧版*
 運用ガイド/*.html
+
+# 視覚回帰スモークの実行時出力（#153）— golden/ は commit 対象・out/ はローカル成果物
+rpdx/test/visual/out/

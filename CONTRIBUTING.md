@@ -50,3 +50,21 @@ gh pr create --base main --head dev
 - **テスト緑**: `node --test rpdx/test/*.test.mjs` が全通過すること。
 
 新しい試合・チーム・選手の追加は [docs/MATCH_PACKS.md](docs/MATCH_PACKS.md) の手順に従ってください。
+
+## 視覚回帰ゲート（golden 画像）の更新ルール（#153）
+
+CI は `node rpdx/test/visual/smoke.mjs` で **視覚スモーク**（決定論固定時刻のスクリーンショットに対する
+存在チェック＋golden 画像との許容差比較）を実行します。
+
+- **golden（`rpdx/test/visual/golden/*.png`）は「意図的な視覚変更」の PR でのみ更新**してください。
+  **正準環境は CI（linux・Chrome for Testing 固定版）**です — 更新手順:
+  1. 視覚変更を push → CI の golden 差分が落ちる（想定どおり）
+  2. 失敗した run のアーティファクト `visual-smoke-out` から実レンダリング（`out/*.png`）を取得
+     （`gh run download <run-id> -n visual-smoke-out`）
+  3. 内容をレビューし、`golden/` へ差し替えて **PR 本文に更新理由を明記**して commit → CI 緑
+  意図しない差分の場合は golden を上書きせず、原因（メッシュ割れ・法線・カメラ・色）を先に直します。
+- ローカル（macOS 等）はフォントラスタライズ差で同一版でも 9〜11% ずれるため、golden 比較は
+  広い閾値（20%）の参考扱いです（存在チェックは全OSで厳密）。`UPDATE_GOLDEN=1` でのローカル生成は
+  自分の環境での回帰確認用で、**commit する golden は CI アーティファクト由来**にしてください。
+- スモークは依存ゼロ（Node 組込み WebSocket + CDP 生プロトコル + 公式配布 Chrome）です。
+  ローカル実行は `CHROME_BIN` で Chrome を指定できます（例: macOS の Chrome.app）。

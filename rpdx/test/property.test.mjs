@@ -121,3 +121,67 @@ for (const m of Object.values(MATCHES)) {
     }
   });
 }
+
+// #178: 名簿が変わる瞬間（交代・退場・宣言フェーズ）の 1 フレーム飛びを検出する。
+// ランダム抽出のサンプル検査では、こういう「特定の 1 フレームだけ」の違反を踏み抜けない。
+// 0.25 秒刻みでも足りない（5 サブフレームで平均されて山が消える）ので 0.05 秒で見る。
+//
+// 直した不具合: 位置を返す経路が 2 つ（stateAt の描画ループと stateFrozenPos）あり、
+// フェーズ切替のブレンドが描画側にしか入っていなかった。速度・走行距離は stateFrozenPos を
+// 使うため、退場の瞬間に「画面の選手は滑らかに動いているのに、報告される速度が 161m/s」
+// という食い違いが出ていた（決勝・ARG の 8 人が同時に飛ぶ）。
+//
+// 【残っている違反は台帳に明記する】交代で入った選手が相互分離（#28）の場に瞬間出現し、
+// 周囲を押しのける系統がまだ残る。ここに書いたものだけを許し、**新しい組み合わせが出るか、
+// 既知の山が高くなったら落ちる**。0 件になるまでは #178 を閉じない。
+const KNOWN_JUMPS = {
+  "wc2026-r32-bra-jpn": { "JPN#24@4860": 12.2 },
+  "wc2026-r16-arg-egy": { "ARG#24@4140": 21.2 },
+  "wc2026-final-esp-arg": { "ESP#20@4740": 16.6, "ARG#3@3720": 10.0, "ARG#20@5822": 10.5,
+    "ARG#19@5822": 12.0, "ARG#26@5822": 17.1, "ARG#25@5822": 16.4 },
+  "wc2026-sf-fra-esp": { "FRA#4@1800": 11.5, "FRA#3@1800": 10.3, "FRA#5@4560": 10.0,
+    "FRA#4@4560": 10.6, "FRA#26@4560": 10.0, "ESP#19@4680": 10.7, "ESP#10@4680": 11.0,
+    "ESP#15@4680": 12.1 },
+};
+
+for (const [id, m] of Object.entries(MATCHES)) {
+  test(`property[${id}]: 名簿変更の前後で位置が飛ばない（0.05秒刻み・#178）`, () => {
+    const sc = E.actualScenario(m);
+    const range = E.playedRange(m);
+    const CAP = 9.9, STEP = 0.05, WIN = 3;
+    const peak = {};
+    for (const team of E.teamKeys(m)) {
+      // 名簿が変わる時刻: 交代・退場・宣言フェーズ（ハーフ開始は陣地交代なので対象外）
+      const marks = [
+        ...(sc.subs[team] || []).map((s) => s.t),
+        ...E.outagesOf(m, sc, team).map((o) => o.t),
+        ...E.phasesOf(m, sc, team).map((p) => p.from),
+      ].filter((t) => t > range.t0 + 40 && t < range.t1 - 40
+        && !Object.values(m.time).some((p) => p.start > 0 && Math.abs(t - p.start) < 12));
+      for (const mk of marks) {
+        for (const q of m.teams[team].squad) {
+          const pr = E.presenceOf(m, sc, team, q.no);
+          if (!pr || mk < pr.from + 35 || mk > pr.to - 2) continue;
+          let prev = null;
+          for (let t = mk - WIN; t <= mk + WIN; t += STEP) {
+            if (t < pr.from + 35 || t > pr.to - 2) { prev = null; continue; }
+            const p = E.stateFrozenPos(m, sc, team, q.no, t);
+            if (prev) {
+              const v = Math.hypot(p.x - prev.x, p.y - prev.y) / STEP;
+              if (v > CAP) { const k = `${team}#${q.no}@${mk}`; peak[k] = Math.max(peak[k] || 0, v); }
+            }
+            prev = p;
+          }
+        }
+      }
+    }
+    const known = KNOWN_JUMPS[id] || {};
+    const added = Object.keys(peak).filter((k) => !(k in known));
+    const worse = Object.entries(peak).filter(([k, v]) => k in known && v > known[k] + 0.15)
+      .map(([k, v]) => `${k} ${v.toFixed(1)}m/s（既知 ${known[k]}）`);
+    const gone = Object.keys(known).filter((k) => !(k in peak));
+    assert.deepEqual(added, [], `新しい飛びが増えた:\n  ${added.map((k) => `${k} ${peak[k].toFixed(1)}m/s`).join("\n  ")}`);
+    assert.deepEqual(worse, [], `既知の飛びが高くなった:\n  ${worse.join("\n  ")}`);
+    assert.deepEqual(gone, [], `直った組み合わせは台帳から外すこと:\n  ${gone.join("\n  ")}`);
+  });
+}
